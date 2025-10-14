@@ -1,0 +1,171 @@
+/*
+    Theme Name: Book Order
+    Author: Nam Tran
+    Description: This is a custom theme for Asl contract
+    Version: 1.0
+*/
+.main-panel {
+    margin-bottom: 100px;
+}
+.fa-150p {
+    font-size: 1.5rem !important;
+}
+.fa-120p {
+    font-size: 1.2rem !important;
+}
+.btn-rounded {
+    --bs-btn-padding-x: 1em;
+}
+.w180 {
+    width: 180px;
+}
+.w200 {
+    width: 200px;
+    max-width: calc(50% - 10px);
+    min-width: 162px;
+}
+.w235 {
+    width: 235px;
+}
+.w280 {
+    width: 280px;
+}
+.w40 {
+    width: 40px;
+}
+.min-w395 {
+    min-width: 395px;
+}
+.max-w395{
+    max-width: 395px;
+}
+.max-w600{
+    max-width: 600px;
+}
+.fit-content {
+    width: fit-content;
+}
+
+.border-radius-9 {
+    border-radius: 9px;
+}
+
+.border-radius-6 {
+    border-radius: 6px;
+}
+
+.bs-dotted {
+    border: 1px dashed !important;
+}
+
+.height-auto {
+    height: auto;
+}
+#relative .d-flex {
+    position: relative;
+}
+.abs-top-left {
+    position: absolute;
+    top: -50px;
+    left: 10px;
+    z-index: 9;
+}
+.fixed-bottom-right {
+    position: fixed;
+    bottom: 130px;
+    right: 40px;
+    padding: 11px 12px 9px 12px;
+    border: 2px dotted;
+    border-radius: 50px;
+    background: #ffffffa1;
+}
+.fixed-bottom-right:hover {
+    border-style: solid;
+}
+.form-control, .typeahead, .tt-query, .tt-hint, .select2-container--default .select2-selection--single .select2-search__field, .select2-container--default .select2-selection--single{
+    padding: 0.675rem;
+}
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 20px;
+}
+.bluesky-bg {
+    background: #effbff;
+    border: 1px solid #c8eaf9 !important;
+}
+.loginbg {
+    background: url('img/dark_bg.jpg') no-repeat center center;
+    background-size: cover;
+}
+.lh18 {
+    line-height: 18px;
+}
+.border-info {
+    border: 1px solid #17a2b8 !important;
+}
+.border-success {
+    border: 1px solid #28a745 !important;
+}   
+.border-danger {
+    border: 1px solid #dc3545 !important;
+}
+.border-warning {
+    border: 1px solid #ffc107 !important;
+}
+.border-primary {
+    border: 1px solid #007bff !important;
+}
+/* Dashboard styles */
+.dash-icon {
+    width: 48px;
+    height: 48px;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.bg-light-primary {
+    background-color: rgba(66, 80, 255, 0.1);
+}
+.bg-light-info {
+    background-color: rgba(23, 162, 184, 0.1);
+}
+.bg-light-success {
+    background-color: rgba(40, 167, 69, 0.1);
+}
+.bg-light-warning {
+    background-color: rgba(255, 193, 7, 0.1);
+}
+.card .card-body.box {
+    padding: 1rem 1.5rem;
+}
+/* Website status indicator dot */
+.website-status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+.bg-success {
+    background-color: #28a745;
+}
+.bg-danger {
+    background-color: #dc3545;
+}
+select.form-control, select.typeahead, select.tt-query, select.tt-hint, .select2-container--default .select2-selection--single select.select2-search__field, .select2-container--default select.select2-selection--single {
+    line-height: 18px;
+    color: #4d4d4d;
+}
+.input-group .form-control {
+    height: 48px;
+}
+.bb-0 {
+    border-bottom: none;
+}
+.bb-1 {
+    border-bottom: 1px solid #e0e0e0 !important;
+}
+.box-shadow {
+    border: 1px solid ghostwhite;
+    box-shadow: 0px 3px 5px whitesmoke;
+}
