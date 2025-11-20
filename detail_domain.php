@@ -25,6 +25,12 @@ if (!$domain) {
     exit;
 }
 
+// Check if user has permission to view this domain
+if (!can_user_view_item($domain->owner_user_id, null)) {
+    wp_redirect(home_url('/danh-sach-ten-mien/'));
+    exit;
+}
+
 // Get user data
 $users_table = $wpdb->prefix . 'im_users';
 $user = $wpdb->get_row($wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $domain->owner_user_id));
@@ -86,12 +92,24 @@ get_header();
                 </div>
                 <div>
                     <div class="d-flex flex-row justify-content-center gap-3">
+                        <?php if (is_inova_admin()): ?>
                         <a href="<?php echo home_url('/edit-domain/?domain_id=' . $domain_id); ?>" class="btn btn-info btn-icon-text d-flex align-items-center">
                             <i class="ph ph-pencil me-1"></i> Chỉnh sửa
                         </a>
                         <a href="<?php echo home_url('/them-moi-hoa-don/?domain_id=' . $domain_id); ?>" class="btn btn-dark btn-icon-text d-flex align-items-center">
                             <i class="ph ph-receipt me-1"></i> Tạo hóa đơn
                         </a>
+                        <?php endif; ?>
+
+                        <?php if (!is_inova_admin() && $domain->managed_by_inova == 0): ?>
+                        <!-- Customers can manually renew domains NOT managed by INOVA -->
+                        <button type="button" class="btn btn-success btn-icon-text d-flex align-items-center renew-domain-manual-btn"
+                            data-domain-id="<?php echo $domain->id; ?>"
+                            data-domain-name="<?php echo esc_attr($domain->domain_name); ?>"
+                            data-expiry-date="<?php echo esc_attr($domain->expiry_date); ?>">
+                            <i class="ph ph-clock-clockwise me-1"></i> Gia hạn thêm 1 năm
+                        </button>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

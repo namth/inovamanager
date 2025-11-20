@@ -69,9 +69,12 @@ if (isset($_POST['delete_hosting_id']) && !empty($_POST['delete_hosting_id'])) {
     }
 }
 
-// Get all hostings with related data
+// Get all hostings with related data, grouped by hosting with concatenated website names
+// Build permission WHERE clause (hostings has partner_id field)
+$permission_where = get_user_permission_where_clause('h', 'owner_user_id', 'partner_id');
+
 $query = "
-    SELECT 
+    SELECT
         h.*,
         u.name AS owner_name,
         u.user_code AS owner_code,
@@ -79,19 +82,22 @@ $query = "
         pc.name AS product_name,
         pc.service_type,
         pc.renew_price AS product_price,
-        IFNULL(w.name, '') AS website_name,
-        IFNULL(w.id, 0) AS website_id
-    FROM 
+        GROUP_CONCAT(DISTINCT w.name SEPARATOR ', ') AS websites_names,
+        GROUP_CONCAT(DISTINCT w.id SEPARATOR ',') AS websites_ids
+    FROM
         $hostings_table h
-    LEFT JOIN 
+    LEFT JOIN
         $users_table u ON h.owner_user_id = u.id
-    LEFT JOIN 
+    LEFT JOIN
         $users_table p ON h.provider_id = p.id AND p.user_type = 'SUPPLIER'
-    LEFT JOIN 
+    LEFT JOIN
         $product_catalog_table pc ON h.product_catalog_id = pc.id
-    LEFT JOIN 
+    LEFT JOIN
         $websites_table w ON w.hosting_id = h.id
-    ORDER BY 
+    " . (!empty($permission_where) ? "WHERE 1=1 {$permission_where}" : "") . "
+    GROUP BY
+        h.id
+    ORDER BY
         h.expiry_date ASC
 ";
 
@@ -132,10 +138,12 @@ get_header();
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h4 class="card-title">Danh sách Hosting</h4>
                         <div class="d-flex gap-2 align-items-center">
+                            <?php if (is_inova_admin()): ?>
                             <button id="bulk-renew-btn" class="btn btn-secondary btn-icon-text" style="display: none;" onclick="handleBulkRenewal('hostings', 'hosting', '<?php echo home_url('/them-moi-hoa-don/'); ?>')">
                                 <i class="ph ph-arrow-clockwise btn-icon-prepend"></i>
                                 <span>Gia hạn nhiều hosting</span>
                             </button>
+                            <?php endif; ?>
                             <div class="d-flex align-items-center">
                                 <i class="ph ph-funnel text-muted me-2 fa-150p"></i>
                                 <select class="form-select form-select-sm w180" onchange="window.location.href=this.value">
@@ -150,9 +158,11 @@ get_header();
                                     </option>
                                 </select>
                             </div>
+                            <?php if (is_inova_admin()): ?>
                             <a href="<?php echo home_url('/them-moi-hosting/'); ?>" class="fixed-bottom-right nav-link" title="Thêm mới hosting" data-bs-toggle="tooltip" data-bs-placement="left">
                                 <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
                             </a>
+                            <?php endif; ?>
                         </div>
                     </div>
                     
@@ -161,18 +171,22 @@ get_header();
                         <i class="ph ph-cloud-slash icon-lg text-muted mb-3" style="font-size: 48px;"></i>
                         <h4>Chưa có hosting nào</h4>
                         <p class="text-muted">Bắt đầu bằng cách thêm hosting đầu tiên của bạn</p>
+                        <?php if (is_inova_admin()): ?>
                         <a href="<?php echo home_url('/them-moi-hosting/'); ?>" class="btn btn-primary">
                             <i class="ph ph-plus-circle me-2"></i> Thêm mới Hosting
                         </a>
+                        <?php endif; ?>
                     </div>
                     <?php else: ?>
                     <div class="table-responsive">
                         <table class="table table-hover">
                             <thead>
                                 <tr class="bg-light">
+                                    <?php if (is_inova_admin()): ?>
                                     <th style="width: 40px;">
                                         <input type="checkbox" id="select-all-hostings" class="form-check form-check-danger">
                                     </th>
+                                    <?php endif; ?>
                                     <th style="width: 50px;">STT</th>
                                     <th>Mã hosting</th>
                                     <th>Website</th>
@@ -187,14 +201,16 @@ get_header();
                                 <?php 
                                 if (!empty($hostings)) {
                                     $stt = 1;
-                                    foreach ($hostings as $hosting): 
+                                    foreach ($hostings as $hosting):
                                 ?>
                                 <tr>
+                                    <?php if (is_inova_admin()): ?>
                                     <td class="text-center">
-                                        <input type="checkbox" class="form-check form-check-danger hosting-checkbox" 
-                                               value="<?php echo $hosting->id; ?>" 
+                                        <input type="checkbox" class="form-check form-check-danger hosting-checkbox"
+                                               value="<?php echo $hosting->id; ?>"
                                                data-owner-id="<?php echo $hosting->owner_user_id; ?>">
                                     </td>
+                                    <?php endif; ?>
                                     <td class="text-center fw-bold text-muted"><?php echo $stt++; ?></td>
                                     <td>
                                         <div class="d-flex align-items-center">
@@ -206,18 +222,22 @@ get_header();
                                         </div>
                                     </td>
                                     <td>
-                                        <?php if (!empty($hosting->website_name)): ?>
-                                            <a href="<?php echo home_url('/edit-website/?website_id=' . $hosting->website_id); ?>" 
-                                               class="text-decoration-none fw-bold text-primary">
-                                                <?php echo esc_html($hosting->website_name); ?>
-                                                <i class="fas fa-external-link-alt ms-1" style="font-size: 0.8em;"></i>
-                                            </a>
-                                        <?php else: ?>
+                                        <?php if (!empty($hosting->websites_names)):
+                                            $website_names = explode(', ', $hosting->websites_names);
+                                            $website_ids = explode(',', $hosting->websites_ids);
+                                            foreach ($website_names as $index => $website_name): ?>
+                                                <a href="<?php echo home_url('/edit-website/?website_id=' . $website_ids[$index]); ?>"
+                                                   class="text-decoration-none fw-bold text-primary d-block">
+                                                    <?php echo esc_html($website_name); ?>
+                                                    <i class="fas fa-external-link-alt ms-1" style="font-size: 0.8em;"></i>
+                                                </a>
+                                            <?php endforeach;
+                                        else: ?>
                                             <span class="text-muted">Chưa có website</span>
                                         <?php endif; ?>
-                                        
+
                                         <?php if (!empty($hosting->ip_address)): ?>
-                                            <div class="mt-1">
+                                            <div class="mt-2">
                                                 <small class="text-danger fw-bold">
                                                     <i class="ph ph-globe me-1"></i>
                                                     <?php echo esc_html($hosting->ip_address); ?>
@@ -287,27 +307,34 @@ get_header();
                                         </span>
                                     </td>
                                     <td>
+                                        <?php if (is_inova_admin()): ?>
                                         <div class="d-flex align-items-center">
                                             <a href="<?php echo home_url('/sua-hosting/?hosting_id=' . $hosting->id); ?>" class="nav-link text-warning me-2" title="Sửa hosting">
                                                 <i class="ph ph-pencil-simple btn-icon-prepend fa-150p"></i>
                                             </a>
-                                            
-                                            <?php if (empty($hosting->website_name)): ?>
+
+                                            <?php if (empty($hosting->websites_names)): ?>
                                             <a href="<?php echo home_url('/attach-product-to-website/?hosting_id=' . $hosting->id); ?>" class="nav-link text-warning me-2" title="Tạo website mới">
                                                 <i class="ph ph-globe btn-icon-prepend fa-150p"></i>
                                             </a>
                                             <?php endif; ?>
-                                            
-                                            <a href="<?php echo home_url('/them-moi-hoa-don/?hosting_id=' . $hosting->id); ?>" class="nav-link text-warning me-2" title="Tạo hóa đơn gia hạn">
-                                                <i class="ph ph-receipt btn-icon-prepend fa-150p"></i>
-                                            </a>
-                                            
-                                            <button type="button" class="nav-link text-danger border-0 bg-transparent p-0" 
-                                                    title="Xóa hosting" 
-                                                    onclick="confirmDeleteHosting(<?php echo $hosting->id; ?>, '<?php echo esc_js(!empty($hosting->hosting_code) ? $hosting->hosting_code : 'HOST-' . $hosting->id); ?>', <?php echo ($hosting->website_id > 0) ? 'true' : 'false'; ?>)">
+
+                                            <button type="button" class="btn btn-sm btn-icon p-0 me-2 add-to-cart-btn"
+                                                data-service-type="hosting"
+                                                data-service-id="<?php echo $hosting->id; ?>"
+                                                title="Thêm vào giỏ hàng">
+                                                <i class="ph ph-shopping-cart text-info fa-150p"></i>
+                                            </button>
+
+                                            <button type="button" class="nav-link text-danger border-0 bg-transparent p-0"
+                                                    title="Xóa hosting"
+                                                    onclick="confirmDeleteHosting(<?php echo $hosting->id; ?>, '<?php echo esc_js(!empty($hosting->hosting_code) ? $hosting->hosting_code : 'HOST-' . $hosting->id); ?>', <?php echo (!empty($hosting->websites_names)) ? 'true' : 'false'; ?>)">
                                                 <i class="ph ph-trash btn-icon-prepend fa-150p"></i>
                                             </button>
                                         </div>
+                                        <?php else: ?>
+                                        <span class="text-muted">--</span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                                 <?php 
@@ -364,10 +391,10 @@ get_header();
                         <strong>Hosting này đang được sử dụng bởi website!</strong>
                         <br>Nếu bạn tiếp tục, website sẽ không còn liên kết với hosting nào.
                     </div>
-                    
+
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="confirmForceDelete">
-                        <label class="form-check-label text-danger" for="confirmForceDelete">
+                        <label class="form-check-label text-danger fw-bold" for="confirmForceDelete">
                             Tôi hiểu và muốn xóa hosting kể cả khi đang được sử dụng
                         </label>
                     </div>

@@ -26,9 +26,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $tax_amount = floatval($_POST['tax_amount']);
     $total_amount = floatval($_POST['total_amount']);
 
-    // Generate invoice code if not provided
-    $invoice_code = isset($_POST['invoice_code']) ? sanitize_text_field($_POST['invoice_code']) : 'INV-' . date('Ymd') . '-' . rand(1000, 9999);
-
     // Convert date format from DD/MM/YYYY to YYYY-MM-DD
     $invoice_date_parts = explode('/', $invoice_date);
     $formatted_invoice_date = $invoice_date_parts[2] . '-' . $invoice_date_parts[1] . '-' . $invoice_date_parts[0];
@@ -40,24 +37,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $items = [];
     if (isset($_POST['service_type'])) {
         foreach ($_POST['service_type'] as $index => $service_type) {
+            $service_type_clean = sanitize_text_field($service_type);
+            $item_total = floatval($_POST['item_total'][$index]);
+
+            // Get VAT rate for this service type
+            $vat_rate = get_vat_rate_for_service($service_type_clean);
+            $vat_amount = calculate_vat_amount($item_total, $vat_rate);
+
             $item = [
-                'service_type' => sanitize_text_field($service_type),
+                'service_type' => $service_type_clean,
                 'service_id' => intval($_POST['service_id'][$index]),
                 'description' => sanitize_text_field($_POST['description'][$index]),
                 'unit_price' => floatval($_POST['unit_price'][$index]),
                 'quantity' => intval($_POST['quantity'][$index]),
-                'item_total' => floatval($_POST['item_total'][$index]),
+                'item_total' => $item_total,
+                'vat_rate' => $vat_rate,
+                'vat_amount' => $vat_amount,
             ];
-            
+
             // Process start and end dates if provided
             if (isset($_POST['start_date'][$index]) && !empty($_POST['start_date'][$index])) {
                 $item['start_date'] = sanitize_text_field($_POST['start_date'][$index]);
             }
-            
+
             if (isset($_POST['end_date'][$index]) && !empty($_POST['end_date'][$index])) {
                 $item['end_date'] = sanitize_text_field($_POST['end_date'][$index]);
             }
-            
+
             $items[] = $item;
         }
     }
@@ -67,6 +73,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
 
     if ($action === 'add_invoice') {
+        // Generate invoice code using the new helper function
+        $invoice_code = generate_invoice_code($user_id);
+
+        // Get user's VAT invoice preference
+        $user_vat_settings = get_user_meta($user_id, 'inova_vat_invoice_settings', true);
+        $requires_vat_invoice = 0;
+        if (!empty($user_vat_settings) && isset($user_vat_settings['requires_vat_invoice'])) {
+            $requires_vat_invoice = intval($user_vat_settings['requires_vat_invoice']);
+        }
+
         // Insert new invoice
         $wpdb->insert($invoices_table, [
             'invoice_code' => $invoice_code,
@@ -79,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'total_amount' => $total_amount,
             'notes' => $notes,
             'status' => isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft',
+            'requires_vat_invoice' => $requires_vat_invoice,
             'created_by_type' => 'admin',
             'created_by_id' => get_current_user_id(),
         ]);
@@ -95,22 +112,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'unit_price' => $item['unit_price'],
                 'quantity' => $item['quantity'],
                 'item_total' => $item['item_total'],
+                'vat_rate' => $item['vat_rate'],
+                'vat_amount' => $item['vat_amount'],
             ];
-            
+
             // Add start and end dates if available
             if (isset($item['start_date'])) {
                 $insert_data['start_date'] = $item['start_date'];
             }
-            
+
             if (isset($item['end_date'])) {
                 $insert_data['end_date'] = $item['end_date'];
             }
-            
+
             $wpdb->insert($invoice_items_table, $insert_data);
         }
 
         echo '<div class="alert alert-success">Hóa đơn đã được tạo thành công!</div>';
-        
+
+        // Clear cart items if invoice was created from cart
+        if (isset($_POST['from_cart']) && $_POST['from_cart'] == 1) {
+            $cart_table = $wpdb->prefix . 'im_cart';
+            $wpdb->delete($cart_table, ['user_id' => $user_id]);
+        }
+
         // Redirect to invoice detail page if finalized
         if (isset($_POST['finalize']) && $_POST['finalize'] == 1) {
             wp_redirect(home_url('/chi-tiet-hoa-don/?invoice_id=' . $new_invoice_id));
@@ -146,17 +171,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'unit_price' => $item['unit_price'],
                 'quantity' => $item['quantity'],
                 'item_total' => $item['item_total'],
+                'vat_rate' => $item['vat_rate'],
+                'vat_amount' => $item['vat_amount'],
             ];
-            
+
             // Add start and end dates if available
             if (isset($item['start_date'])) {
                 $insert_data['start_date'] = $item['start_date'];
             }
-            
+
             if (isset($item['end_date'])) {
                 $insert_data['end_date'] = $item['end_date'];
             }
-            
+
             $wpdb->insert($invoice_items_table, $insert_data);
         }
 
@@ -203,6 +230,36 @@ if ($invoice_id > 0) {
 // Initialize variables for service data
 $service_type = '';
 $renewal_products = []; // Unified array to hold all renewal products
+
+// Check if loading from cart
+$from_cart = isset($_GET['from_cart']) && $_GET['from_cart'] == 1;
+$cart_quantities = []; // Store quantities from cart: ['service_type-service_id' => quantity]
+
+if ($from_cart && $user_id > 0) {
+    // Load all cart items for this user
+    $cart_table = $wpdb->prefix . 'im_cart';
+    $cart_items = $wpdb->get_results($wpdb->prepare("
+        SELECT * FROM $cart_table WHERE user_id = %d ORDER BY added_at
+    ", $user_id));
+
+    // Group cart items by service type and store quantities
+    foreach ($cart_items as $cart_item) {
+        $key = $cart_item->service_type . '-' . $cart_item->service_id;
+        $cart_quantities[$key] = $cart_item->quantity;
+
+        switch ($cart_item->service_type) {
+            case 'domain':
+                $bulk_domains .= ($bulk_domains ? ',' : '') . $cart_item->service_id;
+                break;
+            case 'hosting':
+                $bulk_hostings .= ($bulk_hostings ? ',' : '') . $cart_item->service_id;
+                break;
+            case 'maintenance':
+                $bulk_maintenances .= ($bulk_maintenances ? ',' : '') . $cart_item->service_id;
+                break;
+        }
+    }
+}
 
 // Convert single items to bulk format for unified processing
 if ($domain_id > 0) {
@@ -291,16 +348,23 @@ if (!empty($bulk_domains)) {
         foreach ($domains_data as $domain_data) {
             // Ensure we have required fields
             $domain_name = $domain_data->domain_name ?? 'Domain-' . $domain_data->id;
-            // Get price from product catalog
-            $price = $domain_data->product_price ?? 0;
+            // Get price from product catalog, fallback to 0 if not available
+            $price = isset($domain_data->product_price) && $domain_data->product_price > 0
+                ? $domain_data->product_price
+                : 0;
             $period = $domain_data->registration_period_years ?? 1;
             $expiry_date = $domain_data->expiry_date ?? date('Y-m-d');
+
+            // Get quantity from cart if available, otherwise default to 1
+            $cart_key = 'domain-' . $domain_data->id;
+            $quantity = isset($cart_quantities[$cart_key]) ? $cart_quantities[$cart_key] : 1;
 
             $renewal_products[] = array(
                 'type' => 'domain',
                 'id' => $domain_data->id,
                 'name' => $domain_name,
                 'price' => $price,
+                'quantity' => $quantity,
                 'period' => $period,
                 'period_type' => 'years',
                 'expiry_date' => $expiry_date,
@@ -327,17 +391,32 @@ if (!empty($bulk_hostings)) {
         if (empty($user_id)) {
             $user_id = $hostings_data[0]->owner_user_id;
         }
-        
+
+        // Get website names for hostings
+        $websites_table = $wpdb->prefix . 'im_websites';
         foreach ($hostings_data as $hosting_data) {
+            // Get linked website name (if any)
+            $website_name = $wpdb->get_var($wpdb->prepare(
+                "SELECT name FROM $websites_table WHERE hosting_id = %d LIMIT 1",
+                $hosting_data->id
+            ));
+            $hosting_data->website_name = $website_name;
+
             // Use product_price from product catalog, fallback to price field if exists
             $hosting_price = $hosting_data->product_price ?? $hosting_data->price ?? 0;
+
+            // Get quantity from cart if available, otherwise default to 1
+            $cart_key = 'hosting-' . $hosting_data->id;
+            $quantity = $cart_quantities[$cart_key] ?? 1;
 
             $renewal_products[] = array(
                 'type' => 'hosting',
                 'id' => $hosting_data->id,
                 'name' => $hosting_data->hosting_code,
                 'product_name' => $hosting_data->product_name,
+                'website_name' => $website_name,
                 'price' => $hosting_price,
+                'quantity' => $quantity,
                 'period' => $hosting_data->billing_cycle_months,
                 'period_type' => 'months',
                 'expiry_date' => $hosting_data->expiry_date,
@@ -364,14 +443,29 @@ if (!empty($bulk_maintenances)) {
         if (empty($user_id)) {
             $user_id = $maintenances_data[0]->owner_user_id;
         }
-        
+
+        // Get website names for maintenance packages
+        $websites_table = $wpdb->prefix . 'im_websites';
         foreach ($maintenances_data as $maintenance_data) {
+            // Get linked website name (if any)
+            $website_name = $wpdb->get_var($wpdb->prepare(
+                "SELECT name FROM $websites_table WHERE maintenance_package_id = %d LIMIT 1",
+                $maintenance_data->id
+            ));
+            $maintenance_data->website_name = $website_name;
+
+            // Get quantity from cart if available, otherwise default to 1
+            $cart_key = 'maintenance-' . $maintenance_data->id;
+            $quantity = $cart_quantities[$cart_key] ?? 1;
+
             $renewal_products[] = array(
                 'type' => 'maintenance',
                 'id' => $maintenance_data->id,
                 'name' => $maintenance_data->order_code,
                 'product_name' => $maintenance_data->product_name,
+                'website_name' => $website_name,
                 'price' => $maintenance_data->price_per_cycle,
+                'quantity' => $quantity,
                 'period' => $maintenance_data->billing_cycle_months,
                 'period_type' => 'months',
                 'expiry_date' => $maintenance_data->expiry_date,
@@ -386,27 +480,38 @@ if (!empty($bulk_maintenances)) {
 // Process bulk websites (get all associated products)
 if (!empty($bulk_websites)) {
     $websites_data = processBulkItems($bulk_websites, 'website', $wpdb, $websites_table);
-    
+
     if (!empty($websites_data)) {
         $service_type = count(explode(',', $bulk_websites)) > 1 ? 'bulk_websites' : 'website';
         if (empty($user_id)) {
             $user_id = $websites_data[0]->owner_user_id;
         }
-        
+
+        // Track added hosting and maintenance packages to avoid duplicates
+        $added_hostings = [];
+        $added_maintenances = [];
+
+        // Calculate date 30 days from now for expiry filter
+        $date_30_days_later = date('Y-m-d', strtotime('+30 days'));
+
         foreach ($websites_data as $website_data) {
             // Get all products associated with this website
-            // 1. Get domain
+            // 1. Get domain - only if managed by Inova and expiring within 30 days
             if ($website_data->domain_id > 0) {
                 $domain_data = $wpdb->get_row($wpdb->prepare("
                     SELECT d.*, pc.name AS product_name, pc.renew_price AS product_price
                     FROM $domains_table d
                     LEFT JOIN {$wpdb->prefix}im_product_catalog pc ON d.product_catalog_id = pc.id
                     WHERE d.id = %d
-                ", $website_data->domain_id));
+                    AND d.managed_by_inova = 1
+                    AND d.expiry_date <= %s
+                ", $website_data->domain_id, $date_30_days_later));
 
                 if ($domain_data) {
-                    // Get price from product catalog
-                    $domain_price = $domain_data->product_price ?? 0;
+                    // Get price from product catalog, fallback to 0 if not available
+                    $domain_price = isset($domain_data->product_price) && $domain_data->product_price > 0
+                        ? $domain_data->product_price
+                        : 0;
 
                     $renewal_products[] = array(
                         'type' => 'domain',
@@ -421,19 +526,26 @@ if (!empty($bulk_websites)) {
                     );
                 }
             }
-            
-            // 2. Get hosting
-            if ($website_data->hosting_id > 0) {
+
+            // 2. Get hosting - only if expiring within 30 days and not already added
+            if ($website_data->hosting_id > 0 && !in_array($website_data->hosting_id, $added_hostings)) {
                 $hosting_data = $wpdb->get_row($wpdb->prepare("
                     SELECT h.*, pc.name AS product_name, pc.renew_price AS product_price
                     FROM $hostings_table h
                     LEFT JOIN {$wpdb->prefix}im_product_catalog pc ON h.product_catalog_id = pc.id
                     WHERE h.id = %d
-                ", $website_data->hosting_id));
-                
+                    AND h.expiry_date <= %s
+                ", $website_data->hosting_id, $date_30_days_later));
+
                 if ($hosting_data) {
                     // Use product_price from product catalog, fallback to price field if exists
                     $hosting_price = $hosting_data->product_price ?? $hosting_data->price ?? 0;
+
+                    // Get list of websites using this hosting
+                    $websites_using_hosting = $wpdb->get_results($wpdb->prepare("
+                        SELECT name FROM $websites_table WHERE hosting_id = %d
+                    ", $hosting_data->id));
+                    $website_names = array_map(function($w) { return $w->name; }, $websites_using_hosting);
 
                     $renewal_products[] = array(
                         'type' => 'hosting',
@@ -445,21 +557,31 @@ if (!empty($bulk_websites)) {
                         'period_type' => 'months',
                         'expiry_date' => $hosting_data->expiry_date,
                         'description' => 'Gia hạn hosting ' . $hosting_data->product_name . ' - ' . ($hosting_data->billing_cycle_months / 12) . ' năm',
-                        'website_name' => $website_data->name
+                        'website_name' => implode(', ', $website_names)
                     );
+
+                    // Mark this hosting as added
+                    $added_hostings[] = $hosting_data->id;
                 }
             }
-            
-            // 3. Get maintenance package
-            if ($website_data->maintenance_package_id > 0) {
+
+            // 3. Get maintenance package - only if expiring within 30 days and not already added
+            if ($website_data->maintenance_package_id > 0 && !in_array($website_data->maintenance_package_id, $added_maintenances)) {
                 $maintenance_data = $wpdb->get_row($wpdb->prepare("
                     SELECT m.*, pc.name AS product_name
                     FROM $maintenance_table m
                     LEFT JOIN {$wpdb->prefix}im_product_catalog pc ON m.product_catalog_id = pc.id
                     WHERE m.id = %d
-                ", $website_data->maintenance_package_id));
-                
+                    AND m.expiry_date <= %s
+                ", $website_data->maintenance_package_id, $date_30_days_later));
+
                 if ($maintenance_data) {
+                    // Get list of websites using this maintenance package
+                    $websites_using_maintenance = $wpdb->get_results($wpdb->prepare("
+                        SELECT name FROM $websites_table WHERE maintenance_package_id = %d
+                    ", $maintenance_data->id));
+                    $website_names = array_map(function($w) { return $w->name; }, $websites_using_maintenance);
+
                     $renewal_products[] = array(
                         'type' => 'maintenance',
                         'id' => $maintenance_data->id,
@@ -470,8 +592,11 @@ if (!empty($bulk_websites)) {
                         'period_type' => 'months',
                         'expiry_date' => $maintenance_data->expiry_date,
                         'description' => 'Gia hạn gói bảo trì ' . $maintenance_data->product_name . ' - ' . ($maintenance_data->billing_cycle_months / 12) . ' năm',
-                        'website_name' => $website_data->name
+                        'website_name' => implode(', ', $website_names)
                     );
+
+                    // Mark this maintenance package as added
+                    $added_maintenances[] = $maintenance_data->id;
                 }
             }
         }
@@ -517,10 +642,12 @@ if (!empty($renewal_products) && count($renewal_products) == 1 &&
         $product_data->hosting_code = $single_product['name'];
         $product_data->product_name = $single_product['product_name'] ?? '';
         $product_data->billing_cycle_months = $single_product['period'];
+        $product_data->website_name = $single_product['website_name'] ?? null;
     } elseif ($service_type == 'maintenance') {
         $product_data->order_code = $single_product['name'];
         $product_data->product_name = $single_product['product_name'] ?? '';
         $product_data->billing_cycle_months = $single_product['period'];
+        $product_data->website_name = $single_product['website_name'] ?? null;
     }
 }
 
@@ -541,25 +668,39 @@ if ($service_type == 'website' && !empty($bulk_websites)) {
 $invoice_items = array();
 if ($invoice_id > 0) {
     $invoice_items = $wpdb->get_results($wpdb->prepare("
-        SELECT 
+        SELECT
             ii.*,
-            CASE 
+            CASE
                 WHEN ii.service_type = 'domain' THEN (SELECT domain_name FROM {$wpdb->prefix}im_domains WHERE id = ii.service_id)
                 WHEN ii.service_type = 'hosting' THEN (SELECT hosting_code FROM {$wpdb->prefix}im_hostings WHERE id = ii.service_id)
                 WHEN ii.service_type = 'maintenance' THEN (SELECT order_code FROM {$wpdb->prefix}im_maintenance_packages WHERE id = ii.service_id)
                 ELSE ''
-            END AS service_name
-        FROM 
+            END AS service_name,
+            CASE
+                WHEN ii.service_type = 'hosting' THEN (SELECT w2.name FROM {$wpdb->prefix}im_websites w2 WHERE w2.hosting_id = ii.service_id LIMIT 1)
+                WHEN ii.service_type = 'maintenance' THEN (SELECT w3.name FROM {$wpdb->prefix}im_websites w3 WHERE w3.maintenance_package_id = ii.service_id LIMIT 1)
+                ELSE NULL
+            END AS website_name
+        FROM
             $invoice_items_table ii
-        WHERE 
+        WHERE
             ii.invoice_id = %d
     ", $invoice_id));
 }
 
 // Calculate total
 $sub_total = 0;
-foreach ($invoice_items as $item) {
-    $sub_total += $item->item_total;
+if (!empty($invoice_items)) {
+    // If editing existing invoice, calculate from invoice_items
+    foreach ($invoice_items as $item) {
+        $sub_total += $item->item_total;
+    }
+} else {
+    // If creating new invoice, calculate from renewal_products
+    foreach ($renewal_products as $product) {
+        $quantity = isset($product['quantity']) ? $product['quantity'] : 1;
+        $sub_total += $product['price'] * $quantity;
+    }
 }
 
 // Check if the invoice is being finalized
@@ -584,7 +725,9 @@ get_header();
                     <form id="invoice-form" method="post" action="">
                         <input type="hidden" name="action" value="<?php echo $invoice_id > 0 ? 'edit_invoice' : 'add_invoice'; ?>">
                         <input type="hidden" name="invoice_id" value="<?php echo $invoice_id; ?>">
-                        <input type="hidden" name="invoice_code" value="<?php echo $existing_invoice ? esc_attr($existing_invoice->invoice_code) : 'INV-' . date('Ymd') . '-' . rand(1000, 9999); ?>">
+                        <?php if ($from_cart): ?>
+                        <input type="hidden" name="from_cart" value="1">
+                        <?php endif; ?>
                         
                         <?php if (($product_data || $website_id > 0 || !empty($renewal_products)) && !$existing_invoice): ?>
                         <div class="alert alert-info">
@@ -643,7 +786,7 @@ get_header();
                                             
                                             <div class="col-md-6 mb-3">
                                                 <label class="form-label">Mã hóa đơn</label>
-                                                <input type="text" class="form-control" name="invoice_code_display" value="<?php echo $existing_invoice ? esc_attr($existing_invoice->invoice_code) : 'INV-' . date('Ymd') . '-' . rand(1000, 9999); ?>" readonly>
+                                                <input type="text" class="form-control" name="invoice_code_display" value="<?php echo $existing_invoice ? esc_attr($existing_invoice->invoice_code) : '(sẽ được tạo tự động)'; ?>" readonly>
                                                 <small class="text-muted">Mã hóa đơn được tạo tự động</small>
                                             </div>
                                         </div>
@@ -686,19 +829,23 @@ get_header();
                                             <table class="table" id="invoice-items-table">
                                                 <thead>
                                                     <tr>
-                                                        <th style="width: 35%">Dịch vụ</th>
-                                                        <th style="width: 30%">Mô tả</th>
-                                                        <th style="width: 15%">Đơn giá</th>
-                                                        <th style="width: 10%">SL</th>
-                                                        <th style="width: 15%">Thành tiền</th>
-                                                        <th style="width: 5%">Xóa</th>
+                                                        <th style="width: 25%">Dịch vụ</th>
+                                                        <th style="width: 25%">Mô tả</th>
+                                                        <th style="width: 12%">Đơn giá</th>
+                                                        <th style="width: 8%">SL</th>
+                                                        <th style="width: 12%">Thành tiền</th>
+                                                        <th style="width: 12%">VAT</th>
+                                                        <th style="width: 6%">Xóa</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <?php 
+                                                    <?php
                                                     // Display existing items
-                                                    if (!empty($invoice_items)): 
+                                                    if (!empty($invoice_items)):
                                                         foreach ($invoice_items as $index => $item):
+                                                            // Calculate VAT for existing items
+                                                            $vat_rate = isset($item->vat_rate) ? $item->vat_rate : get_vat_rate_for_service($item->service_type);
+                                                            $vat_amount = isset($item->vat_amount) ? $item->vat_amount : calculate_vat_amount($item->item_total, $vat_rate);
                                                     ?>
                                                     <tr class="invoice-item">
                                                         <td>
@@ -706,6 +853,9 @@ get_header();
                                                             <input type="hidden" name="service_type[]" value="<?php echo $item->service_type; ?>">
                                                             <input type="hidden" name="service_id[]" value="<?php echo $item->service_id; ?>">
                                                             <strong><?php echo ucfirst($item->service_type); ?>:</strong> <?php echo esc_html($item->service_name); ?>
+                                                            <?php if (isset($item->website_name) && !empty($item->website_name) && in_array($item->service_type, ['hosting', 'maintenance'])): ?>
+                                                                <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($item->website_name); ?></small>
+                                                            <?php endif; ?>
                                                         </td>
                                                         <td>
                                                             <input type="text" class="form-control" name="description[]" value="<?php echo esc_attr($item->description); ?>" required>
@@ -718,6 +868,16 @@ get_header();
                                                         </td>
                                                         <td>
                                                             <input type="text" class="form-control item-total" name="item_total[]" value="<?php echo number_format($item->item_total, 0, '', ''); ?>" readonly>
+                                                        </td>
+                                                        <td>
+                                                            <div class="item-vat-display">
+                                                                <?php if ($vat_amount > 0): ?>
+                                                                    <span class="vat-amount"><?php echo number_format($vat_amount, 0, ',', '.'); ?> VNĐ</span>
+                                                                    <br><small class="text-muted vat-rate">(<?php echo number_format($vat_rate, 1); ?>%)</small>
+                                                                <?php else: ?>
+                                                                    <span class="text-muted">-</span>
+                                                                <?php endif; ?>
+                                                            </div>
                                                         </td>
                                                         <td>
                                                             <button type="button" class="btn btn-danger btn-sm remove-item">
@@ -748,6 +908,11 @@ get_header();
                                                             $end_date = date('Y-m-d', strtotime($start_date . ' + ' . $product_data->billing_cycle_months . ' months'));
                                                             $unit_price = $product_data->price;
                                                         endif;
+
+                                                        // Calculate VAT for new item
+                                                        $service_type_capitalized = ucfirst($service_type);
+                                                        $item_vat_rate = get_vat_rate_for_service($service_type_capitalized);
+                                                        $item_vat_amount = calculate_vat_amount($unit_price, $item_vat_rate);
                                                     ?>
                                                     <tr class="invoice-item">
                                                         <td>
@@ -756,8 +921,8 @@ get_header();
                                                             <input type="hidden" name="service_id[]" value="<?php echo $service_type == 'domain' ? $domain_id : ($service_type == 'hosting' ? $hosting_id : $maintenance_id); ?>">
                                                             <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
                                                             <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
-                                                            <strong><?php echo ucfirst($service_type); ?>:</strong> 
-                                                            <?php 
+                                                            <strong><?php echo ucfirst($service_type); ?>:</strong>
+                                                            <?php
                                                             if ($service_type == 'domain'):
                                                                 echo esc_html($product_data->domain_name);
                                                             elseif ($service_type == 'hosting'):
@@ -766,6 +931,9 @@ get_header();
                                                                 echo esc_html($product_data->order_code);
                                                             endif;
                                                             ?>
+                                                            <?php if (isset($product_data->website_name) && !empty($product_data->website_name) && in_array($service_type, ['hosting', 'maintenance'])): ?>
+                                                                <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($product_data->website_name); ?></small>
+                                                            <?php endif; ?>
                                                         </td>
                                                         <td>
                                                             <input type="text" class="form-control" name="description[]" value="<?php echo esc_attr($description); ?>" required>
@@ -778,6 +946,16 @@ get_header();
                                                         </td>
                                                         <td>
                                                             <input type="text" class="form-control item-total" name="item_total[]" value="<?php echo number_format($unit_price, 0, '', ''); ?>" readonly>
+                                                        </td>
+                                                        <td>
+                                                            <div class="item-vat-display">
+                                                                <?php if ($item_vat_amount > 0): ?>
+                                                                    <span class="vat-amount"><?php echo number_format($item_vat_amount, 0, ',', '.'); ?> VNĐ</span>
+                                                                    <br><small class="text-muted vat-rate">(<?php echo number_format($item_vat_rate, 1); ?>%)</small>
+                                                                <?php else: ?>
+                                                                    <span class="text-muted">-</span>
+                                                                <?php endif; ?>
+                                                            </div>
                                                         </td>
                                                         <td>
                                                             <button type="button" class="btn btn-danger btn-sm remove-item">
@@ -799,9 +977,16 @@ get_header();
                                                                     $end_date = date('Y-m-d', strtotime($product['expiry_date'] . ' + ' . $product['period'] . ' months'));
                                                                 }
                                                             }
-                                                            
+
                                                             // Use pre-calculated start date if available
                                                             $start_date = isset($product['start_date']) ? $product['start_date'] : $product['expiry_date'];
+
+                                                            // Calculate VAT for this product
+                                                            $item_quantity = isset($product['quantity']) ? $product['quantity'] : 1;
+                                                            $item_total = $product['price'] * $item_quantity;
+                                                            $product_type_capitalized = ucfirst($product['type']);
+                                                            $product_vat_rate = get_vat_rate_for_service($product_type_capitalized);
+                                                            $product_vat_amount = calculate_vat_amount($item_total, $product_vat_rate);
                                                     ?>
                                                     <tr class="invoice-item">
                                                         <td>
@@ -810,10 +995,10 @@ get_header();
                                                             <input type="hidden" name="service_id[]" value="<?php echo $product['id']; ?>">
                                                             <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
                                                             <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
-                                                            <strong><?php echo ucfirst($product['type']); ?>:</strong> 
+                                                            <strong><?php echo ucfirst($product['type']); ?>:</strong>
                                                             <?php echo esc_html($product['name']); ?>
-                                                            <?php if (isset($product['website_name'])): ?>
-                                                                <br><small class="text-muted">Website: <?php echo esc_html($product['website_name']); ?></small>
+                                                            <?php if (isset($product['website_name']) && !empty($product['website_name']) && in_array($product['type'], ['hosting', 'maintenance'])): ?>
+                                                                <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($product['website_name']); ?></small>
                                                             <?php endif; ?>
                                                         </td>
                                                         <td>
@@ -823,10 +1008,20 @@ get_header();
                                                             <input type="text" class="form-control unit-price" name="unit_price[]" value="<?php echo number_format($product['price'], 0, '', ''); ?>" required>
                                                         </td>
                                                         <td>
-                                                            <input type="number" class="form-control quantity" name="quantity[]" value="1" min="1" required>
+                                                            <input type="number" class="form-control quantity" name="quantity[]" value="<?php echo $item_quantity; ?>" min="1" required>
                                                         </td>
                                                         <td>
-                                                            <input type="text" class="form-control item-total" name="item_total[]" value="<?php echo number_format($product['price'], 0, '', ''); ?>" readonly>
+                                                            <input type="text" class="form-control item-total" name="item_total[]" value="<?php echo number_format($item_total, 0, '', ''); ?>" readonly>
+                                                        </td>
+                                                        <td>
+                                                            <div class="item-vat-display">
+                                                                <?php if ($product_vat_amount > 0): ?>
+                                                                    <span class="vat-amount"><?php echo number_format($product_vat_amount, 0, ',', '.'); ?> VNĐ</span>
+                                                                    <br><small class="text-muted vat-rate">(<?php echo number_format($product_vat_rate, 1); ?>%)</small>
+                                                                <?php else: ?>
+                                                                    <span class="text-muted">-</span>
+                                                                <?php endif; ?>
+                                                            </div>
                                                         </td>
                                                         <td>
                                                             <button type="button" class="btn btn-danger btn-sm remove-item">
@@ -839,17 +1034,6 @@ get_header();
                                                     endif; 
                                                     ?>
                                                 </tbody>
-                                                <tfoot>
-                                                    <tr>
-                                                        <td colspan="6">
-                                                            <div class="text-center">
-                                                                <a href="#" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addItemModal">
-                                                                    <i class="ph ph-plus-circle me-1"></i> Thêm dịch vụ
-                                                                </a>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                </tfoot>
                                             </table>
                                         </div>
                                     </div>
@@ -910,7 +1094,7 @@ get_header();
                                             <p class="mb-1"><strong>Ngân hàng:</strong> VietcomBank</p>
                                             <p class="mb-1"><strong>Số tài khoản:</strong> 1234567890</p>
                                             <p class="mb-1"><strong>Chủ tài khoản:</strong> INOVA COMPANY</p>
-                                            <p class="mb-0"><strong>Nội dung CK:</strong> <span class="text-danger"><?php echo $existing_invoice ? $existing_invoice->invoice_code : 'INV-' . date('Ymd') . '-' . rand(1000, 9999); ?></span></p>
+                                            <p class="mb-0"><strong>Nội dung CK:</strong> <span class="text-danger"><?php echo $existing_invoice ? $existing_invoice->invoice_code : '(Mã hóa đơn)'; ?></span></p>
                                         </div>
                                         
                                         <div id="qr-info" class="mt-3 p-3 bg-light rounded d-none">
@@ -947,35 +1131,27 @@ get_header();
     </div>
 </div>
 
-<!-- Modal Add Item -->
-<div class="modal fade" id="addItemModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title">Thêm dịch vụ vào hóa đơn</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
+<script>
                 <div class="mb-4">
                     <label class="form-label">Loại dịch vụ</label>
                     <div class="btn-group w-100" role="group">
                         <input type="radio" class="btn-check" name="service_type_select" id="type-domain" value="domain" autocomplete="off" checked>
-                        <label class="btn btn-outline-primary" for="type-domain">
+                        <label class="btn btn-primary d-flex align-items-center" for="type-domain">
                             <i class="ph ph-globe me-1"></i> Tên miền
                         </label>
                         
                         <input type="radio" class="btn-check" name="service_type_select" id="type-hosting" value="hosting" autocomplete="off">
-                        <label class="btn btn-outline-primary" for="type-hosting">
+                        <label class="btn btn-primary d-flex align-items-center" for="type-hosting">
                             <i class="ph ph-database me-1"></i> Hosting
                         </label>
                         
                         <input type="radio" class="btn-check" name="service_type_select" id="type-maintenance" value="maintenance" autocomplete="off">
-                        <label class="btn btn-outline-primary" for="type-maintenance">
+                        <label class="btn btn-primary d-flex align-items-center" for="type-maintenance">
                             <i class="ph ph-wrench me-1"></i> Bảo trì
                         </label>
                         
                         <input type="radio" class="btn-check" name="service_type_select" id="type-website" value="website" autocomplete="off">
-                        <label class="btn btn-outline-primary" for="type-website">
+                        <label class="btn btn-primary d-flex align-items-center" for="type-website">
                             <i class="ph ph-globe-hemisphere-west me-1"></i> Website
                         </label>
                     </div>
@@ -1119,238 +1295,5 @@ get_header();
     </div>
 </div>
 
-<script>
-jQuery(document).ready(function($) {
-    // Format prices with thousand separators
-    function formatPrice(price) {
-        return parseFloat(price).toLocaleString('vi-VN').replace(/\./g, ',');
-    }
-    
-    // Unformat price from thousand separators to number
-    function unformatPrice(formattedPrice) {
-        return parseInt(formattedPrice.replace(/\./g, '').replace(/,/g, ''));
-    }
-    
-    // Calculate line total when unit price or quantity changes
-    $(document).on('input', '.unit-price, .quantity', function() {
-        var row = $(this).closest('.invoice-item');
-        var unitPrice = row.find('.unit-price').val().replace(/,/g, '');
-        var quantity = row.find('.quantity').val();
-        
-        var total = unitPrice * quantity;
-        row.find('.item-total').val(total);
-        
-        updateTotals();
-    });
-    
-    // Format unit price on input
-    $(document).on('blur', '.unit-price', function() {
-        var value = $(this).val().replace(/,/g, '');
-        if (!isNaN(value) && value !== '') {
-            $(this).val(parseInt(value).toLocaleString('vi-VN').replace(/\./g, ''));
-        }
-    });
-    
-    // Remove invoice item
-    $(document).on('click', '.remove-item', function() {
-        $(this).closest('.invoice-item').remove();
-        updateTotals();
-    });
-    
-    // Update totals when discount or tax changes
-    $('#discount-amount, #tax-amount').on('input', function() {
-        updateTotals();
-    });
-    
-    // Toggle payment method info
-    $('input[name="payment_method"]').on('change', function() {
-        if ($(this).val() === 'bank_transfer') {
-            $('#bank-info').removeClass('d-none');
-            $('#qr-info').addClass('d-none');
-        } else {
-            $('#bank-info').addClass('d-none');
-            $('#qr-info').removeClass('d-none');
-        }
-    });
-    
-    // Switch between service types in the modal
-    $('input[name="service_type_select"]').on('change', function() {
-        $('.service-select-container').addClass('d-none');
-        $('#' + $(this).val() + '-select').removeClass('d-none');
-    });
-    
-    // Add service from modal to invoice
-    $('#add-service-btn').on('click', function() {
-        var serviceType = $('input[name="service_type_select"]:checked').val();
-        var serviceId, serviceName, price, description, startDate, endDate;
-        
-        if (serviceType === 'domain') {
-            var selected = $('#domain-dropdown option:selected');
-            if (selected.val() === '') {
-                alert('Vui lòng chọn tên miền');
-                return;
-            }
-            serviceId = selected.val();
-            serviceName = selected.text();
-            price = selected.data('price');
-            var expiryDate = new Date(selected.data('expiry'));
-            var period = selected.data('period');
-            startDate = selected.data('expiry');
-            
-            // Calculate new expiry date by adding years
-            var endDateObj = new Date(expiryDate);
-            endDateObj.setFullYear(endDateObj.getFullYear() + parseInt(period));
-            endDate = endDateObj.toISOString().split('T')[0];
-            
-            description = 'Gia hạn tên miền ' + serviceName + ' - ' + period + ' năm';
-        } 
-        else if (serviceType === 'hosting') {
-            var selected = $('#hosting-dropdown option:selected');
-            if (selected.val() === '') {
-                alert('Vui lòng chọn hosting');
-                return;
-            }
-            serviceId = selected.val();
-            serviceName = selected.text().trim();
-            price = selected.data('price');
-            var expiryDate = new Date(selected.data('expiry'));
-            var period = selected.data('period');
-            startDate = selected.data('expiry');
-            
-            // Calculate new expiry date by adding months
-            var endDateObj = new Date(expiryDate);
-            endDateObj.setMonth(endDateObj.getMonth() + parseInt(period));
-            endDate = endDateObj.toISOString().split('T')[0];
-            
-            description = 'Gia hạn hosting ' + selected.data('name') + ' - ' + (period/12) + ' năm';
-        } 
-        else if (serviceType === 'maintenance') {
-            var selected = $('#maintenance-dropdown option:selected');
-            if (selected.val() === '') {
-                alert('Vui lòng chọn gói bảo trì');
-                return;
-            }
-            serviceId = selected.val();
-            serviceName = selected.text().trim();
-            price = selected.data('price');
-            var expiryDate = new Date(selected.data('expiry'));
-            var period = selected.data('period');
-            startDate = selected.data('expiry');
-            
-            // Calculate new expiry date by adding months
-            var endDateObj = new Date(expiryDate);
-            endDateObj.setMonth(endDateObj.getMonth() + parseInt(period));
-            endDate = endDateObj.toISOString().split('T')[0];
-            
-            description = 'Gia hạn gói bảo trì ' + selected.data('name') + ' - ' + (period/12) + ' năm';
-        }
-        else if (serviceType === 'website') {
-            var selected = $('#website-dropdown option:selected');
-            if (selected.val() === '') {
-                alert('Vui lòng chọn website');
-                return;
-            }
-            
-            // For websites, we'll redirect to the invoice page with the website ID
-            var websiteId = selected.val();
-            var currentUrl = window.location.href.split('?')[0];
-            window.location.href = currentUrl + '?website_id=' + websiteId;
-            return;
-        }
-        
-        // Add new row to invoice items table
-        var newRow = `
-            <tr class="invoice-item">
-                <td>
-                    <input type="hidden" name="item_id[]" value="0">
-                    <input type="hidden" name="service_type[]" value="${serviceType}">
-                    <input type="hidden" name="service_id[]" value="${serviceId}">
-                    <input type="hidden" name="start_date[]" value="${startDate}">
-                    <input type="hidden" name="end_date[]" value="${endDate}">
-                    <strong>${serviceType.charAt(0).toUpperCase() + serviceType.slice(1)}:</strong> ${serviceName}
-                </td>
-                <td>
-                    <input type="text" class="form-control" name="description[]" value="${description}" required>
-                </td>
-                <td>
-                    <input type="text" class="form-control unit-price" name="unit_price[]" value="${price}" required>
-                </td>
-                <td>
-                    <input type="number" class="form-control quantity" name="quantity[]" value="1" min="1" required>
-                </td>
-                <td>
-                    <input type="text" class="form-control item-total" name="item_total[]" value="${price}" readonly>
-                </td>
-                <td>
-                    <button type="button" class="btn btn-danger btn-sm remove-item">
-                        <i class="ph ph-trash"></i>
-                    </button>
-                </td>
-            </tr>
-        `;
-        
-        $('#invoice-items-table tbody').append(newRow);
-        updateTotals();
-        
-        // Close modal
-        $('#addItemModal').modal('hide');
-    });
-    
-    // Update invoice totals
-    function updateTotals() {
-        var subTotal = 0;
-        
-        // Sum all item totals
-        $('.item-total').each(function() {
-            var itemTotal = $(this).val().replace(/,/g, '');
-            subTotal += parseInt(itemTotal) || 0;
-        });
-        
-        // Get discount and tax
-        var discount = parseInt($('#discount-amount').val()) || 0;
-        var tax = parseInt($('#tax-amount').val()) || 0;
-        
-        // Calculate total
-        var total = subTotal - discount + tax;
-        
-        // Update summary display
-        $('#summary-subtotal').text(formatPrice(subTotal) + ' VNĐ');
-        $('#summary-total').text(formatPrice(total) + ' VNĐ');
-        
-        // Update hidden inputs for form submission
-        $('#sub-total-input').val(subTotal);
-        $('#total-amount-input').val(total);
-    }
-    
-    // Initialize Select2
-    if($.fn.select2) {
-        $('.js-example-basic-single').select2({
-            dropdownParent: $('#addItemModal') // Fix for select2 in modal
-        });
-    }
-    
-    // Initialize datepickers
-    if($.fn.datepicker) {
-        $('.datepicker input').datepicker({
-            format: 'dd/mm/yyyy',
-            autoclose: true,
-            todayHighlight: true
-        });
-    }
-    
-    // Initial calculation
-    updateTotals();
-    
-    // Customer change event
-    $('#user_id').on('change', function() {
-        // When changing customer, we would need to reload the page to get their services
-        if ($(this).val() !== '') {
-            var url = new URL(window.location.href);
-            url.searchParams.set('user_id', $(this).val());
-            window.location.href = url.toString();
-        }
-    });
-});
-</script>
 
 <?php get_footer(); ?>

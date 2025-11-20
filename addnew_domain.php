@@ -7,6 +7,21 @@ global $wpdb;
 $domains_table = $wpdb->prefix . 'im_domains';
 $current_user_id = get_current_user_id();
 
+// Get website ID from URL if provided
+$website_id = $_GET['website_id'] ?? 0;
+
+// If website ID is provided, get website data
+if ($website_id) {
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $website = $wpdb->get_row("SELECT * FROM $websites_table WHERE id = $website_id");
+    if ($website) {
+        // Get owner's user data
+        $users_table = $wpdb->prefix . 'im_users';
+        $user = $wpdb->get_row("SELECT * FROM $users_table WHERE id = $website->owner_user_id");
+        $user_id = $website->owner_user_id;
+    }
+}
+
 // Get all domain products for auto-detection
 $catalog_table = $wpdb->prefix . 'im_product_catalog';
 $domain_products = $wpdb->get_results("SELECT * FROM $catalog_table WHERE service_type = 'Domain' AND is_active = 1 ORDER BY name");
@@ -28,6 +43,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $management_username = sanitize_text_field($_POST['management_username']);
         $management_password = sanitize_text_field($_POST['management_password']);
         $notes = sanitize_text_field($_POST['notes']);
+        $selected_website_id = !empty($_POST['selected_website_id']) ? intval($_POST['selected_website_id']) : 0;
         
         // Registration date handling
         if (isset($_POST['registration_date']) && !empty($_POST['registration_date'])) {
@@ -47,6 +63,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $data = array(
                 'domain_name' => $domain_name,
                 'owner_user_id' => $owner_user_id,
+                'create_by' => $current_user_id,
                 'provider_id' => $provider_id,
                 'product_catalog_id' => $product_catalog_id,
                 'registration_date' => $registration_date,
@@ -66,9 +83,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $domains_table,
                 $data
             );
-            
+
             if ($insert) {
                 $new_domain_id = $wpdb->insert_id;
+
+                // Update website's domain_id if website_id was provided or selected
+                $final_website_id = $website_id > 0 ? $website_id : $selected_website_id;
+                if ($final_website_id > 0) {
+                    $websites_table = $wpdb->prefix . 'im_websites';
+                    $wpdb->update(
+                        $websites_table,
+                        array('domain_id' => $new_domain_id),
+                        array('id' => $final_website_id),
+                        array('%d'),
+                        array('%d')
+                    );
+                }
+
                 $notification = '<div class="alert alert-success" role="alert">Thêm domain mới thành công!</div>';
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Đã xảy ra lỗi khi thêm domain. Vui lòng thử lại sau.</div>';
@@ -128,15 +159,50 @@ get_header();
                                         </h5>
                                     </div>
                                     <div class="card-body">
+                                        <?php if (!$website_id): ?>
+                                        <div class="form-group mb-3">
+                                            <label class="fw-bold">Website liên kết</label>
+                                            <select class="js-example-basic-single w-100" name="selected_website_id" id="selected_website_id">
+                                                <option value="">-- Chọn website (không bắt buộc) --</option>
+                                                <?php
+                                                $websites_table = $wpdb->prefix . 'im_websites';
+                                                $users_table = $wpdb->prefix . 'im_users';
+                                                $websites = $wpdb->get_results("
+                                                    SELECT w.id, w.name, w.owner_user_id, u.user_code, u.name as owner_name
+                                                    FROM $websites_table w
+                                                    LEFT JOIN $users_table u ON w.owner_user_id = u.id
+                                                    WHERE w.status = 'ACTIVE'
+                                                    AND (w.domain_id IS NULL OR w.domain_id = 0)
+                                                    ORDER BY w.name
+                                                ");
+                                                foreach ($websites as $ws) {
+                                                    $website_label = $ws->name;
+                                                    if (!empty($ws->owner_name)) {
+                                                        $website_label .= ' (' . $ws->owner_name . ')';
+                                                    }
+                                                    echo '<option value="' . $ws->id . '" data-owner-id="' . $ws->owner_user_id . '">' . $website_label . '</option>';
+                                                }
+                                                ?>
+                                            </select>
+                                            <small class="form-text text-muted">Chọn website để tự động điền chủ sở hữu và liên kết</small>
+                                        </div>
+                                        <?php endif; ?>
+
                                         <div class="form-group mb-3">
                                             <label for="domain_name" class="fw-bold">Tên miền <span class="text-danger">*</span></label>
-                                            <input type="text" class="form-control" id="domain_name" name="domain_name" placeholder="example.com" required>
+                                            <div class="input-group">
+                                                <input type="text" class="form-control" id="domain_name" name="domain_name" placeholder="example.com" required>
+                                                <button type="button" class="btn btn-secondary" id="lookup-whois-btn">
+                                                    <i class="ph ph-magnifying-glass me-1"></i> Looking up
+                                                </button>
+                                            </div>
                                             <small id="domain_type_info" class="form-text text-muted"></small>
+                                            <div id="whois-lookup-status" class="mt-2"></div>
                                         </div>
-                                        
+
                                         <div class="form-group mb-3">
                                             <label class="fw-bold">Chủ sở hữu <span class="text-danger">*</span></label>
-                                            <select class="js-example-basic-single w-100" name="owner_user_id" required>
+                                            <select class="js-example-basic-single w-100" name="owner_user_id" id="owner_user_id" required>
                                                 <option value="">-- Chọn chủ sở hữu --</option>
                                                 <?php
                                                 $users_table = $wpdb->prefix . 'im_users';
@@ -146,7 +212,8 @@ get_header();
                                                     if (!empty($user->company_name)) {
                                                         $user_label .= ' (' . $user->company_name . ')';
                                                     }
-                                                    echo '<option value="' . $user->id . '">' . $user->user_code . ' - ' . $user_label . '</option>';
+                                                    $selected = (isset($user_id) && $user->id == $user_id) ? 'selected' : '';
+                                                    echo '<option value="' . $user->id . '" ' . $selected . '>' . $user->user_code . ' - ' . $user_label . '</option>';
                                                 }
                                                 ?>
                                             </select>
@@ -343,18 +410,133 @@ function calculateExpiryDate() {
 document.addEventListener('DOMContentLoaded', function() {
     const registrationDateField = document.getElementById('registration_date');
     const registrationPeriodField = document.getElementById('registration_period_years');
-    
+
     if (registrationDateField) {
-        registrationDateField.addEventListener('change', calculateExpiryDate);
-        registrationDateField.addEventListener('blur', calculateExpiryDate);
+        // Use jQuery to handle datepicker events properly
+        $('#registration_date').on('change changeDate input blur', calculateExpiryDate);
     }
-    
+
     if (registrationPeriodField) {
         registrationPeriodField.addEventListener('change', calculateExpiryDate);
     }
-    
+
     // Auto-calculate when page loads if registration date is filled
     calculateExpiryDate();
+
+    // Auto-fill owner when website is selected
+    $('#selected_website_id').on('change', function() {
+        const selectedOption = $(this).find('option:selected');
+        const ownerId = selectedOption.attr('data-owner-id');
+
+        if (ownerId) {
+            // Set the owner select value using Select2
+            $('[name="owner_user_id"]').val(ownerId).trigger('change');
+        } else {
+            // Clear owner selection if no website is selected
+            $('[name="owner_user_id"]').val('').trigger('change');
+        }
+    });
+
+    /**
+     * Auto-fetch domain information from APILayer when domain name is entered
+     */
+    // WHOIS lookup when clicking the button
+    $('#lookup-whois-btn').on('click', function() {
+        const domainName = $('#domain_name').val().trim();
+        const $button = $(this);
+        const $statusDiv = $('#whois-lookup-status');
+        const $registrationDate = $('#registration_date');
+        const $expiryDate = $('#expiry_date');
+
+        if (!domainName) {
+            $statusDiv.html('<div class="alert alert-warning"><i class="ph ph-warning me-1"></i>Vui lòng nhập tên miền trước.</div>');
+            return;
+        }
+
+        if (!domainName.includes('.')) {
+            $statusDiv.html('<div class="alert alert-warning"><i class="ph ph-warning me-1"></i>Tên miền không hợp lệ.</div>');
+            return;
+        }
+
+        console.log('Manual WHOIS lookup for:', domainName);
+
+        // Show loading state
+        $button.prop('disabled', true).html('<i class="ph ph-spinner ph-spin me-1"></i> Đang tra cứu...');
+        $statusDiv.html('<div class="alert alert-info"><i class="ph ph-info me-1"></i>Đang tra cứu thông tin WHOIS...</div>');
+        $registrationDate.prop('disabled', true).val('Đang tải...');
+        $expiryDate.prop('disabled', true).val('Đang tải...');
+
+        $.ajax({
+            url: AJAX.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'fetch_domain_info',
+                domain: domainName
+            },
+            success: function(response) {
+                console.log('WHOIS API Response:', response);
+
+                // Reset button state
+                $button.prop('disabled', false).html('<i class="ph ph-magnifying-glass me-1"></i> Looking up');
+
+                if (response.success && response.data) {
+                    let foundData = false;
+
+                    // Fill in registration date if available
+                    if (response.data.registration_date) {
+                        const regDate = new Date(response.data.registration_date);
+                        const regFormatted = ('0' + regDate.getDate()).slice(-2) + '/' +
+                                           ('0' + (regDate.getMonth() + 1)).slice(-2) + '/' +
+                                           regDate.getFullYear();
+                        $registrationDate.val(regFormatted);
+                        foundData = true;
+                    }
+
+                    // Fill in expiry date if available
+                    if (response.data.expiry_date) {
+                        const expDate = new Date(response.data.expiry_date);
+                        const expFormatted = ('0' + expDate.getDate()).slice(-2) + '/' +
+                                           ('0' + (expDate.getMonth() + 1)).slice(-2) + '/' +
+                                           expDate.getFullYear();
+                        $expiryDate.val(expFormatted);
+                        foundData = true;
+                    }
+
+                    // Show success notification
+                    if (foundData) {
+                        $statusDiv.html('<div class="alert alert-success"><i class="ph ph-check-circle me-1"></i>Đã tra cứu thành công thông tin WHOIS!</div>');
+                    } else {
+                        $statusDiv.html('<div class="alert alert-warning"><i class="ph ph-warning me-1"></i>Không tìm thấy thông tin ngày đăng ký/hết hạn.</div>');
+                    }
+                } else {
+                    const errorMsg = response.data && response.data.message ? response.data.message : 'Không thể tra cứu thông tin WHOIS';
+                    $statusDiv.html('<div class="alert alert-danger"><i class="ph ph-x-circle me-1"></i>' + errorMsg + '</div>');
+                }
+
+                // Re-enable fields
+                $registrationDate.prop('disabled', false);
+                $expiryDate.prop('disabled', false);
+
+                // If no data was returned, clear the fields
+                if (!response.success || !response.data || !response.data.registration_date) {
+                    $registrationDate.val('');
+                }
+                if (!response.success || !response.data || !response.data.expiry_date) {
+                    $expiryDate.val('');
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                console.error('AJAX error fetching domain information:', textStatus, errorThrown);
+
+                // Reset button state
+                $button.prop('disabled', false).html('<i class="ph ph-magnifying-glass me-1"></i> Looking up');
+
+                $statusDiv.html('<div class="alert alert-danger"><i class="ph ph-x-circle me-1"></i>Lỗi kết nối đến server.</div>');
+                $registrationDate.prop('disabled', false).val('');
+                $expiryDate.prop('disabled', false).val('');
+            }
+        });
+    });
 });
 </script>
 

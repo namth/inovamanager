@@ -31,20 +31,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (isset($_POST['edit_product_field']) && wp_verify_nonce($_POST['edit_product_field'], 'edit_product')) {
         $service_type = sanitize_text_field($_POST['service_type']);
         $name = sanitize_text_field($_POST['product_name']);
+        $code = sanitize_text_field($_POST['code']);
         $description = sanitize_textarea_field($_POST['description']);
-        $base_price = floatval($_POST['base_price']);
+        $register_price = intval($_POST['register_price']);
+        $renew_price = intval($_POST['renew_price']);
         $billing_cycle = sanitize_text_field($_POST['billing_cycle']);
         $is_active = isset($_POST['is_active']) ? 1 : 0;
-        
+
         // Validate required fields
-        if (!empty($service_type) && !empty($name) && !empty($base_price) && !empty($billing_cycle)) {
+        if (!empty($service_type) && !empty($name) && !empty($code) && !empty($register_price) && !empty($renew_price) && !empty($billing_cycle)) {
             $wpdb->update(
                 $table_name,
                 array(
                     'service_type' => $service_type,
                     'name' => $name,
+                    'code' => $code,
                     'description' => $description,
-                    'base_price' => $base_price,
+                    'register_price' => $register_price,
+                    'renew_price' => $renew_price,
                     'billing_cycle' => $billing_cycle,
                     'is_active' => $is_active,
                     'updated_at' => current_time('mysql')
@@ -100,15 +104,28 @@ get_header();
                             <label for="product_name" class="fw-bold">Tên sản phẩm <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="product_name" name="product_name" value="<?php echo esc_attr($product->name); ?>" required>
                         </div>
-                        
+
+                        <div class="form-group">
+                            <label for="code" class="fw-bold">Mã sản phẩm <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="code" name="code" maxlength="5" value="<?php echo esc_attr($product->code); ?>" placeholder="VD: HOST, DMN" required>
+                            <small class="form-text text-muted">Mã sản phẩm (tối đa 5 ký tự, viết hoa)</small>
+                        </div>
+
                         <div class="form-group">
                             <label for="description" class="fw-bold">Mô tả</label>
                             <textarea class="form-control height-auto" id="description" name="description" rows="3"><?php echo esc_textarea($product->description); ?></textarea>
                         </div>
-                        
+
                         <div class="form-group">
-                            <label for="base_price" class="fw-bold">Giá cơ bản (VNĐ) <span class="text-danger">*</span></label>
-                            <input type="number" step="0.01" class="form-control" id="base_price" name="base_price" value="<?php echo esc_attr($product->base_price); ?>" required>
+                            <label for="register_price" class="fw-bold">Giá đăng ký lần đầu (VNĐ) <span class="text-danger">*</span></label>
+                            <input type="number" step="1000" class="form-control" id="register_price" name="register_price" value="<?php echo esc_attr($product->register_price); ?>" required>
+                            <small class="form-text text-muted">Giá cho lần đăng ký đầu tiên</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="renew_price" class="fw-bold">Giá gia hạn (VNĐ) <span class="text-danger">*</span></label>
+                            <input type="number" step="1000" class="form-control" id="renew_price" name="renew_price" value="<?php echo esc_attr($product->renew_price); ?>" required>
+                            <small class="form-text text-muted">Giá cho các lần gia hạn tiếp theo</small>
                         </div>
                         
                         <div class="form-group">

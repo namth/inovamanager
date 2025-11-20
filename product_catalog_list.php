@@ -69,10 +69,12 @@ get_header();
                             <thead>
                                 <tr>
                                     <th>ID</th>
+                                    <th>Mã SP</th>
                                     <th>Loại dịch vụ</th>
                                     <th>Tên sản phẩm</th>
                                     <th>Mô tả</th>
-                                    <th>Giá cơ bản</th>
+                                    <th>Giá đăng ký</th>
+                                    <th>Giá gia hạn</th>
                                     <th>Chu kỳ</th>
                                     <th>Trạng thái</th>
                                     <th>Thao tác</th>
@@ -81,18 +83,21 @@ get_header();
                             <tbody>
                                 <?php if (empty($products)): ?>
                                 <tr>
-                                    <td colspan="8" class="text-center">Chưa có sản phẩm nào</td>
+                                    <td colspan="10" class="text-center">Chưa có sản phẩm nào</td>
                                 </tr>
                                 <?php else: ?>
                                     <?php foreach ($products as $product): ?>
                                     <tr>
                                         <td><?php echo $product->id; ?></td>
                                         <td>
-                                            <?php 
+                                            <span class="badge bg-dark"><?php echo esc_html($product->code); ?></span>
+                                        </td>
+                                        <td>
+                                            <?php
                                             // Display service type with icon
                                             $type_icon = '';
                                             $type_class = '';
-                                            
+
                                             switch ($product->service_type) {
                                                 case 'Hosting':
                                                     $type_icon = 'ph-cloud';
@@ -114,13 +119,14 @@ get_header();
                                                     $type_icon = 'ph-package';
                                                     $type_class = 'd-flex fit-content badge bg-secondary border-radius-9';
                                             }
-                                            
+
                                             echo '<span class="' . $type_class . '"><i class="ph ' . $type_icon . ' me-1"></i>' . $product->service_type . '</span>';
                                             ?>
                                         </td>
                                         <td><?php echo $product->name; ?></td>
                                         <td><?php echo !empty($product->description) ? substr($product->description, 0, 50) . '...' : ''; ?></td>
-                                        <td><?php echo number_format($product->base_price, 0, ',', '.') . ' VNĐ'; ?></td>
+                                        <td><?php echo number_format($product->register_price, 0, ',', '.') . ' VNĐ'; ?></td>
+                                        <td><?php echo number_format($product->renew_price, 0, ',', '.') . ' VNĐ'; ?></td>
                                         <td><?php echo $product->billing_cycle; ?></td>
                                         <td>
                                             <?php

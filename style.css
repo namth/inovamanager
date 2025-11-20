@@ -169,3 +169,8 @@ select.form-control, select.typeahead, select.tt-query, select.tt-hint, .select2
     border: 1px solid ghostwhite;
     box-shadow: 0px 3px 5px whitesmoke;
 }
+.form-check-input[type="radio"] {
+    position: absolute;
+    left: 25px;
+    top: -2px;
+}

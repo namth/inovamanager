@@ -363,7 +363,7 @@ get_header();
                                 <a href="javascript:history.back()" class="btn btn-secondary">
                                     <i class="ph ph-arrow-left me-2"></i>Quay lại
                                 </a>
-                                <a href="<?php echo home_url('/them-moi-website/?owner_user_id=' . $product_owner_id . '&' . $product_type . '_id=' . 
+                                <a href="<?php echo home_url('/addnew-website/?owner_user_id=' . $product_owner_id . '&' . $product_type . '_id=' . 
                                     ($product_type === 'domain' ? $domain_id : 
                                         ($product_type === 'hosting' ? $hosting_id : $maintenance_id))); ?>" 
                                    class="btn btn-success">

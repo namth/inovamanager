@@ -27,10 +27,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                 $payment_date = sanitize_text_field($_POST['payment_date']);
                 $payment_notes = sanitize_textarea_field($_POST['payment_notes']);
                 $payment_method = sanitize_text_field($_POST['payment_method']);
-                
+
                 // Start transaction to ensure data consistency
                 $wpdb->query('START TRANSACTION');
-                
+
                 try {
                     // Update invoice status
                     $invoice_result = $wpdb->update(
@@ -45,27 +45,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                         ),
                         array('id' => $invoice_id)
                     );
-                    
+
                     if ($invoice_result === false) {
                         throw new Exception('Failed to update invoice status');
                     }
-                    
-                    // Get related services from invoice items
+
+                    // Define table names for different service types
+                    $domains_table = $wpdb->prefix . 'im_domains';
+                    $hostings_table = $wpdb->prefix . 'im_hostings';
+                    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+
+                    // Get all invoice items with renewal information
+                    $invoice_items = $wpdb->get_results($wpdb->prepare("
+                        SELECT
+                            ii.service_type,
+                            ii.service_id,
+                            ii.end_date
+                        FROM $invoice_items_table ii
+                        WHERE ii.invoice_id = %d
+                        AND ii.service_id IS NOT NULL
+                        AND ii.end_date IS NOT NULL
+                    ", $invoice_id));
+
+                    // Update expiry_date for each service/product based on service_type
+                    foreach ($invoice_items as $item) {
+                        $update_result = false;
+
+                        switch ($item->service_type) {
+                            case 'domain':
+                                $update_result = $wpdb->update(
+                                    $domains_table,
+                                    array(
+                                        'expiry_date' => $item->end_date,
+                                        'updated_at' => current_time('mysql')
+                                    ),
+                                    array('id' => $item->service_id)
+                                );
+                                error_log("Updated domain ID {$item->service_id} expiry_date to {$item->end_date}");
+                                break;
+
+                            case 'hosting':
+                                $update_result = $wpdb->update(
+                                    $hostings_table,
+                                    array(
+                                        'expiry_date' => $item->end_date,
+                                        'updated_at' => current_time('mysql')
+                                    ),
+                                    array('id' => $item->service_id)
+                                );
+                                error_log("Updated hosting ID {$item->service_id} expiry_date to {$item->end_date}");
+                                break;
+
+                            case 'maintenance':
+                                $update_result = $wpdb->update(
+                                    $maintenance_table,
+                                    array(
+                                        'expiry_date' => $item->end_date,
+                                        'updated_at' => current_time('mysql')
+                                    ),
+                                    array('id' => $item->service_id)
+                                );
+                                error_log("Updated maintenance package ID {$item->service_id} expiry_date to {$item->end_date}");
+                                break;
+
+                            case 'website_service':
+                                // Website services don't have expiry_date, skip
+                                $update_result = true;
+                                break;
+                        }
+
+                        if ($update_result === false) {
+                            throw new Exception("Failed to update expiry_date for {$item->service_type} ID: {$item->service_id}");
+                        }
+                    }
+
+                    // Get related website services from invoice items
                     $related_services = $wpdb->get_results($wpdb->prepare("
-                        SELECT DISTINCT ii.service_id 
-                        FROM $invoice_items_table ii 
-                        WHERE ii.invoice_id = %d 
+                        SELECT DISTINCT ii.service_id
+                        FROM $invoice_items_table ii
+                        WHERE ii.invoice_id = %d
                         AND ii.service_type = 'website_service'
                         AND ii.service_id IS NOT NULL
                     ", $invoice_id));
-                    
+
                     // Update service status to in_progress for each related service
                     foreach ($related_services as $service_item) {
                         // Check if service is currently approved before updating
                         $current_service = $wpdb->get_row($wpdb->prepare("
                             SELECT status FROM $service_table WHERE id = %d
                         ", $service_item->service_id));
-                        
+
                         if ($current_service && $current_service->status === 'APPROVED') {
                             $service_result = $wpdb->update(
                                 $service_table,
@@ -76,16 +145,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                                 ),
                                 array('id' => $service_item->service_id)
                             );
-                            
+
                             if ($service_result === false) {
                                 throw new Exception('Failed to update service status for service ID: ' . $service_item->service_id);
                             }
                         }
                     }
-                    
+
                     $wpdb->query('COMMIT');
-                    $success_message = 'Hóa đơn đã được đánh dấu là đã thanh toán và dịch vụ đã chuyển sang trạng thái đang thực hiện.';
-                    
+                    $success_message = 'Hóa đơn đã được đánh dấu là đã thanh toán. Ngày hết hạn của các sản phẩm/dịch vụ đã được cập nhật.';
+
                 } catch (Exception $e) {
                     $wpdb->query('ROLLBACK');
                     $error_message = 'Có lỗi xảy ra khi cập nhật: ' . $e->getMessage();
@@ -143,23 +212,32 @@ if (!$invoice) {
     exit;
 }
 
-// Get invoice items with service details
+// Get invoice items with service details and website names
+$websites_table = $wpdb->prefix . 'im_websites';
+$hostings_table = $wpdb->prefix . 'im_hostings';
+$maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+
 $invoice_items = $wpdb->get_results($wpdb->prepare("
-    SELECT 
+    SELECT
         ii.*,
-        CASE 
+        CASE
             WHEN ii.service_type = 'website_service' THEN ws.title
             ELSE ii.description
         END AS service_title,
-        CASE 
+        CASE
             WHEN ii.service_type = 'website_service' THEN CONCAT('Yêu cầu dịch vụ #', ws.id)
             ELSE ''
-        END AS service_reference
-    FROM 
+        END AS service_reference,
+        CASE
+            WHEN ii.service_type = 'hosting' THEN (SELECT w2.name FROM $websites_table w2 WHERE w2.hosting_id = ii.service_id LIMIT 1)
+            WHEN ii.service_type = 'maintenance' THEN (SELECT w3.name FROM $websites_table w3 WHERE w3.maintenance_package_id = ii.service_id LIMIT 1)
+            ELSE NULL
+        END AS website_name
+    FROM
         $invoice_items_table ii
-    LEFT JOIN 
+    LEFT JOIN
         $service_table ws ON ii.service_type = 'website_service' AND ii.service_id = ws.id
-    WHERE 
+    WHERE
         ii.invoice_id = %d
     ORDER BY ii.id
 ", $invoice_id));
@@ -330,6 +408,8 @@ get_header();
                                         <th class="text-center">Số lượng</th>
                                         <th class="text-end">Đơn giá</th>
                                         <th class="text-end">Thành tiền</th>
+                                        <th class="text-end">VAT</th>
+                                        <th class="text-end">Tổng</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -341,11 +421,23 @@ get_header();
                                                 <?php if ($item->service_reference): ?>
                                                     <br><small class="text-muted"><?php echo esc_html($item->service_reference); ?></small>
                                                 <?php endif; ?>
+                                                <?php if (isset($item->website_name) && !empty($item->website_name) && in_array($item->service_type, ['hosting', 'maintenance'])): ?>
+                                                    <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> Website: <?php echo esc_html($item->website_name); ?></small>
+                                                <?php endif; ?>
                                             </div>
                                         </td>
                                         <td class="text-center"><?php echo number_format($item->quantity); ?></td>
                                         <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
-                                        <td class="text-end"><strong><?php echo number_format($item->item_total); ?> VNĐ</strong></td>
+                                        <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                                        <td class="text-end">
+                                            <?php if (isset($item->vat_amount) && $item->vat_amount > 0): ?>
+                                                <?php echo number_format($item->vat_amount); ?> VNĐ
+                                                <br><small class="text-muted">(<?php echo number_format($item->vat_rate, 1); ?>%)</small>
+                                            <?php else: ?>
+                                                <span class="text-muted">-</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="text-end"><strong><?php echo number_format($item->item_total + (isset($item->vat_amount) ? $item->vat_amount : 0)); ?> VNĐ</strong></td>
                                     </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -405,6 +497,65 @@ get_header();
 
             <!-- Related Invoices Sidebar -->
             <div class="col-lg-4 grid-margin stretch-card d-flex flex-column">
+                <?php
+                // Generate Payment QR Code if settings are configured and invoice is not paid
+                // Check if QR code settings exist (either new format with VAT split or old format)
+                $has_qr_settings = (
+                    (get_option('payment_bank_code_no_vat') && get_option('payment_account_number_no_vat')) ||
+                    (get_option('payment_bank_code_with_vat') && get_option('payment_account_number_with_vat')) ||
+                    (get_option('payment_bank_code') && get_option('payment_account_number'))
+                );
+
+                if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
+                    // Calculate remaining amount
+                    $remaining_amount = $invoice->total_amount - $invoice->paid_amount;
+
+                    // Generate QR code with invoice code as reference
+                    // Pass requires_vat_invoice to select appropriate bank account
+                    $qr_add_info = 'HD ' . $invoice->invoice_code;
+                    $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
+                    $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
+
+                    if ($qr_code_url):
+                ?>
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <i class="ph ph-qr-code me-2"></i>Thanh toán qua QR Code
+                        </h6>
+                        <p class="text-muted small mb-3">Quét mã QR để thanh toán nhanh</p>
+
+                        <!-- QR Code Image -->
+                        <div class="text-center mb-3">
+                            <img src="<?php echo esc_url($qr_code_url); ?>"
+                                 alt="Payment QR Code"
+                                 class="img-fluid rounded"
+                                 style="max-width: 280px; border: 1px solid #ddd; padding: 10px;">
+                        </div>
+
+                        <!-- Payment Information -->
+                        <div class="alert alert-danger mb-0">
+                            <table class="table table-sm table-borderless mb-0">
+                                <tr>
+                                    <td class="text-muted"><small>Nội dung CK:</small></td>
+                                    <td><strong><small><?php echo esc_html($qr_add_info); ?></small></strong></td>
+                                </tr>
+                            </table>
+                        </div>
+
+                        <div class="mt-3">
+                            <small class="text-muted">
+                                <i class="ph ph-info me-1"></i>
+                                Vui lòng giữ nguyên nội dung chuyển khoản để hệ thống tự động xác nhận thanh toán.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+                <?php
+                    endif;
+                endif;
+                ?>
+
                 <?php if (!empty($related_invoices)): ?>
                 <div class="card mb-4">
                     <div class="card-body">
@@ -457,8 +608,13 @@ get_header();
                             <a href="<?php echo home_url('/danh-sach-hoa-don/'); ?>" class="btn btn-secondary mb-2">
                                 <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
                             </a>
-                            
-                            <a href="<?php echo home_url('/print-invoice/?invoice_id=' . $invoice->id); ?>" 
+
+                            <a href="<?php echo admin_url('admin-ajax.php?action=generate_invoice_pdf&invoice_id=' . $invoice->id); ?>"
+                               class="btn btn-primary mb-2" target="_blank">
+                                <i class="ph ph-file-pdf me-2"></i>Xuất PDF
+                            </a>
+
+                            <a href="<?php echo home_url('/print-invoice/?invoice_id=' . $invoice->id); ?>"
                                class="btn btn-info" target="_blank">
                                 <i class="ph ph-printer me-2"></i>In hóa đơn
                             </a>

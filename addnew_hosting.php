@@ -52,6 +52,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $hosting_code = sanitize_text_field($_POST['hosting_code']);
         $product_catalog_id = intval($_POST['product_catalog_id']);
         $provider_id = !empty($_POST['provider_id']) ? intval($_POST['provider_id']) : null;
+        $selected_website_id = !empty($_POST['selected_website_id']) ? intval($_POST['selected_website_id']) : 0;
 
         // Registration date handling
         if (isset($_POST['registration_date']) && !empty($_POST['registration_date'])) {
@@ -98,6 +99,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             
             $data = array(
                 'owner_user_id' => $owner_user_id,
+                'create_by' => $current_user_id,
                 'hosting_code' => $hosting_code,
                 'product_catalog_id' => $product_catalog_id,
                 'provider_id' => $provider_id,
@@ -121,21 +123,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             if ($insert) {
                 $new_hosting_id = $wpdb->insert_id;
-                
-                // Update website's hosting_id if website_id was provided
-                if ($website_id > 0) {
+
+                // Update website's hosting_id if website_id was provided or selected
+                $final_website_id = $website_id > 0 ? $website_id : $selected_website_id;
+                if ($final_website_id > 0) {
                     $websites_table = $wpdb->prefix . 'im_websites';
                     $wpdb->update(
                         $websites_table,
                         array('hosting_id' => $new_hosting_id),
-                        array('id' => $website_id),
+                        array('id' => $final_website_id),
                         array('%d'),
                         array('%d')
                     );
-                    
+
                     // After updating, redirect to the website detail page if it exists
-                    if (isset($website)) {
-                        wp_redirect(home_url('/hosting/?hosting_id=') . $website_id);
+                    if (isset($website) || $selected_website_id > 0) {
+                        wp_redirect(home_url('/hosting/?hosting_id=') . $final_website_id);
                         exit;
                     }
                 }
@@ -203,15 +206,44 @@ get_header();
                                         </h5>
                                     </div>
                                     <div class="card-body">
+                                        <?php if (!$website_id): ?>
+                                        <div class="form-group mb-3">
+                                            <label class="fw-bold">Website liên kết</label>
+                                            <select class="js-example-basic-single w-100" name="selected_website_id" id="selected_website_id">
+                                                <option value="">-- Chọn website (không bắt buộc) --</option>
+                                                <?php
+                                                $websites_table = $wpdb->prefix . 'im_websites';
+                                                $users_table = $wpdb->prefix . 'im_users';
+                                                $websites = $wpdb->get_results("
+                                                    SELECT w.id, w.name, w.owner_user_id, u.user_code, u.name as owner_name
+                                                    FROM $websites_table w
+                                                    LEFT JOIN $users_table u ON w.owner_user_id = u.id
+                                                    WHERE w.status = 'ACTIVE'
+                                                    AND (w.hosting_id IS NULL OR w.hosting_id = 0)
+                                                    ORDER BY w.name
+                                                ");
+                                                foreach ($websites as $ws) {
+                                                    $website_label = $ws->name;
+                                                    if (!empty($ws->owner_name)) {
+                                                        $website_label .= ' (' . $ws->owner_name . ')';
+                                                    }
+                                                    echo '<option value="' . $ws->id . '" data-owner-id="' . $ws->owner_user_id . '">' . $website_label . '</option>';
+                                                }
+                                                ?>
+                                            </select>
+                                            <small class="form-text text-muted">Chọn website để tự động điền chủ sở hữu và liên kết</small>
+                                        </div>
+                                        <?php endif; ?>
+
                                         <div class="form-group mb-3">
                                             <label for="hosting_code" class="fw-bold">Mã hosting</label>
                                             <input type="text" class="form-control" id="hosting_code" name="hosting_code" placeholder="HOST001" value="<?php echo isset($_POST['hosting_code']) ? $_POST['hosting_code'] : ''; ?>">
                                             <small class="form-text text-muted">Để trống để tự động tạo mã</small>
                                         </div>
-                                        
+
                                         <div class="form-group mb-3">
                                             <label class="fw-bold">Chủ sở hữu <span class="text-danger">*</span></label>
-                                            <select class="js-example-basic-single w-100" name="owner_user_id" required>
+                                            <select class="js-example-basic-single w-100" name="owner_user_id" id="owner_user_id" required>
                                                 <option value="">-- Chọn chủ sở hữu --</option>
                                                 <?php
                                                 $users_table = $wpdb->prefix . 'im_users';
@@ -240,7 +272,11 @@ get_header();
                                                             if (!empty($product->code)) {
                                                                 $product_display = '[' . $product->code . '] ' . $product->name;
                                                             }
-                                                            echo '<option value="' . $product->id . '" data-code="' . (isset($product->code) ? $product->code : '') . '">' . $product_display . '</option>';
+                                                            // Add price information
+                                                            if (isset($product->register_price) && $product->register_price > 0) {
+                                                                $product_display .= ' - ' . number_format($product->register_price, 0, ',', '.') . ' VNĐ';
+                                                            }
+                                                            echo '<option value="' . $product->id . '" data-code="' . (isset($product->code) ? $product->code : '') . '">' . esc_html($product_display) . '</option>';
                                                         }
                                                         ?>
                                                     </select>
@@ -437,22 +473,23 @@ function calculateExpiryDate() {
             document.getElementById('expiry_date').value = `${day}/${month}/${year}`;
         }
     }
+    // console.log(registrationDate);
 }
 
 // Attach event listeners
 document.addEventListener('DOMContentLoaded', function() {
     const registrationDateField = document.getElementById('registration_date');
     const billingCycleField = document.getElementById('billing_cycle_months');
-    
+
     if (registrationDateField) {
-        registrationDateField.addEventListener('change', calculateExpiryDate);
-        registrationDateField.addEventListener('blur', calculateExpiryDate);
+        // Use jQuery to handle datepicker events properly
+        $('#registration_date').on('change changeDate input blur', calculateExpiryDate);
     }
-    
+
     if (billingCycleField) {
         billingCycleField.addEventListener('change', calculateExpiryDate);
     }
-    
+
     // Set default registration date to today if empty
     if (registrationDateField && !registrationDateField.value) {
         const today = new Date();
@@ -462,6 +499,20 @@ document.addEventListener('DOMContentLoaded', function() {
         registrationDateField.value = `${day}/${month}/${year}`;
         calculateExpiryDate();
     }
+
+    // Auto-fill owner when website is selected
+    $('#selected_website_id').on('change', function() {
+        const selectedOption = $(this).find('option:selected');
+        const ownerId = selectedOption.attr('data-owner-id');
+
+        if (ownerId) {
+            // Set the owner select value using Select2
+            $('[name="owner_user_id"]').val(ownerId).trigger('change');
+        } else {
+            // Clear owner selection if no website is selected
+            $('[name="owner_user_id"]').val('').trigger('change');
+        }
+    });
 });
 
 // Password toggle and billing cycle functionality is now handled by custom.js

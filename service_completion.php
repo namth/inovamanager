@@ -456,7 +456,7 @@ get_header();
                                 <a href="<?php echo home_url('/danh-sach-dich-vu/'); ?>" class="btn btn-light">
                                     <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
                                 </a>
-                                <a href="<?php echo home_url('/thuc-hien-dich-vu/?service_id=' . $service->id); ?>" class="btn btn-outline-primary ms-2">
+                                <a href="<?php echo home_url('/thuc-hien-dich-vu/?service_id=' . $service->id); ?>" class="btn btn-primary ms-2 d-flex align-items-center">
                                     <i class="ph ph-gear me-2"></i>Xem thực hiện
                                 </a>
                                 <button type="button" class="btn btn-outline-success ms-2" onclick="window.print()">

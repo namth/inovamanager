@@ -1,5 +1,21 @@
 /**
  * Custom JavaScript functionality for Inova Manager
+ * 
+ * ============================================
+ * Global Features
+ * ============================================
+ * 
+ * 1. Password Toggle (.toggle-password)
+ *    - Unified handler for all password field toggles
+ *    - Works with all password input fields across the application
+ *    - Button must be inside .input-group with password input
+ *    - HTML Structure:
+ *      <div class="input-group">
+ *          <input type="password" class="form-control" ...>
+ *          <button class="btn btn-secondary toggle-password" type="button">
+ *              <i class="ph ph-eye"></i>
+ *          </button>
+ *      </div>
  */
 jQuery(document).ready(function($) {
     /**
@@ -17,48 +33,36 @@ jQuery(document).ready(function($) {
     });
 
     /**
-     * Enhanced password visibility toggle functionality
-     * Supports multiple toggle button styles and password field configurations
-     * Works with .toggle-password class and specific ID-based toggles
+     * Universal password visibility toggle functionality
+     * Handles all password field toggle buttons across the application
+     * Files using this: addnew_website.php, edit_website.php, addnew_website_simple.php,
+     *                   edit_website_simple.php, addnew_domain.php, edit_domain.php,
+     *                   addnew_hosting.php, edit_hosting.php, detail_website.php,
+     *                   detail_domain.php, detail_hosting.php
      */
-    $(document).on('click', '.toggle-password, #togglePassword', function(e) {
-        // Prevent default behavior and stop event propagation
+    $(document).on('click', '.toggle-password', function(e) {
         e.preventDefault();
         e.stopPropagation();
         
-        var passwordInput, icon;
+        // Find password input - always inside .input-group with button
+        var $inputGroup = $(this).closest('.input-group');
+        var $passwordInput = $inputGroup.find('input[type="password"], input[type="text"]');
+        var $icon = $(this).find('i');
         
-        // Handle specific ID-based toggle (for edit_hosting.php compatibility)
-        if ($(this).attr('id') === 'togglePassword') {
-            passwordInput = $('#management_password');
-            icon = $('#toggleIcon');
-        } else {
-            // Handle generic .toggle-password class
-            passwordInput = $(this).closest('.input-group').find('input');
-            if (passwordInput.length === 0) {
-                // Alternative: look for sibling input
-                passwordInput = $(this).siblings('input');
-            }
-            icon = $(this).find('i');
-        }
-        
-        if (passwordInput.length && icon.length) {
-            // Toggle between password and text type
-            if (passwordInput.attr('type') === 'password') {
-                passwordInput.attr('type', 'text');
-                icon.removeClass('ph-eye').addClass('ph-eye-slash');
+        // Ensure we found the elements
+        if ($passwordInput.length && $icon.length) {
+            // Toggle password visibility
+            if ($passwordInput.attr('type') === 'password') {
+                $passwordInput.attr('type', 'text');
+                $icon.removeClass('ph-eye').addClass('ph-eye-slash');
             } else {
-                passwordInput.attr('type', 'password');
-                icon.removeClass('ph-eye-slash').addClass('ph-eye');
+                $passwordInput.attr('type', 'password');
+                $icon.removeClass('ph-eye-slash').addClass('ph-eye');
             }
         }
+        
+        return false;
     });
-
-    /**
-     * Original toggle password functionality (kept for backwards compatibility)
-     * Note: This is now handled by the enhanced password toggle above
-     */
-    // Removed duplicate code - now handled by enhanced toggle above
 
     /**
      * Update billing cycle based on selected product
@@ -241,63 +245,6 @@ jQuery(document).ready(function($) {
     if ($('#registration_date').val() && $('#registration_period_years').length) {
         updateExpiryDatePreview();
     }
-    
-    /**
-     * Filter domains, hostings, and maintenance packages based on selected owner
-     */
-    $(document).on('change', '#owner_user_id', function() {
-        var ownerId = $(this).val();
-        if (ownerId) {
-            // You can implement AJAX calls here to filter domains, hostings and maintenance
-            // packages based on the selected owner if needed
-            console.log('Owner changed to: ' + ownerId);
-        }
-    });
-
-    /**
-     * Check website status functionality for website forms
-     */
-    $(document).on('click', '#checkWebsiteStatus', function() {
-        var websiteUrl = '';
-        
-        // Try to get domain name from select
-        var domainId = $('#domain_id').val();
-        if (domainId) {
-            var domainText = $('#domain_id option:selected').text();
-            if (domainText && domainText !== '-- Chọn tên miền --') {
-                websiteUrl = domainText;
-            }
-        }
-        
-        // If no domain selected, try to use the website name
-        if (!websiteUrl) {
-            websiteUrl = $('#website_name').val();
-        }
-        
-        if (websiteUrl) {
-            $('#statusResult').html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Đang kiểm tra...');
-            
-            $.ajax({
-                url: AJAX.ajaxurl,
-                type: 'POST',
-                data: {
-                    action: 'checkWebsiteStatus',
-                    url: websiteUrl,
-                    security: $('#check_website_status_nonce').val()
-                },
-                success: function(response) {
-                    // Parse the response
-                    var obj = JSON.parse(response);
-                    $('#statusResult').html('<span class="website-status-dot bg-' + obj.class + '"></span> <span class="badge border-radius-9 btn-inverse-' + obj.class + '">' + obj.message + '</span>');
-                },
-                error: function() {
-                    $('#statusResult').html('<span class="badge bg-danger">Lỗi kết nối</span>');
-                }
-            });
-        } else {
-            $('#statusResult').html('<span class="badge border-radius-9 btn-danger">Vui lòng chọn tên miền hoặc nhập tên website</span>');
-        }
-    });
 
     /**
      * Auto-detect domain type and populate hidden field for domain forms
@@ -325,14 +272,15 @@ jQuery(document).ready(function($) {
                 if (domainName.endsWith(tldName)) {
                     foundMatch = true;
                     productId = product.id;
-                    
-                    // Update price field if it exists
-                    const price = product.base_price;
+
+                    // Update price field if it exists (use register_price for new domain registration)
+                    const registerPrice = product.register_price || 0;
+                    const renewPrice = product.renew_price || 0;
                     if ($('#price').length) {
-                        $('#price').val(price);
+                        $('#price').val(registerPrice);
                     }
-                    
-                    domainInfo = `<span class="text-success">Loại tên miền: <strong>${product.name}</strong> - Giá: ${new Intl.NumberFormat('vi-VN').format(price)} VNĐ</span>`;
+
+                    domainInfo = `<span class="text-success">Loại tên miền: <strong>${product.name}</strong> - Giá đăng ký: ${new Intl.NumberFormat('vi-VN').format(registerPrice)} VNĐ | Giá gia hạn: ${new Intl.NumberFormat('vi-VN').format(renewPrice)} VNĐ</span>`;
                     break;
                 }
             }
@@ -598,4 +546,456 @@ jQuery(document).ready(function($) {
             $(this).closest('form').submit();
         }
     });
-});
+
+    /**
+     * Add to Cart functionality
+     * Handle adding services (domain, hosting, maintenance) to cart
+     */
+    $(document).on('click', '.add-to-cart-btn', function(e) {
+        e.preventDefault();
+
+        var $btn = $(this);
+        var serviceType = $btn.data('service-type');
+        var serviceId = $btn.data('service-id');
+        var originalIcon = $btn.find('i').attr('class');
+
+        // Disable button and show loading
+        $btn.prop('disabled', true);
+        $btn.find('i').attr('class', 'ph ph-circle-notch ph-spin text-info fa-150p');
+
+        $.ajax({
+            url: AJAX.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'add_to_cart',
+                service_type: serviceType,
+                service_id: serviceId,
+                quantity: 1
+            },
+            success: function(response) {
+                var data = JSON.parse(response);
+
+                if (data.status) {
+                    // Show success message
+                    showToast(data.message, 'success');
+
+                    // Update cart count badge
+                    updateCartCount(data.cart_count);
+
+                    // Change icon to checkmark temporarily
+                    $btn.find('i').attr('class', 'ph ph-check-circle text-success fa-150p');
+
+                    // Restore original icon after 2 seconds
+                    setTimeout(function() {
+                        $btn.find('i').attr('class', originalIcon);
+                        $btn.prop('disabled', false);
+                    }, 2000);
+                } else {
+                    showToast(data.message, 'error');
+                    $btn.find('i').attr('class', originalIcon);
+                    $btn.prop('disabled', false);
+                }
+            },
+            error: function() {
+                showToast('Có lỗi xảy ra khi thêm vào giỏ hàng', 'error');
+                $btn.find('i').attr('class', originalIcon);
+                $btn.prop('disabled', false);
+            }
+        });
+    });
+
+    /**
+     * Update cart count badge in header
+     */
+    function updateCartCount(count) {
+        var $cartBadge = $('#cart-count-badge');
+
+        if (count > 0) {
+            if ($cartBadge.length) {
+                $cartBadge.text(count).show();
+            } else {
+                // Create badge if it doesn't exist
+                $('#cart-icon').append('<span class="badge badge-danger rounded-pill position-absolute top-0 start-100 translate-middle" id="cart-count-badge">' + count + '</span>');
+            }
+        } else {
+            $cartBadge.hide();
+        }
+    }
+
+    /**
+     * Show toast notification
+     */
+    function showToast(message, type) {
+        // Create toast element
+        var bgClass = type === 'success' ? 'bg-success' : 'bg-danger';
+        var icon = type === 'success' ? 'ph-check-circle' : 'ph-warning-circle';
+
+        var toast = $('<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">' +
+            '<div class="toast align-items-center text-white ' + bgClass + ' border-0 show" role="alert">' +
+                '<div class="d-flex">' +
+                    '<div class="toast-body">' +
+                        '<i class="ph ' + icon + ' me-2"></i>' + message +
+                    '</div>' +
+                    '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>' +
+                '</div>' +
+            '</div>' +
+        '</div>');
+
+        $('body').append(toast);
+
+        // Auto remove after 3 seconds
+        setTimeout(function() {
+            toast.fadeOut(function() {
+                $(this).remove();
+            });
+        }, 3000);
+    }
+
+    /**
+     * Load cart count on page load
+     */
+    $.ajax({
+        url: AJAX.ajaxurl,
+        type: 'POST',
+        data: {
+            action: 'get_cart_count'
+        },
+        success: function(response) {
+            var data = JSON.parse(response);
+            if (data.status && data.cart_count > 0) {
+                updateCartCount(data.cart_count);
+            }
+        }
+    });
+
+    /**
+     * ========================================
+     * INVOICE PAGE FUNCTIONALITY
+     * ========================================
+     */
+
+    // Check if we're on add_invoice page
+    if ($('#invoice-form').length > 0) {
+
+        /**
+         * Format prices with thousand separators (Vietnamese format: 1.000.000)
+         */
+        function formatPrice(price) {
+            return parseInt(price).toLocaleString('vi-VN');
+        }
+
+        /**
+         * Calculate line total when unit price or quantity changes
+         */
+        $(document).on('input', '.unit-price, .quantity', function() {
+            console.log('=== Invoice: Quantity/Price Changed ===');
+            var $row = $(this).closest('.invoice-item');
+
+            var unitPriceRaw = $row.find('.unit-price').val();
+            var quantityRaw = $row.find('.quantity').val();
+
+            console.log('Unit Price Raw:', unitPriceRaw);
+            console.log('Quantity Raw:', quantityRaw);
+
+            var unitPrice = parseInt(unitPriceRaw.replace(/\./g, '').replace(/,/g, '')) || 0;
+            var quantity = parseInt(quantityRaw) || 0;
+
+            console.log('Unit Price Parsed:', unitPrice);
+            console.log('Quantity Parsed:', quantity);
+
+            var total = unitPrice * quantity;
+            console.log('Total Calculated:', total);
+
+            // Store as plain number for calculation
+            $row.find('.item-total').val(total.toString());
+            console.log('Item Total Set To:', total.toString());
+
+            // Update VAT display for this row
+            var serviceType = $row.find('input[name="service_type[]"]').val();
+            if (serviceType) {
+                var vatRate = getVATRate(serviceType);
+                var vatAmount = calculateVATAmount(total, vatRate);
+
+                var $vatDisplay = $row.find('.item-vat-display');
+                if ($vatDisplay.length > 0) {
+                    if (vatAmount > 0) {
+                        $vatDisplay.html(
+                            '<span class="vat-amount">' + formatPrice(vatAmount) + ' VNĐ</span>' +
+                            '<br><small class="text-muted vat-rate">(' + vatRate.toFixed(1) + '%)</small>'
+                        );
+                    } else {
+                        $vatDisplay.html('<span class="text-muted">-</span>');
+                    }
+                }
+                console.log('VAT Updated - Service Type:', serviceType, 'Rate:', vatRate + '%', 'Amount:', vatAmount);
+            }
+
+            updateInvoiceTotals();
+        });
+
+        /**
+         * Format unit price on blur
+         */
+        $(document).on('blur', '.unit-price', function() {
+            var value = $(this).val().replace(/\./g, '').replace(/,/g, '');
+            if (!isNaN(value) && value !== '') {
+                $(this).val(parseInt(value).toLocaleString('vi-VN'));
+            }
+        });
+
+        /**
+         * Remove invoice item
+         */
+        $(document).on('click', '.remove-item', function() {
+            $(this).closest('.invoice-item').remove();
+            updateInvoiceTotals();
+        });
+
+        /**
+         * Get VAT rate for a service type
+         */
+        function getVATRate(serviceType) {
+            if (typeof AJAX !== 'undefined' && typeof AJAX.vat_rates !== 'undefined') {
+                // Capitalize first letter to match the key format
+                var key = serviceType.charAt(0).toUpperCase() + serviceType.slice(1).toLowerCase();
+                return parseFloat(AJAX.vat_rates[key]) || 0;
+            }
+            return 0;
+        }
+
+        /**
+         * Calculate VAT amount based on item total and VAT rate
+         */
+        function calculateVATAmount(itemTotal, vatRate) {
+            return Math.round(itemTotal * vatRate / 100);
+        }
+
+        /**
+         * Update invoice totals
+         */
+        function updateInvoiceTotals() {
+            console.log('=== Updating Invoice Totals ===');
+            var subTotal = 0;
+            var totalVAT = 0;
+
+            // Sum all item totals and calculate VAT
+            $('.invoice-item').each(function(index) {
+                var $row = $(this);
+                var itemTotal = $row.find('.item-total').val().replace(/\./g, '').replace(/,/g, '');
+                var parsed = parseInt(itemTotal) || 0;
+                console.log('Item ' + index + ' Total:', itemTotal, '-> Parsed:', parsed);
+                subTotal += parsed;
+
+                // Get service type and calculate VAT for this item
+                var serviceType = $row.find('input[name="service_type[]"]').val();
+                if (serviceType) {
+                    var vatRate = getVATRate(serviceType);
+                    var vatAmount = calculateVATAmount(parsed, vatRate);
+                    console.log('Item ' + index + ' Service Type:', serviceType, 'VAT Rate:', vatRate + '%', 'VAT Amount:', vatAmount);
+                    totalVAT += vatAmount;
+                }
+            });
+
+            console.log('SubTotal:', subTotal, 'Total VAT:', totalVAT);
+
+            // Get discount
+            var discountRaw = $('#discount-amount').val() || '0';
+            var discount = parseInt(discountRaw.replace(/\./g, '').replace(/,/g, '')) || 0;
+
+            // Auto-calculate VAT and update the tax field
+            $('#tax-amount').val(totalVAT);
+
+            console.log('Discount:', discount, 'VAT:', totalVAT);
+
+            // Calculate total
+            var total = subTotal - discount + totalVAT;
+            console.log('Total:', total);
+
+            // Update summary display
+            $('#summary-subtotal').text(formatPrice(subTotal) + ' VNĐ');
+            $('#summary-total').text(formatPrice(total) + ' VNĐ');
+
+            // Update hidden inputs for form submission
+            $('#sub-total-input').val(subTotal);
+            $('#total-amount-input').val(total);
+        }
+
+        /**
+         * Update totals when discount changes
+         * Note: VAT is auto-calculated, so we only listen to discount changes
+         */
+        $('#discount-amount').on('input', function() {
+            updateInvoiceTotals();
+        });
+
+        /**
+         * Toggle payment method info
+         */
+        $('input[name="payment_method"]').on('change', function() {
+            if ($(this).val() === 'bank_transfer') {
+                $('#bank-info').removeClass('d-none');
+                $('#qr-info').addClass('d-none');
+            } else {
+                $('#bank-info').addClass('d-none');
+                $('#qr-info').removeClass('d-none');
+            }
+        });
+
+        /**
+         * Initial calculation on page load
+         */
+        updateInvoiceTotals();
+        console.log('Invoice page loaded, initial totals calculated');
+    }
+
+    /**
+     * ===================================================================
+     * DOMAIN RENEWAL - Single Domain (+1 Year)
+     * ===================================================================
+     * File: domain_list.php
+     *
+     * Handle quick renewal for individual domains
+     * - Click renew icon in actions column
+     * - Adds 1 year to current expiry date
+     * - Shows confirmation with old/new dates
+     * - Auto reloads page after success
+     */
+    $(document).on('click', '.renew-domain-btn', function() {
+        const $button = $(this);
+        const domainId = $button.data('domain-id');
+        const domainName = $button.data('domain-name');
+        const expiryDate = $button.data('expiry-date');
+
+        // Confirm renewal
+        if (!confirm(`Bạn có chắc muốn gia hạn tên miền "${domainName}" thêm 1 năm?\n\nNgày hết hạn hiện tại: ${formatDate(expiryDate)}\nNgày hết hạn mới: ${formatDate(addYears(expiryDate, 1))}`)) {
+            return;
+        }
+
+        // Show loading state
+        const originalIcon = $button.find('i').attr('class');
+        $button.prop('disabled', true);
+        $button.find('i').attr('class', 'ph ph-spinner ph-spin text-success btn-icon-prepend fa-150p');
+
+        // Send AJAX request
+        $.ajax({
+            url: AJAX.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'renew_domain_one_year',
+                domain_id: domainId,
+                nonce: $button.closest('table').data('renew-nonce') || ''
+            },
+            success: function(response) {
+                if (response.success) {
+                    // Show success message
+                    alert('✅ Đã gia hạn thành công!\n\n' +
+                          'Tên miền: ' + domainName + '\n' +
+                          'Ngày hết hạn mới: ' + formatDate(response.data.new_expiry_date));
+
+                    // Reload page to show updated data
+                    location.reload();
+                } else {
+                    // Show error message
+                    alert('❌ Lỗi: ' + (response.data.message || 'Không thể gia hạn tên miền'));
+
+                    // Reset button
+                    $button.prop('disabled', false);
+                    $button.find('i').attr('class', originalIcon);
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                console.error('AJAX error:', textStatus, errorThrown);
+                alert('❌ Lỗi kết nối đến server. Vui lòng thử lại.');
+
+                // Reset button
+                $button.prop('disabled', false);
+                $button.find('i').attr('class', originalIcon);
+            }
+        });
+    });
+
+    /**
+     * Helper function to format date (DD/MM/YYYY)
+     * Used by domain renewal functionality
+     */
+    function formatDate(dateString) {
+        const date = new Date(dateString);
+        const day = ('0' + date.getDate()).slice(-2);
+        const month = ('0' + (date.getMonth() + 1)).slice(-2);
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
+    }
+
+    /**
+     * Helper function to add years to a date
+     * Used by domain renewal functionality
+     */
+    function addYears(dateString, years) {
+        const date = new Date(dateString);
+        date.setFullYear(date.getFullYear() + years);
+        return date.toISOString().split('T')[0];
+    }
+
+    /**
+     * ===================================================================
+     * DELETE WEBSITE - User/Admin
+     * ===================================================================
+     * File: website_list.php
+     * 
+     * Handle delete website for user who created it or admin
+     * - Only creator or admin can delete
+     * - Cannot delete if has linked services (domain, hosting, maintenance)
+     */
+    $(document).on('click', '.delete-website-btn', function(e) {
+        e.preventDefault();
+        
+        const $button = $(this);
+        const websiteId = $button.data('website-id');
+        const websiteName = $button.data('website-name');
+        
+        // Confirm deletion
+        if (!confirm(`Bạn có chắc muốn xóa website "${websiteName}"?\n\nNhư lưu ý: Không thể xóa website nếu nó có liên kết với tên miền, hosting hoặc gói bảo trì.`)) {
+            return;
+        }
+        
+        // Show loading state
+        const originalIcon = $button.find('i').attr('class');
+        $button.prop('disabled', true);
+        $button.find('i').attr('class', 'ph ph-spinner ph-spin text-danger btn-icon-prepend fa-150p');
+        
+        // Send AJAX request
+        $.ajax({
+            url: AJAX.ajaxurl,
+            type: 'POST',
+            dataType: 'json',
+            data: {
+                action: 'delete_website_user',
+                website_id: websiteId
+            },
+            success: function(response) {
+                if (response.success) {
+                    // Show success message
+                    alert('✅ Đã xóa website thành công!');
+                    
+                    // Reload page to show updated list
+                    location.reload();
+                } else {
+                    // Show error message
+                    alert('❌ Lỗi: ' + (response.data.message || 'Không thể xóa website'));
+                    
+                    // Reset button
+                    $button.prop('disabled', false);
+                    $button.find('i').attr('class', originalIcon);
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                console.error('AJAX error:', textStatus, errorThrown);
+                alert('❌ Lỗi kết nối đến server. Vui lòng thử lại.');
+                
+                // Reset button
+                $button.prop('disabled', false);
+                $button.find('i').attr('class', originalIcon);
+            }
+        });
+    });
+    });

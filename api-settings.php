@@ -20,10 +20,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $notification = 'API key generated successfully!';
             $notification_type = 'success';
         } elseif ($_POST['action'] === 'revoke_key') {
-            // Revoke API key by setting it to empty
             update_option('bookorder_api_key', '');
             $notification = 'API key has been revoked!';
-            $notification_type = 'warning';
+            $notification_type = 'success';
+        } elseif ($_POST['action'] === 'save_cloudflare_settings') {
+            // Save Cloudflare settings
+            update_option('cloudflare_api_token', sanitize_text_field($_POST['cloudflare_api_token']));
+            update_option('cloudflare_account_id', sanitize_text_field($_POST['cloudflare_account_id']));
+            $notification = 'Cloudflare settings saved successfully!';
+            $notification_type = 'success';
         }
     } else {
         $notification = 'Security check failed!';
@@ -33,6 +38,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // Get current API key
 $current_api_key = get_option('bookorder_api_key', '');
+// Get current Cloudflare settings
+$cloudflare_api_token = get_option('cloudflare_api_token', '');
+$cloudflare_account_id = get_option('cloudflare_account_id', '');
 
 get_header();
 ?>
@@ -67,7 +75,7 @@ get_header();
                                             <label class="form-label fw-bold">Current API Key:</label>
                                             <div class="input-group">
                                                 <input type="text" class="form-control" id="api-key-display" value="<?php echo esc_attr($current_api_key); ?>" readonly>
-                                                <button class="btn btn-outline-secondary" type="button" onclick="copyApiKey()">
+                                                <button class="btn btn-secondary d-flex align-items-center" type="button" onclick="copyApiKey()">
                                                     <i class="ph ph-copy"></i>
                                                 </button>
                                             </div>
@@ -100,53 +108,38 @@ get_header();
                             </div>
                         </div>
 
-                        <div class="col-md-8 col-lg-6 mt-4 mt-lg-0">
+                        <!-- Cloudflare API Settings -->
+                        <div class="col-md-8 col-lg-6 mt-4">
                             <div class="card">
-                                <div class="d-flex card-header btn-secondary align-items-center">
-                                    <h4 class="mt-1 mb-1"><i class="ph ph-book me-2"></i> API Documentation</h4>
+                                <div class="card-header btn-info">
+                                    <h4 class="mb-1 mt-1"><i class="ph ph-cloud-arrow-up me-2"></i> Cloudflare API Settings</h4>
                                 </div>
                                 <div class="card-body">
-                                    <h5>Partner Import API</h5>
-                                    <p>Import a partner with a single POST request.</p>
-                                    
-                                    <div class="mb-3">
-                                        <h6>Endpoint:</h6>
-                                        <code><?php echo esc_url(rest_url('bookorder/v1/import-partner')); ?></code>
-                                    </div>
-                                    
-                                    <div class="mb-3">
-                                        <h6>Method:</h6>
-                                        <code>POST</code>
-                                    </div>
-                                    
-                                    <div class="mb-3">
-                                        <h6>Headers:</h6>
-                                        <pre class="bg-light p-2"><code>X-API-KEY: your_api_key
-Content-Type: application/json</code></pre>
-                                    </div>
-                                    
-                                    <div class="mb-3">
-                                        <h6>Parameters:</h6>
-                                        <pre class="bg-light p-2"><code>{
-  "user_code": "P001",
-  "user_type": "PARTNER",
-  "name": "Partner Name",
-  "email": "partner@example.com",
-  "phone_number": "1234567890",
-  "tax_code": "12345",
-  "address": "Partner Address",
-  "notes": "Additional notes"
-}</code></pre>
-                                    </div>
-                                    
-                                    <div>
-                                        <h6>Required Fields:</h6>
-                                        <ul>
-                                            <li><code>user_code</code> - Unique identifier</li>
-                                            <li><code>user_type</code> - One of: INDIVIDUAL, BUSINESS, PARTNER, SUPPLIER</li>
-                                            <li><code>name</code> - Partner name</li>
-                                        </ul>
-                                    </div>
+                                    <p class="card-text">Enter your Cloudflare API Token and Account ID to enable website import functionality.</p>
+                                    <form method="post">
+                                        <?php wp_nonce_field('api_settings_action', 'api_settings_nonce'); ?>
+                                        <input type="hidden" name="action" value="save_cloudflare_settings">
+
+                                        <div class="mb-3">
+                                            <label for="cloudflare_api_token" class="form-label fw-bold">API Token</label>
+                                            <input type="text" class="form-control" id="cloudflare_api_token" name="cloudflare_api_token" value="<?php echo esc_attr($cloudflare_api_token); ?>" placeholder="Enter your Cloudflare API Token">
+                                            <small class="form-text text-muted">Create a token with "Zone:Read" and "DNS:Read" permissions.</small>
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label for="cloudflare_account_id" class="form-label fw-bold">Account ID</label>
+                                            <input type="text" class="form-control" id="cloudflare_account_id" name="cloudflare_account_id" value="<?php echo esc_attr($cloudflare_account_id); ?>" placeholder="Enter your Cloudflare Account ID">
+                                            <small class="form-text text-muted">You can find this on the main page of your Cloudflare dashboard.</small>
+                                        </div>
+
+                                        <button type="submit" class="btn btn-info">
+                                            <i class="ph ph-floppy-disk"></i> Save Cloudflare Settings
+                                        </button>
+                                        <button type="button" class="btn btn-secondary ms-2" id="test-cloudflare-connection">
+                                            <i class="ph ph-plugs-connected"></i> Test Connection
+                                        </button>
+                                    </form>
+                                    <div id="cloudflare-test-result" class="mt-3"></div>
                                 </div>
                             </div>
                         </div>
@@ -166,7 +159,7 @@ Content-Type: application/json</code></pre>
                                             <label class="fw-bold">Endpoint:</label>
                                             <div class="input-group">
                                                 <input type="text" class="form-control" value="<?php echo esc_url(rest_url('bookorder/v1/update-partner/{id}')); ?>" readonly>
-                                                <button class="btn btn-outline-secondary" type="button" onclick="copyEndpoint(this)">
+                                                <button class="btn btn-secondary d-flex align-items-center" type="button" onclick="copyEndpoint(this)">
                                                     <i class="ph ph-copy"></i>
                                                 </button>
                                             </div>
@@ -210,7 +203,7 @@ Content-Type: application/json</code></pre>
                                             <label class="fw-bold">Endpoint:</label>
                                             <div class="input-group">
                                                 <input type="text" class="form-control" value="<?php echo esc_url(rest_url('bookorder/v1/add-contact')); ?>" readonly>
-                                                <button class="btn btn-outline-secondary" type="button" onclick="copyEndpoint(this)">
+                                                <button class="btn btn-secondary d-flex align-items-center" type="button" onclick="copyEndpoint(this)">
                                                     <i class="ph ph-copy"></i>
                                                 </button>
                                             </div>
@@ -262,7 +255,7 @@ Content-Type: application/json</code></pre>
                                             <label class="fw-bold">Endpoint:</label>
                                             <div class="input-group">
                                                 <input type="text" class="form-control" value="<?php echo esc_url(rest_url('bookorder/v1/search-partners')); ?>" readonly>
-                                                <button class="btn btn-outline-secondary" type="button" onclick="copyEndpoint(this)">
+                                                <button class="btn btn-secondary d-flex align-items-center" type="button" onclick="copyEndpoint(this)">
                                                     <i class="ph ph-copy"></i>
                                                 </button>
                                             </div>
@@ -330,7 +323,7 @@ function copyEndpoint(button) {
     input.select();
     input.setSelectionRange(0, 99999); // For mobile devices
     document.execCommand("copy");
-    
+
     // Show feedback
     var originalBtnContent = button.innerHTML;
     button.innerHTML = '<i class="ph ph-check"></i>';
@@ -338,6 +331,50 @@ function copyEndpoint(button) {
         button.innerHTML = originalBtnContent;
     }, 2000);
 }
+
+// Test Cloudflare Connection
+jQuery(document).ready(function($) {
+    $('#test-cloudflare-connection').on('click', function() {
+        var button = $(this);
+        var resultDiv = $('#cloudflare-test-result');
+        var apiToken = $('#cloudflare_api_token').val();
+        var accountId = $('#cloudflare_account_id').val();
+
+        if (!apiToken || !accountId) {
+            resultDiv.html('<div class="alert alert-warning">Vui lòng nhập API Token và Account ID trước.</div>');
+            return;
+        }
+
+        button.prop('disabled', true).html('<i class="ph ph-spinner ph-spin"></i> Testing...');
+        resultDiv.html('<div class="alert alert-info">Đang kiểm tra kết nối...</div>');
+
+        // Save temporarily to options then test
+        $.ajax({
+            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+            type: 'POST',
+            data: {
+                action: 'test_cloudflare_connection',
+                api_token: apiToken,
+                account_id: accountId,
+                nonce: '<?php echo wp_create_nonce('cloudflare_test_nonce'); ?>'
+            },
+            success: function(response) {
+                button.prop('disabled', false).html('<i class="ph ph-plugs-connected"></i> Test Connection');
+
+                if (response.success) {
+                    resultDiv.html('<div class="alert alert-success"><strong>Kết nối thành công!</strong><br>' + response.data.message + '</div>');
+                } else {
+                    resultDiv.html('<div class="alert alert-danger"><strong>Lỗi kết nối:</strong><br>' + response.data.message + '</div>');
+                }
+            },
+            error: function(jqXHR) {
+                button.prop('disabled', false).html('<i class="ph ph-plugs-connected"></i> Test Connection');
+                console.error('Test error:', jqXHR.responseText);
+                resultDiv.html('<div class="alert alert-danger"><strong>Lỗi:</strong> Không thể kết nối đến server.</div>');
+            }
+        });
+    });
+});
 </script>
 
 <?php get_footer(); ?>

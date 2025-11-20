@@ -40,6 +40,20 @@ function register_bookorder_api_routes() {
         'callback' => 'search_partners_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for getting website ID from domain name
+    register_rest_route('bookorder/v1', '/get-website-id', array(
+        'methods' => 'POST',
+        'callback' => 'get_website_id_api',
+        'permission_callback' => 'validate_api_key'
+    ));
+
+    // Register route for updating website active status
+    register_rest_route('bookorder/v1', '/update-status', array(
+        'methods' => 'POST',
+        'callback' => 'update_website_status_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -577,3 +591,145 @@ function generate_bookorder_api_key() {
 // if (!get_option('bookorder_api_key')) {
 //     generate_bookorder_api_key();
 // }
+
+/**
+ * API callback function for getting website ID from domain name
+ * Used by satellite websites to identify themselves during plugin setup
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function get_website_id_api($request) {
+    global $wpdb;
+
+    // Get domain parameter
+    $domain = isset($request['domain']) ? sanitize_text_field($request['domain']) : '';
+
+    if (empty($domain)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Domain name is required'
+            ),
+            400
+        );
+    }
+
+    // Clean domain (remove http://, https://, www., trailing slash)
+    $domain = preg_replace('#^https?://(www\.)?#', '', $domain);
+    $domain = rtrim($domain, '/');
+
+    // Find website by domain name
+    $domains_table = $wpdb->prefix . 'im_domains';
+    $websites_table = $wpdb->prefix . 'im_websites';
+
+    $query = $wpdb->prepare("
+        SELECT w.id, w.name, d.domain_name
+        FROM {$websites_table} w
+        LEFT JOIN {$domains_table} d ON w.domain_id = d.id
+        WHERE d.domain_name = %s
+        AND (w.status IS NULL OR w.status != 'DELETED')
+        LIMIT 1
+    ", $domain);
+
+    $website = $wpdb->get_row($query);
+
+    if (!$website) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Website not found for domain: ' . $domain
+            ),
+            404
+        );
+    }
+
+    // Log the setup request
+    error_log("Website ID request: Domain {$domain} -> Website ID {$website->id} ({$website->name})");
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'website_id' => intval($website->id),
+            'website_name' => $website->name,
+            'domain' => $website->domain_name
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for updating website active_time
+ * Called by satellite websites every 5 minutes via WP-Cron
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function update_website_status_api($request) {
+    global $wpdb;
+
+    // Get website_id parameter
+    $website_id = isset($request['website_id']) ? intval($request['website_id']) : 0;
+
+    if ($website_id <= 0) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Valid website_id is required'
+            ),
+            400
+        );
+    }
+
+    // Check if website exists
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $website = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, name FROM {$websites_table} WHERE id = %d",
+        $website_id
+    ));
+
+    if (!$website) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Website not found'
+            ),
+            404
+        );
+    }
+
+    // Update active_time to current timestamp
+    $update_result = $wpdb->update(
+        $websites_table,
+        array('active_time' => current_time('mysql')),
+        array('id' => $website_id),
+        array('%s'),
+        array('%d')
+    );
+
+    if ($update_result === false) {
+        error_log("Failed to update active_time for website ID {$website_id}: " . $wpdb->last_error);
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Failed to update status'
+            ),
+            500
+        );
+    }
+
+    // Get updated active_time
+    $updated_website = $wpdb->get_row($wpdb->prepare(
+        "SELECT active_time FROM {$websites_table} WHERE id = %d",
+        $website_id
+    ));
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'active_time' => $updated_website->active_time,
+            'message' => 'Status updated successfully'
+        ),
+        200
+    );
+}

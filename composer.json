@@ -1,0 +1,13 @@
+{
+    "name": "inovamanager/bookorder-theme",
+    "description": "InIn Inova Manager Theme with Dompdf support",
+    "type": "wordpress-theme",
+    "require": {
+        "php": ">=7.4",
+        "dompdf/dompdf": "^3.0"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist"
+    }
+}

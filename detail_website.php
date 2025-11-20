@@ -30,6 +30,12 @@ if (!$website) {
     exit;
 }
 
+// Check if user has permission to view this website
+if (!can_user_view_item($website->owner_user_id, null)) {
+    wp_redirect(home_url('/list-website/'));
+    exit;
+}
+
 // Get owner data
 $owner = null;
 if ($website->owner_user_id) {
@@ -102,6 +108,7 @@ get_header();
                 <div class="justify-content-center">
                     <h3 class="mb-1">Chi tiết website <?php echo esc_html($website->name); ?></h3>
                 </div>
+                <?php if (is_inova_admin()): ?>
                 <div>
                     <div class="d-flex flex-row justify-content-center gap-3">
                         <a href="<?php echo home_url('/sua-website/?website_id=' . $website_id); ?>" class="btn btn-info btn-icon-text d-flex align-items-center">
@@ -112,6 +119,7 @@ get_header();
                         </a>
                     </div>
                 </div>
+                <?php endif; ?>
             </div>
             
             <div class="mt-3">
@@ -218,6 +226,25 @@ get_header();
                                             </tr>
                                             <?php endif; ?>
                                             <tr>
+                                                <th>Địa chỉ IP</th>
+                                                <td>
+                                                    <?php
+                                                        // Prioritize website IP, fallback to hosting IP
+                                                        $display_ip = !empty($website->ip_address) ? $website->ip_address : (!empty($hosting->ip_address) ? $hosting->ip_address : '');
+                                                        if (!empty($display_ip)) {
+                                                            echo '<span class="badge bg-dark">' . esc_html($display_ip) . '</span>';
+                                                            if (!empty($website->ip_address)) {
+                                                                echo ' <small class="text-muted">(IP riêng)</small>';
+                                                            } else {
+                                                                echo ' <small class="text-muted">(IP từ hosting)</small>';
+                                                            }
+                                                        } else {
+                                                            echo '<span class="text-muted">Chưa có thông tin</span>';
+                                                        }
+                                                    ?>
+                                                </td>
+                                            </tr>
+                                            <tr>
                                                 <th>Ngày tạo</th>
                                                 <td><?php echo date('d/m/Y', strtotime($website->created_at)); ?></td>
                                             </tr>
@@ -283,11 +310,13 @@ get_header();
                                                     </div>
                                                     <?php else: ?>
                                                     <p class="text-muted">Website này chưa có tên miền liên kết.</p>
+                                                    <?php if (is_inova_admin()): ?>
                                                     <div class="mt-2">
                                                         <a href="<?php echo home_url('/them-moi-domain/?website_id=' . $website_id); ?>" class="btn btn-sm btn-danger d-flex align-items-center fit-content">
                                                             <i class="ph ph-plus-circle me-1"></i> Thêm tên miền
                                                         </a>
                                                     </div>
+                                                    <?php endif; ?>
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
@@ -332,11 +361,13 @@ get_header();
                                                     </div>
                                                     <?php else: ?>
                                                     <p class="text-muted">Website này chưa có hosting liên kết.</p>
+                                                    <?php if (is_inova_admin()): ?>
                                                     <div class="mt-2">
                                                         <a href="<?php echo home_url('/them-moi-hosting/?website_id=' . $website_id); ?>" class="btn btn-sm btn-danger d-flex align-items-center fit-content">
                                                             <i class="ph ph-plus-circle me-1"></i> Thêm hosting
                                                         </a>
                                                     </div>
+                                                    <?php endif; ?>
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
@@ -404,6 +435,7 @@ get_header();
                                                     </div>
                                                     <?php else: ?>
                                                     <p class="text-muted">Website này chưa được bảo trì thường xuyên, có thể tồn tại rủi ro bảo mật.</p>
+                                                    <?php if (is_inova_admin()): ?>
                                                     <div class="mt-2 d-flex gap-2">
                                                         <a href="<?php echo home_url('/them-goi-bao-tri/?website_id=' . $website_id); ?>" class="btn btn-sm btn-danger d-flex align-items-center fit-content">
                                                             <i class="ph ph-plus-circle me-1"></i> Thêm gói bảo trì
@@ -412,6 +444,7 @@ get_header();
                                                             <i class="ph ph-info me-1"></i> Tìm hiểu thêm
                                                         </a>
                                                     </div>
+                                                    <?php endif; ?>
                                                     <?php endif; ?>
                                                 </div>
                                             </div>

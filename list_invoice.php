@@ -60,23 +60,15 @@ $status_filter = isset($_GET['status']) ? sanitize_text_field($_GET['status']) :
 $date_from = isset($_GET['date_from']) ? sanitize_text_field($_GET['date_from']) : '';
 $date_to = isset($_GET['date_to']) ? sanitize_text_field($_GET['date_to']) : '';
 
-// Build query
-$query = "
-    SELECT 
-        i.*, 
-        u.name AS customer_name,
-        u.user_code
-    FROM 
-        $invoice_table i
-    LEFT JOIN 
-        $users_table u ON i.user_id = u.id
-    WHERE 
-        1=1
-";
+// Build permission filtering
+$permission_where = get_user_permission_where_clause('u', 'id');
+
+// Build WHERE clause separately for reuse in count query
+$where_clause = "WHERE 1=1 {$permission_where}";
 
 // Add search conditions
 if (!empty($search_term)) {
-    $query .= $wpdb->prepare(" AND (i.invoice_code LIKE %s OR u.name LIKE %s OR u.user_code LIKE %s)", 
+    $where_clause .= $wpdb->prepare(" AND (i.invoice_code LIKE %s OR u.name LIKE %s OR u.user_code LIKE %s)", 
         '%' . $wpdb->esc_like($search_term) . '%',
         '%' . $wpdb->esc_like($search_term) . '%',
         '%' . $wpdb->esc_like($search_term) . '%'
@@ -84,7 +76,7 @@ if (!empty($search_term)) {
 }
 
 if (!empty($status_filter)) {
-    $query .= $wpdb->prepare(" AND i.status = %s", $status_filter);
+    $where_clause .= $wpdb->prepare(" AND i.status = %s", $status_filter);
 }
 
 if (!empty($date_from)) {
@@ -92,7 +84,7 @@ if (!empty($date_from)) {
     $date_parts = explode('/', $date_from);
     if (count($date_parts) === 3) {
         $db_date = $date_parts[2] . '-' . $date_parts[1] . '-' . $date_parts[0];
-        $query .= $wpdb->prepare(" AND i.invoice_date >= %s", $db_date);
+        $where_clause .= $wpdb->prepare(" AND i.invoice_date >= %s", $db_date);
     }
 }
 
@@ -101,17 +93,34 @@ if (!empty($date_to)) {
     $date_parts = explode('/', $date_to);
     if (count($date_parts) === 3) {
         $db_date = $date_parts[2] . '-' . $date_parts[1] . '-' . $date_parts[0];
-        $query .= $wpdb->prepare(" AND i.invoice_date <= %s", $db_date);
+        $where_clause .= $wpdb->prepare(" AND i.invoice_date <= %s", $db_date);
     }
 }
 
 // Get total records for pagination
-$count_query = str_replace("SELECT i.*, u.name AS customer_name, u.user_code", "SELECT COUNT(*)", $query);
+$count_query = "
+    SELECT COUNT(*) 
+    FROM $invoice_table i
+    LEFT JOIN $users_table u ON i.user_id = u.id
+    {$where_clause}
+";
 $total_items = $wpdb->get_var($count_query);
 $total_pages = ceil($total_items / $per_page);
 
-// Order and limit
-$query .= " ORDER BY i.created_at DESC LIMIT $offset, $per_page";
+// Build main query
+$query = "
+    SELECT
+        i.*,
+        u.name AS customer_name,
+        u.user_code
+    FROM
+        $invoice_table i
+    LEFT JOIN
+        $users_table u ON i.user_id = u.id
+    {$where_clause}
+    ORDER BY i.created_at DESC 
+    LIMIT $offset, $per_page
+";
 
 // Execute query
 $invoices = $wpdb->get_results($query);
@@ -126,10 +135,12 @@ get_header();
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h4 class="card-title">Quản lý hóa đơn</h4>
+                        <?php if (is_inova_admin()): ?>
                         <a href="<?php echo home_url('/tao-hoa-don/'); ?>" class="btn btn-primary btn-icon-text">
                             <i class="ph ph-plus btn-icon-prepend"></i>
                             <span>Tạo hóa đơn mới</span>
                         </a>
+                        <?php endif; ?>
                     </div>
                     
                     <!-- Search and Filters -->
@@ -138,7 +149,7 @@ get_header();
                             <div class="col-md-3 mb-3">
                                 <div class="input-group">
                                     <input type="text" class="form-control" placeholder="Tìm kiếm hóa đơn..." name="search" value="<?php echo esc_attr($search_term); ?>">
-                                    <button class="btn btn-outline-primary" type="submit">
+                                    <button class="btn btn-primary d-flex align-items-center" type="submit">
                                         <i class="ph ph-magnifying-glass"></i>
                                     </button>
                                 </div>
@@ -176,7 +187,7 @@ get_header();
                             <div class="col-md-3 mb-3">
                                 <div class="d-flex">
                                     <button type="submit" class="btn btn-primary me-2">Lọc</button>
-                                    <a href="<?php echo home_url('/danh-sach-hoa-don/'); ?>" class="btn btn-outline-secondary">Đặt lại</a>
+                                    <a href="<?php echo home_url('/danh-sach-hoa-don/'); ?>" class="btn btn-secondary d-flex align-items-center">Đặt lại</a>
                                 </div>
                             </div>
                         </div>
@@ -243,35 +254,39 @@ get_header();
                                         </td>
                                         <td>
                                             <div class="d-flex align-items-center">
-                                                <?php if ($invoice->status == 'draft'): ?>
-                                                <a href="<?php echo home_url('/tao-hoa-don/?invoice_id=' . $invoice->id); ?>" class="nav-link text-warning me-2" title="Chỉnh sửa">
-                                                    <i class="ph ph-pencil-simple fa-150p"></i>
-                                                </a>
-                                                
-                                                <a href="<?php echo home_url('/tao-hoa-don/?invoice_id=' . $invoice->id . '&finalize=1'); ?>" class="nav-link text-success me-2" title="Hoàn tất hóa đơn">
-                                                    <i class="ph ph-check-circle fa-150p"></i>
-                                                </a>
+                                                <?php if (is_inova_admin()): ?>
+                                                    <?php if ($invoice->status == 'draft'): ?>
+                                                    <a href="<?php echo home_url('/tao-hoa-don/?invoice_id=' . $invoice->id); ?>" class="nav-link text-warning me-2" title="Chỉnh sửa">
+                                                        <i class="ph ph-pencil-simple fa-150p"></i>
+                                                    </a>
+
+                                                    <a href="<?php echo home_url('/tao-hoa-don/?invoice_id=' . $invoice->id . '&finalize=1'); ?>" class="nav-link text-success me-2" title="Hoàn tất hóa đơn">
+                                                        <i class="ph ph-check-circle fa-150p"></i>
+                                                    </a>
+                                                    <?php endif; ?>
+
+                                                    <?php if (in_array($invoice->status, ['pending', 'draft'])): ?>
+                                                    <a href="<?php echo home_url('/chi-tiet-hoa-don/?invoice_id=' . $invoice->id . '&action=payment'); ?>" class="nav-link text-success me-2" title="Đánh dấu đã thanh toán">
+                                                        <i class="ph ph-money fa-150p"></i>
+                                                    </a>
+                                                    <?php endif; ?>
+
+                                                    <?php if ($invoice->status == 'pending_completion'): ?>
+                                                    <span class="nav-link text-muted me-2" title="Đang chờ hoàn thành dịch vụ">
+                                                        <i class="ph ph-clock fa-150p"></i>
+                                                    </span>
+                                                    <?php endif; ?>
                                                 <?php endif; ?>
-                                                
-                                                <?php if (in_array($invoice->status, ['pending', 'draft'])): ?>
-                                                <a href="<?php echo home_url('/chi-tiet-hoa-don/?invoice_id=' . $invoice->id . '&action=payment'); ?>" class="nav-link text-success me-2" title="Đánh dấu đã thanh toán">
-                                                    <i class="ph ph-money fa-150p"></i>
-                                                </a>
-                                                <?php endif; ?>
-                                                
-                                                <?php if ($invoice->status == 'pending_completion'): ?>
-                                                <span class="nav-link text-muted me-2" title="Đang chờ hoàn thành dịch vụ">
-                                                    <i class="ph ph-clock fa-150p"></i>
-                                                </span>
-                                                <?php endif; ?>
-                                                
+
                                                 <a href="<?php echo home_url('/print-invoice/?invoice_id=' . $invoice->id); ?>" class="nav-link text-info me-2" title="In hóa đơn" target="_blank">
                                                     <i class="ph ph-printer fa-150p"></i>
                                                 </a>
-                                                
+
+                                                <?php if (is_inova_admin()): ?>
                                                 <a href="#" class="nav-link text-danger delete-invoice" title="Xóa hóa đơn" data-invoice-id="<?php echo $invoice->id; ?>" data-invoice-code="<?php echo $invoice->invoice_code; ?>">
                                                     <i class="ph ph-trash fa-150p"></i>
                                                 </a>
+                                                <?php endif; ?>
                                             </div>
                                         </td>
                                     </tr>
@@ -292,7 +307,7 @@ get_header();
                                 <ul class="pagination">
                                     <?php if ($current_page > 1): ?>
                                     <li class="page-item">
-                                        <a class="page-link" href="<?php echo add_query_arg('paged', $current_page - 1); ?>" aria-label="Previous">
+                                        <a class="page-link" href="<?php echo add_query_arg('paged', $current_page - 1, $_SERVER['REQUEST_URI']); ?>" aria-label="Previous">
                                             <span aria-hidden="true">&laquo;</span>
                                         </a>
                                     </li>
@@ -305,7 +320,7 @@ get_header();
                                     for ($i = $start_page; $i <= $end_page; $i++):
                                     ?>
                                     <li class="page-item <?php echo $i == $current_page ? 'active' : ''; ?>">
-                                        <a class="page-link" href="<?php echo add_query_arg('paged', $i); ?>">
+                                        <a class="page-link" href="<?php echo add_query_arg('paged', $i, $_SERVER['REQUEST_URI']); ?>">
                                             <?php echo $i; ?>
                                         </a>
                                     </li>
@@ -313,7 +328,7 @@ get_header();
                                     
                                     <?php if ($current_page < $total_pages): ?>
                                     <li class="page-item">
-                                        <a class="page-link" href="<?php echo add_query_arg('paged', $current_page + 1); ?>" aria-label="Next">
+                                        <a class="page-link" href="<?php echo add_query_arg('paged', $current_page + 1, $_SERVER['REQUEST_URI']); ?>" aria-label="Next">
                                             <span aria-hidden="true">&raquo;</span>
                                         </a>
                                     </li>

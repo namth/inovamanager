@@ -25,6 +25,12 @@ if (!$maintenance) {
     exit;
 }
 
+// Check if user has permission to view this maintenance package
+if (!can_user_view_item($maintenance->owner_user_id, $maintenance->partner_id)) {
+    wp_redirect(home_url('/danh-sach-bao-tri/'));
+    exit;
+}
+
 // Get user data
 $users_table = $wpdb->prefix . 'im_users';
 $user = $wpdb->get_row($wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $maintenance->owner_user_id));
@@ -80,6 +86,7 @@ get_header();
                 <div class="justify-content-center">
                     <h3 class="mb-1">Chi tiết gói bảo trì <?php echo !empty($maintenance->order_code) ? $maintenance->order_code : 'MAINT-' . $maintenance->id; ?></h3>
                 </div>
+                <?php if (is_inova_admin()): ?>
                 <div>
                     <div class="d-flex flex-row justify-content-center gap-3">
                         <a href="<?php echo home_url('/sua-goi-bao-tri/?maintenance_id=' . $maintenance_id); ?>" class="btn btn-info btn-icon-text d-flex align-items-center">
@@ -90,6 +97,7 @@ get_header();
                         </a>
                     </div>
                 </div>
+                <?php endif; ?>
             </div>
             
             <div class="mt-3">
@@ -370,7 +378,7 @@ get_header();
                                         <i class="ph ph-globe me-2 text-success" style="font-size: 20px;"></i>
                                         <span class="small">Các Website đang được bảo trì</span>
                                     </h5>
-                                    <a href="<?php echo home_url('/them-moi-website/?maintenance_id=' . $maintenance_id); ?>" class="btn btn-sm btn-success" title="Thêm website mới">
+                                    <a href="<?php echo home_url('/addnew-website/?maintenance_id=' . $maintenance_id); ?>" class="btn btn-sm btn-success" title="Thêm website mới">
                                         <i class="ph ph-plus"></i>
                                     </a>
                                 </div>
@@ -409,7 +417,7 @@ get_header();
                                 <div class="alert alert-light text-center py-3">
                                     <i class="ph ph-globe-slash mb-1" style="font-size: 24px;"></i>
                                     <p class="small mb-2">Chưa có website nào</p>
-                                    <a href="<?php echo home_url('/them-moi-website/?maintenance_id=' . $maintenance_id); ?>" class="btn btn-sm btn-success">
+                                    <a href="<?php echo home_url('/addnew-website/?maintenance_id=' . $maintenance_id); ?>" class="btn btn-sm btn-success">
                                         <i class="ph ph-plus-circle me-1"></i> Thêm mới
                                     </a>
                                 </div>

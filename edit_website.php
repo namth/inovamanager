@@ -14,6 +14,16 @@ $products_table     = $wpdb->prefix . 'im_product_catalog';
 $current_user_id = get_current_user_id();
 $website_id = isset($_GET['website_id']) ? intval($_GET['website_id']) : 0;
 
+// Store referrer URL for redirect after submit
+$referrer_url = isset($_GET['referrer']) ? esc_url_raw($_GET['referrer']) : '';
+if (empty($referrer_url) && isset($_SERVER['HTTP_REFERER'])) {
+    $referrer_url = esc_url_raw($_SERVER['HTTP_REFERER']);
+}
+// Default to list-website if no referrer
+if (empty($referrer_url)) {
+    $referrer_url = home_url('/list-website/');
+}
+
 // Redirect if website ID not provided
 if (empty($website_id)) {
     wp_redirect(home_url('/list-website/'));
@@ -62,6 +72,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $admin_url = esc_url_raw($_POST['admin_url']);
         $admin_username = sanitize_text_field($_POST['admin_username']);
         $admin_password = sanitize_text_field($_POST['admin_password']);
+        $ip_address = sanitize_text_field($_POST['ip_address']);
         $notes = sanitize_textarea_field($_POST['notes']);
         
         // Validate required fields
@@ -74,17 +85,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'maintenance_package_id' => $maintenance_package_id,
                 'admin_url' => $admin_url,
                 'admin_username' => $admin_username,
+                'ip_address' => $ip_address,
                 'notes' => $notes,
                 'updated_at' => current_time('mysql')
             );
-            
+
             // Only update password if a new one was provided
             if (!empty($admin_password)) {
                 $data['admin_password'] = $admin_password;
             }
-            
+
             $format = array(
-                '%s', '%d', '%d', '%d', '%d', '%s', '%s', '%s', '%s'
+                '%s', '%d', '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%s'
             );
             
             $result = $wpdb->update(
@@ -107,7 +119,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         array('%d')
                     );
                 }
-                
+
                 // Link new domain if selected
                 if (!empty($domain_id)) {
                     $wpdb->update(
@@ -118,9 +130,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         array('%d')
                     );
                 }
-                
-                // Redirect back to website list after successful update
-                wp_redirect(home_url('/list-website/'));
+
+                // Redirect back to the referrer page after successful update
+                $redirect_url = !empty($_POST['referrer_url']) ? esc_url_raw($_POST['referrer_url']) : home_url('/list-website/');
+                wp_redirect($redirect_url);
                 exit;
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Đã có lỗi xảy ra khi cập nhật website. Vui lòng thử lại.</div>';
@@ -138,7 +151,7 @@ get_header();
         <div class="col-lg-12" id="relative">
             <div class="d-flex justify-content-between align-items-center mb-3 flex-column">
                 <!-- Add back button in the left side -->
-                <a href="<?php echo home_url('/list-website/'); ?>" class="abs-top-left nav-link">
+                <a href="<?php echo esc_url($referrer_url); ?>" class="abs-top-left nav-link">
                     <i class="ph ph-arrow-bend-up-left btn-icon-prepend fa-150p"></i>
                 </a>
                 <div class="justify-content-center">
@@ -189,13 +202,24 @@ get_header();
                                             <select class="js-example-basic-single w-100" name="domain_id" id="domain_id">
                                                 <option value="">-- Chọn tên miền --</option>
                                                 <?php
-                                                // Get domains that are either unassigned or assigned to this website
-                                                $domains = $wpdb->get_results("SELECT * FROM $domains_table ORDER BY domain_name ASC");
-                                                
+                                                // Get unique domains with one linked website name (if any), filter by owner
+                                                $domains = $wpdb->get_results($wpdb->prepare("
+                                                    SELECT d.*,
+                                                           (SELECT w2.name FROM $websites_table w2 WHERE w2.domain_id = d.id AND w2.id != %d LIMIT 1) AS linked_website_name
+                                                    FROM $domains_table d
+                                                    WHERE d.owner_user_id = %d
+                                                    ORDER BY d.domain_name ASC
+                                                ", $website_id, $website->owner_user_id));
+
                                                 foreach ($domains as $domain) {
                                                     $selected = ($domain->id == $website->domain_id) ? 'selected' : '';
-                                                    $domain_code = !empty($domain->order_code) ? $domain->order_code : 'DOM-' . $domain->id;
-                                                    echo '<option value="' . $domain->id . '" ' . $selected . '>' . esc_html($domain_code . ' - ' . $domain->domain_name) . '</option>';
+
+                                                    $display_text = $domain->domain_name;
+                                                    if (!empty($domain->linked_website_name)) {
+                                                        $display_text .= ' (Đã liên kết: ' . $domain->linked_website_name . ')';
+                                                    }
+
+                                                    echo '<option value="' . $domain->id . '" ' . $selected . '>' . esc_html($display_text) . '</option>';
                                                 }
                                                 ?>
                                             </select>
@@ -206,25 +230,29 @@ get_header();
                                             <select class="js-example-basic-single w-100" name="hosting_id" id="hosting_id">
                                                 <option value="">-- Chọn hosting --</option>
                                                 <?php
-                                                // Get hostings that are either unassigned or assigned to this website
-                                                $hostings = $wpdb->get_results($wpdb->prepare(
-                                                    "SELECT * FROM $hostings_table WHERE id NOT IN 
-                                                    (SELECT hosting_id FROM $websites_table WHERE hosting_id IS NOT NULL AND id != %d) OR id = %d",
-                                                    $website_id, $website->hosting_id
-                                                ));
-                                                
+                                                // Get unique hostings with one linked website name (if any), filter by owner
+                                                $hostings = $wpdb->get_results($wpdb->prepare("
+                                                    SELECT h.*,
+                                                           pc.name AS product_name,
+                                                           (SELECT w2.name FROM $websites_table w2 WHERE w2.hosting_id = h.id AND w2.id != %d LIMIT 1) AS linked_website_name
+                                                    FROM $hostings_table h
+                                                    LEFT JOIN $products_table pc ON h.product_catalog_id = pc.id
+                                                    WHERE h.owner_user_id = %d
+                                                    ORDER BY h.hosting_code
+                                                ", $website_id, $website->owner_user_id));
+
                                                 foreach ($hostings as $hosting) {
-                                                    // get product_catalog_id from hosting, then get product name
-                                                    $product_catalog = $wpdb->get_row($wpdb->prepare(
-                                                        "SELECT * FROM $products_table WHERE id = %d", $hosting->product_catalog_id
-                                                    ));
-                                                    
-                                                    $product_name = $product_catalog ? $product_catalog->name : 'Unknown Product';
+                                                    $product_name = $hosting->product_name ?: 'Unknown Product';
                                                     $hosting_code = !empty($hosting->hosting_code) ? $hosting->hosting_code : 'HOST-' . $hosting->id;
-                                                    
+
+                                                    $display_text = $hosting_code . ' - ' . $product_name;
+                                                    if (!empty($hosting->linked_website_name)) {
+                                                        $display_text .= ' (Đã liên kết: ' . $hosting->linked_website_name . ')';
+                                                    }
+
                                                     $selected = ($hosting->id == $website->hosting_id) ? 'selected' : '';
-                                                    echo '<option value="' . $hosting->id . '" ' . $selected . '>' . 
-                                                         esc_html($hosting_code . ' - ' . $product_name) . '</option>';
+                                                    echo '<option value="' . $hosting->id . '" ' . $selected . '>' .
+                                                         esc_html($display_text) . '</option>';
                                                 }
                                                 ?>
                                             </select>
@@ -235,24 +263,25 @@ get_header();
                                             <select class="js-example-basic-single w-100" name="maintenance_package_id" id="maintenance_package_id">
                                                 <option value="">-- Chọn gói bảo trì --</option>
                                                 <?php
-                                                // Get maintenance packages that are either unassigned or assigned to this website
-                                                $maintenance_packages = $wpdb->get_results($wpdb->prepare(
-                                                    "SELECT * FROM $maintenance_table WHERE id NOT IN 
-                                                    (SELECT maintenance_package_id FROM $websites_table WHERE maintenance_package_id IS NOT NULL AND id != %d) OR id = %d",
-                                                    $website_id, $website->maintenance_package_id
-                                                ));
+                                                // Get unique maintenance packages with one linked website name (if any), filter by owner
+                                                $maintenance_packages = $wpdb->get_results($wpdb->prepare("
+                                                    SELECT m.*,
+                                                           (SELECT w2.name FROM $websites_table w2 WHERE w2.maintenance_package_id = m.id AND w2.id != %d LIMIT 1) AS linked_website_name
+                                                    FROM $maintenance_table m
+                                                    WHERE m.owner_user_id = %d
+                                                    ORDER BY m.order_code
+                                                ", $website_id, $website->owner_user_id));
 
                                                 foreach ($maintenance_packages as $package) {
-                                                    // get product_catalog_id from maintenance_package, then get product name
-                                                    $product_catalog = $wpdb->get_row($wpdb->prepare(
-                                                        "SELECT * FROM $products_table WHERE id = %d", $package->product_catalog_id
-                                                    ));
-
-                                                    $product_name = $product_catalog ? $product_catalog->name : 'Unknown Product';
                                                     $display_name = !empty($package->order_code) ? $package->order_code : 'MAINT-' . $package->id;
 
+                                                    $display_text = $display_name . ' - Gói bảo trì website';
+                                                    if (!empty($package->linked_website_name)) {
+                                                        $display_text .= ' (Đã liên kết: ' . $package->linked_website_name . ')';
+                                                    }
+
                                                     $selected = ($package->id == $website->maintenance_package_id) ? 'selected' : '';
-                                                    echo '<option value="' . $package->id . '" ' . $selected . '>' . esc_html($display_name . ' - Gói bảo trì website') . '</option>';
+                                                    echo '<option value="' . $package->id . '" ' . $selected . '>' . esc_html($display_text) . '</option>';
                                                 }
                                                 ?>
                                             </select>
@@ -299,7 +328,7 @@ get_header();
                                         <div class="form-group mb-3">
                                             <label for="admin_password" class="fw-bold">Mật khẩu quản trị</label>
                                             <div class="input-group">
-                                                <input type="password" class="form-control" id="admin_password" name="admin_password" 
+                                                <input type="password" class="form-control" id="admin_password" name="admin_password"
                                                       placeholder="Để trống nếu không muốn thay đổi">
                                                 <button class="btn btn-secondary toggle-password" type="button">
                                                     <i class="ph ph-eye"></i>
@@ -308,35 +337,28 @@ get_header();
                                             <small class="form-text text-muted">Để trống nếu bạn không muốn thay đổi mật khẩu.</small>
                                         </div>
 
-                                        <hr class="my-4">
-
                                         <div class="form-group mb-3">
-                                            <label class="fw-bold">Kiểm tra trạng thái website</label>
-                                            <div class="d-flex align-items-center mt-2">
-                                                <button type="button" id="checkWebsiteStatus" class="btn btn-info btn-icon-text me-2 d-flex align-items-center border-radius-9">
-                                                    <i class="ph ph-activity btn-icon-prepend fa-150p"></i>
-                                                    <span>Kiểm tra hoạt động</span>
-                                                </button>
-                                                <span id="statusResult" class="ms-3"></span>
-                                            </div>
-                                            <div id="statusDetails" class="mt-2"></div>
+                                            <label for="ip_address" class="fw-bold">Địa chỉ IP</label>
+                                            <input type="text" class="form-control" id="ip_address" name="ip_address"
+                                                  placeholder="Nhập địa chỉ IP" value="<?php echo esc_attr($website->ip_address); ?>">
+                                            <small class="form-text text-muted">Địa chỉ IP gốc của website (không qua Cloudflare)</small>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        
+
                         <?php
                         wp_nonce_field('edit_website', 'edit_website_field');
                         ?>
-                        <input type="hidden" id="check_website_status_nonce" value="<?php echo wp_create_nonce('check_website_status_nonce'); ?>">
+                        <input type="hidden" name="referrer_url" value="<?php echo esc_attr($referrer_url); ?>">
                         <div class="form-group d-flex justify-content-center mt-3">
                             <button type="submit"
                                 class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
                                 <i class="ph ph-floppy-disk btn-icon-prepend fa-150p"></i>
                                 <span class="fw-bold">Cập nhật website</span>
                             </button>
-                            <a href="<?php echo home_url('/list-website/'); ?>" class="btn btn-light btn-icon-text ms-2 d-flex align-items-center border-radius-9">
+                            <a href="<?php echo esc_url($referrer_url); ?>" class="btn btn-light btn-icon-text ms-2 d-flex align-items-center border-radius-9">
                                 <i class="ph ph-x btn-icon-prepend fa-150p"></i>
                                 <span class="fw-bold">Hủy</span>
                             </a>

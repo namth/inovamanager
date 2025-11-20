@@ -8,12 +8,34 @@ $websites_table = $wpdb->prefix . 'im_websites';
 $domains_table = $wpdb->prefix . 'im_domains';
 $hostings_table = $wpdb->prefix . 'im_hostings';
 $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+$users_table = $wpdb->prefix . 'im_users';
 
-// Count total items
-$total_websites = $wpdb->get_var("SELECT COUNT(*) FROM $websites_table");
-$total_domains = $wpdb->get_var("SELECT COUNT(*) FROM $domains_table");
-$total_hostings = $wpdb->get_var("SELECT COUNT(*) FROM $hostings_table");
-$total_maintenance = $wpdb->get_var("SELECT COUNT(*) FROM $maintenance_table");
+// Get permission WHERE clauses
+$website_permission = get_website_permission_where_clause('w');
+$domain_permission = get_user_permission_where_clause('d', 'owner_user_id');
+$hosting_permission = get_user_permission_where_clause('h', 'owner_user_id', 'partner_id');
+$maintenance_permission = get_user_permission_where_clause('m', 'owner_user_id', 'partner_id');
+
+// Count total items with permission filtering
+$total_websites = $wpdb->get_var("SELECT COUNT(*) FROM $websites_table w WHERE 1=1 {$website_permission}");
+
+$total_domains = $wpdb->get_var("
+    SELECT COUNT(*)
+    FROM $domains_table d
+    WHERE 1=1 {$domain_permission}
+");
+
+$total_hostings = $wpdb->get_var("
+    SELECT COUNT(*)
+    FROM $hostings_table h
+    WHERE 1=1 {$hosting_permission}
+");
+
+$total_maintenance = $wpdb->get_var("
+    SELECT COUNT(*)
+    FROM $maintenance_table m
+    WHERE 1=1 {$maintenance_permission}
+");
 
 // Current date
 $current_date = date('Y-m-d');
@@ -22,35 +44,38 @@ $one_month_ago = date('Y-m-d', strtotime('-1 month'));
 // Date 1 month from now
 $one_month_later = date('Y-m-d', strtotime('+1 month'));
 
-// Get domains expiring within 1 month (9 closest to expiry)
+// Get domains expiring within 1 month (9 closest to expiry) with permission filtering
 $soon_expiring_domains = $wpdb->get_results("
-    SELECT d.*, u.name AS owner_name, u.user_code 
+    SELECT d.*, u.name AS owner_name, u.user_code
     FROM $domains_table d
-    LEFT JOIN {$wpdb->prefix}im_users u ON d.owner_user_id = u.id
+    LEFT JOIN $users_table u ON d.owner_user_id = u.id
     WHERE d.expiry_date BETWEEN '$one_month_ago' AND '$one_month_later'
-    ORDER BY d.expiry_date ASC 
+    {$domain_permission}
+    ORDER BY d.expiry_date ASC
     LIMIT 9
 ");
 
-// Get hostings expiring within 1 month (9 closest to expiry)
+// Get hostings expiring within 1 month (9 closest to expiry) with permission filtering
 $soon_expiring_hostings = $wpdb->get_results("
     SELECT h.*, u.name AS owner_name, u.user_code, p.name AS product_name
     FROM $hostings_table h
-    LEFT JOIN {$wpdb->prefix}im_users u ON h.owner_user_id = u.id
+    LEFT JOIN $users_table u ON h.owner_user_id = u.id
     LEFT JOIN {$wpdb->prefix}im_product_catalog p ON h.product_catalog_id = p.id
     WHERE h.expiry_date BETWEEN '$one_month_ago' AND '$one_month_later'
-    ORDER BY h.expiry_date ASC 
+    {$hosting_permission}
+    ORDER BY h.expiry_date ASC
     LIMIT 9
 ");
 
-// Get maintenance packages expiring within 1 month (9 closest to expiry)
+// Get maintenance packages expiring within 1 month (9 closest to expiry) with permission filtering
 $soon_expiring_maintenance = $wpdb->get_results("
     SELECT m.*, u.name AS owner_name, u.user_code, p.name AS package_name
     FROM $maintenance_table m
-    LEFT JOIN {$wpdb->prefix}im_users u ON m.owner_user_id = u.id
+    LEFT JOIN $users_table u ON m.owner_user_id = u.id
     LEFT JOIN {$wpdb->prefix}im_product_catalog p ON m.product_catalog_id = p.id
     WHERE m.expiry_date BETWEEN '$one_month_ago' AND '$one_month_later'
-    ORDER BY m.expiry_date ASC 
+    {$maintenance_permission}
+    ORDER BY m.expiry_date ASC
     LIMIT 9
 ");
 

@@ -53,6 +53,15 @@ $current_user = wp_get_current_user();
               <input type="search" class="form-control" placeholder="Search Here" title="Search here">
             </form>
           </li> -->
+
+          <!-- Cart Icon -->
+          <li class="nav-item me-3">
+            <a class="nav-link position-relative" id="cart-icon" href="<?php echo home_url('/gio-hang/'); ?>" title="Giỏ hàng">
+              <i class="ph ph-shopping-cart" style="font-size: 24px;"></i>
+              <span class="badge bg-danger rounded-pill position-absolute top-0 start-100 translate-middle" id="cart-count-badge" style="display: none; font-size: 10px;">0</span>
+            </a>
+          </li>
+
           <li class="nav-item dropdown d-none d-lg-block user-dropdown">
             <a class="nav-link" id="UserDropdown" href="#" data-bs-toggle="dropdown" aria-expanded="false">
               <img class="img-xs rounded-circle"

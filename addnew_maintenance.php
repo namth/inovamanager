@@ -12,6 +12,16 @@ $user_id = $_GET['user_id'] ?? 0;
 // Get website ID from URL if provided
 $website_id = $_GET['website_id'] ?? 0;
 
+// Store referrer URL for redirect after submit
+$referrer_url = isset($_GET['referrer']) ? esc_url_raw($_GET['referrer']) : '';
+if (empty($referrer_url) && isset($_SERVER['HTTP_REFERER'])) {
+    $referrer_url = esc_url_raw($_SERVER['HTTP_REFERER']);
+}
+// Default to maintenance list if no referrer
+if (empty($referrer_url)) {
+    $referrer_url = home_url('/danh-sach-bao-tri/');
+}
+
 // If user ID is provided, get user data
 if ($user_id) {
     $users_table = $wpdb->prefix . 'im_users';
@@ -47,6 +57,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $owner_user_id = intval($_POST['owner_user_id']);
         $order_code = sanitize_text_field($_POST['order_code']);
         $monthly_fee = intval($_POST['monthly_fee']);
+        $selected_website_id = !empty($_POST['selected_website_id']) ? intval($_POST['selected_website_id']) : 0;
 
         // Convert date formats from DD/MM/YYYY to YYYY-MM-DD
         $renew_date = !empty($_POST['renew_date']) ? 
@@ -107,32 +118,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             );
 
             $maintenance_id = $wpdb->insert_id;
-            
+
             if ($maintenance_id) {
-                // Update website's maintenance_package_id if website_id was provided
-                if ($website_id > 0) {
+                // Update website's maintenance_package_id if website_id was provided or selected
+                $final_website_id = $website_id > 0 ? $website_id : $selected_website_id;
+                if ($final_website_id > 0) {
                     $websites_table = $wpdb->prefix . 'im_websites';
                     $wpdb->update(
                         $websites_table,
                         array('maintenance_package_id' => $maintenance_id),
-                        array('id' => $website_id),
+                        array('id' => $final_website_id),
                         array('%d'),
                         array('%d')
                     );
-                    
-                    // After updating, redirect to the website detail page if it exists
-                    if (isset($website)) {
-                        wp_redirect(home_url('/edit-website/?website_id=') . $website_id);
-                        exit;
-                    }
                 }
-                
-                // If not redirected above, redirect to maintenance list or user detail page
-                if ($user_id) {
-                    wp_redirect(home_url('/user-detail/?user_id=') . $user_id);
-                } else {
-                    wp_redirect(home_url('/danh-sach-bao-tri/'));
-                }
+
+                // Redirect back to the referrer page after successful creation
+                $redirect_url = !empty($_POST['referrer_url']) ? esc_url_raw($_POST['referrer_url']) : home_url('/danh-sach-bao-tri/');
+                wp_redirect($redirect_url);
                 exit;
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Không thể thêm mới gói bảo trì. Vui lòng thử lại.</div>';
@@ -153,7 +156,7 @@ print_r($wpdb->last_error); // For debugging, remove in production
         <div class="col-lg-12" id="relative">
             <div class="d-flex justify-content-between align-items-center mb-3 flex-column">
                 <!-- Add back button in the left side -->
-                <a href="<?php echo $user_id ? home_url('/user-detail/?user_id=') . $user_id : home_url('/danh-sach-bao-tri/'); ?>" class="abs-top-left nav-link">
+                <a href="<?php echo esc_url($referrer_url); ?>" class="abs-top-left nav-link">
                     <i class="ph ph-arrow-bend-up-left btn-icon-prepend fa-150p"></i>
                 </a>
                 <div class="justify-content-center">
@@ -233,10 +236,39 @@ print_r($wpdb->last_error); // For debugging, remove in production
                                         </h5>
                                     </div>
                                     <div class="card-body">
+                                        <?php if (!$website_id): ?>
+                                        <div class="form-group mb-3">
+                                            <label class="fw-bold">Website liên kết</label>
+                                            <select class="js-example-basic-single w-100" name="selected_website_id" id="selected_website_id">
+                                                <option value="">-- Chọn website (không bắt buộc) --</option>
+                                                <?php
+                                                $websites_table = $wpdb->prefix . 'im_websites';
+                                                $users_table = $wpdb->prefix . 'im_users';
+                                                $websites = $wpdb->get_results("
+                                                    SELECT w.id, w.name, w.owner_user_id, u.user_code, u.name as owner_name
+                                                    FROM $websites_table w
+                                                    LEFT JOIN $users_table u ON w.owner_user_id = u.id
+                                                    WHERE w.status = 'ACTIVE'
+                                                    AND (w.maintenance_package_id IS NULL OR w.maintenance_package_id = 0)
+                                                    ORDER BY w.name
+                                                ");
+                                                foreach ($websites as $ws) {
+                                                    $website_label = $ws->name;
+                                                    if (!empty($ws->owner_name)) {
+                                                        $website_label .= ' (' . $ws->owner_name . ')';
+                                                    }
+                                                    echo '<option value="' . $ws->id . '" data-owner-id="' . $ws->owner_user_id . '">' . $website_label . '</option>';
+                                                }
+                                                ?>
+                                            </select>
+                                            <small class="form-text text-muted">Chọn website để tự động điền chủ sở hữu và liên kết</small>
+                                        </div>
+                                        <?php endif; ?>
+
                                         <?php if (!isset($user)): ?>
                                         <div class="form-group mb-3">
                                             <label class="fw-bold">Khách hàng <span class="text-danger">*</span></label>
-                                            <select class="js-example-basic-single w-100" name="owner_user_id" required>
+                                            <select class="js-example-basic-single w-100" name="owner_user_id" id="owner_user_id" required>
                                                 <option value="">-- Chọn khách hàng --</option>
                                                 <?php
                                                 $users_table = $wpdb->prefix . 'im_users';
@@ -379,10 +411,11 @@ print_r($wpdb->last_error); // For debugging, remove in production
                         
                         <!-- Hidden field for total_months_registered, will be set equal to billing_cycle_months -->
                         <input type="hidden" id="total_months_registered" name="total_months_registered" value="1">
-                        
+
                         <?php
                         wp_nonce_field('post_maintenance', 'post_maintenance_field');
                         ?>
+                        <input type="hidden" name="referrer_url" value="<?php echo esc_attr($referrer_url); ?>">
                         <div class="form-group d-flex justify-content-center mt-3">
                             <button type="submit"
                                 class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
@@ -475,32 +508,47 @@ document.addEventListener('DOMContentLoaded', function() {
     monthlyFeeInput.addEventListener('input', calculateValues);
     billingCycleSelect.addEventListener('change', calculateValues);
     discountInput.addEventListener('input', calculateValues);
-    renewDateInput.addEventListener('input', calculateValues);
+
+    // Use jQuery to handle datepicker events properly for renew_date
+    $('#renew_date').on('change changeDate input blur', calculateValues);
 
     // Initial calculation
     calculateValues();
-    
+
+    // Auto-fill owner when website is selected
+    $('#selected_website_id').on('change', function() {
+        const selectedOption = $(this).find('option:selected');
+        const ownerId = selectedOption.attr('data-owner-id');
+
+        if (ownerId) {
+            // Set the owner select value using Select2
+            $('[name="owner_user_id"]').val(ownerId).trigger('change');
+        } else {
+            // Clear owner selection if no website is selected
+            $('[name="owner_user_id"]').val('').trigger('change');
+        }
+    });
+
     // Maintenance Code Preview Functionality
-    const ownerSelect = document.querySelector('[name="owner_user_id"]');
     const orderCodeInput = document.getElementById('order_code');
-    
+
     if (ownerSelect && orderCodeInput) {
         ownerSelect.addEventListener('change', function() {
             const selectedOwner = this.options[this.selectedIndex];
             const ownerText = selectedOwner.text;
-            
+
             // Extract user code from owner option text (format: "CODE - Name")
             let userCode = '';
             if (ownerText && ownerText.includes(' - ')) {
                 userCode = ownerText.split(' - ')[0];
             }
-            
+
             // Remove existing preview
             const existingPreview = document.querySelector('.maintenance-code-preview');
             if (existingPreview) {
                 existingPreview.remove();
             }
-            
+
             if (userCode && orderCodeInput.value === '') {
                 // Create preview for new maintenance package (number will be auto-generated)
                 const previewCode = 'BT[N]' + userCode;

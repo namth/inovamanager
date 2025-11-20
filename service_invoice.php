@@ -92,23 +92,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $tax_amount = ($sub_total - $discount_total) * ($tax_rate / 100);
         $total_amount = $sub_total - $discount_total + $tax_amount;
 
-        // Generate invoice code: INV + YYYYMMDD + sequential number
-        $date_part = date('Ymd', strtotime($invoice_date));
-        $count = $wpdb->get_var($wpdb->prepare("
-            SELECT COUNT(*) + 1 FROM $invoice_table 
-            WHERE invoice_code LIKE %s
-        ", "INV{$date_part}%"));
-        $invoice_code = sprintf('INV%s%d', $date_part, $count);
-
         // Start transaction
         $wpdb->query('START TRANSACTION');
 
         try {
+            // Get user's VAT invoice preference
+            $user_vat_settings = get_user_meta($service->owner_user_id, 'inova_vat_invoice_settings', true);
+            $requires_vat_invoice = 0;
+            if (!empty($user_vat_settings) && isset($user_vat_settings['requires_vat_invoice'])) {
+                $requires_vat_invoice = intval($user_vat_settings['requires_vat_invoice']);
+            }
+
             if ($payment_type === 'partial_50') {
+                // Generate invoice codes
+                $first_invoice_code = generate_invoice_code($service->owner_user_id);
+
                 // Create first invoice for 50%
                 $first_amount = $total_amount * 0.5;
                 $invoice_data = array(
-                    'invoice_code' => $invoice_code,
+                    'invoice_code' => $first_invoice_code,
                     'user_id' => $service->owner_user_id,
                     'invoice_date' => date('Y-m-d', strtotime($invoice_date)),
                     'due_date' => date('Y-m-d', strtotime($due_date)),
@@ -118,6 +120,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     'total_amount' => $first_amount,
                     'paid_amount' => 0,
                     'status' => 'pending',
+                    'requires_vat_invoice' => $requires_vat_invoice,
                     'notes' => $invoice_notes . "\n\nThanh toán 50% trước khi bắt đầu thực hiện dịch vụ.",
                     'created_by_type' => 'system',
                     'created_by_id' => get_current_user_id(),
@@ -156,9 +159,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
 
                 // Create second invoice for remaining 50%
-                $second_invoice_code = sprintf('INV%s%d', $date_part, $count + 1);
+                $second_invoice_code = generate_invoice_code($service->owner_user_id); // This will be called after the first one is in DB, so count is correct
                 $second_amount = $total_amount - $first_amount;
-                
+
                 $second_invoice_data = array(
                     'invoice_code' => $second_invoice_code,
                     'user_id' => $service->owner_user_id,
@@ -170,6 +173,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     'total_amount' => $second_amount,
                     'paid_amount' => 0,
                     'status' => 'pending_completion', // Special status for completion payment
+                    'requires_vat_invoice' => $requires_vat_invoice,
                     'notes' => $invoice_notes . "\n\nThanh toán 50% còn lại sau khi hoàn thành dịch vụ.",
                     'created_by_type' => 'system',
                     'created_by_id' => get_current_user_id(),
@@ -207,9 +211,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     throw new Exception('Failed to create second invoice item');
                 }
 
-                $message = '<div class="alert alert-success"><strong>Thành công!</strong> Đã tạo 2 hóa đơn: ' . $invoice_code . ' (50% trước) và ' . $second_invoice_code . ' (50% sau khi hoàn thành).</div>';
+                $message = '<div class="alert alert-success"><strong>Thành công!</strong> Đã tạo 2 hóa đơn: ' . $first_invoice_code . ' (50% trước) và ' . $second_invoice_code . ' (50% sau khi hoàn thành).</div>';
                 $created_invoice_id = $first_invoice_id; // Store for redirect
             } else {
+                // Generate single invoice code
+                $invoice_code = generate_invoice_code($service->owner_user_id);
+
                 // Create single full payment invoice
                 $invoice_data = array(
                     'invoice_code' => $invoice_code,
@@ -222,6 +229,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     'total_amount' => $total_amount,
                     'paid_amount' => 0,
                     'status' => 'draft',
+                    'requires_vat_invoice' => $requires_vat_invoice,
                     'notes' => $invoice_notes,
                     'created_by_type' => 'system',
                     'created_by_id' => get_current_user_id(),

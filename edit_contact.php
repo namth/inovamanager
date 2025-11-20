@@ -72,10 +72,10 @@ get_header();
             <div class="row">
                 <div class="col-lg-12">
                     <div class="d-flex justify-content-between align-items-center mb-3 flex-column">
-                        <!-- add back button in the left side -->
-                        <a href="<?php echo home_url('/chi-tiet-nguoi-dung/?id=') . $contact->user_id; ?>" class="abs-top-left nav-link">
-                            <i class="ph ph-arrow-bend-up-left btn-icon-prepend fa-150p"></i>
-                        </a>
+                         <!-- add back button in the left side -->
+                         <a href="javascript:history.back()" class="abs-top-left nav-link">
+                             <i class="ph ph-arrow-bend-up-left btn-icon-prepend fa-150p"></i>
+                         </a>
                         <div>
                             <h3 class="display-3">Chỉnh sửa liên hệ</h3>
                             <p class="text-center">của <?php echo $user->company_name ?: $user->name; ?></p>
@@ -87,7 +87,7 @@ get_header();
                             if (isset($notification)) {
                                 echo $notification;
                                 // add more button to back to user detail page
-                                echo '<a href="' . home_url('/chi-tiet-nguoi-dung/?id=' . $contact->user_id) . '" class="btn btn-dark btn-icon-text me-2 d-flex align-items-center border-radius-9">
+                                echo '<a href="javascript:history.back()" class="btn btn-dark btn-icon-text me-2 d-flex align-items-center border-radius-9">
                                         <i class="ph ph-user btn-icon-prepend fa-150p"></i>
                                         <span class="fw-bold">Quay lại thông tin người dùng</span>
                                     </a>';

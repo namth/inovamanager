@@ -47,29 +47,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $admin_url = esc_url_raw($_POST['admin_url']);
         $admin_username = sanitize_text_field($_POST['admin_username']);
         $admin_password = sanitize_text_field($_POST['admin_password']);
+        $ip_address = sanitize_text_field($_POST['ip_address']);
         $notes = sanitize_textarea_field($_POST['notes']);
         
         // Validate required fields
-        if (!empty($name) && !empty($owner_user_id)) {
-            $result = $wpdb->insert(
-                $websites_table,
-                array(
-                    'name' => $name,
-                    'owner_user_id' => $owner_user_id,
-                    'domain_id' => $domain_id,
-                    'hosting_id' => $hosting_id,
-                    'maintenance_package_id' => $maintenance_package_id,
-                    'admin_url' => $admin_url,
-                    'admin_username' => $admin_username,
-                    'admin_password' => $admin_password,
-                    'notes' => $notes,
-                    'created_at' => current_time('mysql'),
-                    'updated_at' => current_time('mysql')
-                ),
-                array(
-                    '%s', '%d', '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s'
-                )
-            );
+         if (!empty($name) && !empty($owner_user_id)) {
+             // Get current admin user's inova_user_id for created_by field
+             $admin_inova_user = get_inova_user($current_user_id);
+             $created_by = $admin_inova_user ? $admin_inova_user->id : null;
+             
+             $result = $wpdb->insert(
+                 $websites_table,
+                 array(
+                     'name' => $name,
+                     'owner_user_id' => $owner_user_id,
+                     'created_by' => $created_by,
+                     'domain_id' => $domain_id,
+                     'hosting_id' => $hosting_id,
+                     'maintenance_package_id' => $maintenance_package_id,
+                     'admin_url' => $admin_url,
+                     'admin_username' => $admin_username,
+                     'admin_password' => $admin_password,
+                     'ip_address' => $ip_address,
+                     'notes' => $notes,
+                     'created_at' => current_time('mysql'),
+                     'updated_at' => current_time('mysql')
+                 ),
+                 array(
+                     '%s', '%d', '%d', '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s'
+                 )
+             );
             
             if ($result) {
                 $new_website_id = $wpdb->insert_id;
@@ -155,18 +162,26 @@ get_header();
                                             <select class="js-example-basic-single w-100" name="domain_id" id="domain_id">
                                                 <option value="">-- Chọn tên miền --</option>
                                                 <?php
-                                                // If owner is pre-selected, filter domains by owner
-                                                $domain_query = "SELECT * FROM $domains_table WHERE (website_id IS NULL OR website_id = 0)";
+                                                // Get unique domains with one linked website name (if any), filter by owner if pre-selected
+                                                $domain_query = "SELECT d.*,
+                                                                        (SELECT w2.name FROM $websites_table w2 WHERE w2.domain_id = d.id LIMIT 1) AS linked_website_name
+                                                                 FROM $domains_table d
+                                                                 WHERE 1=1";
                                                 if ($pre_selected_owner_id) {
-                                                    $domain_query .= " AND owner_user_id = " . intval($pre_selected_owner_id);
+                                                    $domain_query .= " AND d.owner_user_id = " . intval($pre_selected_owner_id);
                                                 }
-                                                $domain_query .= " ORDER BY domain_name ASC";
-                                                
+                                                $domain_query .= " ORDER BY d.domain_name ASC";
+
                                                 $domains = $wpdb->get_results($domain_query);
                                                 foreach ($domains as $domain) {
                                                     $selected = ($pre_selected_domain_id == $domain->id) ? 'selected' : '';
-                                                    $domain_code = !empty($domain->order_code) ? $domain->order_code : 'DOM-' . $domain->id;
-                                                    echo '<option value="' . $domain->id . '" data-owner="' . $domain->owner_user_id . '" ' . $selected . '>' . esc_html($domain_code . ' - ' . $domain->domain_name) . '</option>';
+
+                                                    $display_text = $domain->domain_name;
+                                                    if (!empty($domain->linked_website_name)) {
+                                                        $display_text .= ' (Đã liên kết: ' . $domain->linked_website_name . ')';
+                                                    }
+
+                                                    echo '<option value="' . $domain->id . '" data-owner="' . $domain->owner_user_id . '" ' . $selected . '>' . esc_html($display_text) . '</option>';
                                                 }
                                                 ?>
                                             </select>
@@ -177,31 +192,32 @@ get_header();
                                             <select class="js-example-basic-single w-100" name="hosting_id" id="hosting_id">
                                                 <option value="">-- Chọn hosting --</option>
                                                 <?php
-                                                // Get available hostings, filter by owner if pre-selected
-                                                $hosting_query = "SELECT * FROM $hostings_table WHERE id NOT IN (SELECT hosting_id FROM $websites_table WHERE hosting_id IS NOT NULL)";
+                                                // Get unique hostings with one linked website name (if any), filter by owner if pre-selected
+                                                $hosting_query = "SELECT h.*,
+                                                                         pc.name AS product_name,
+                                                                         (SELECT w2.name FROM $websites_table w2 WHERE w2.hosting_id = h.id LIMIT 1) AS linked_website_name
+                                                                  FROM $hostings_table h
+                                                                  LEFT JOIN $products_table pc ON h.product_catalog_id = pc.id
+                                                                  WHERE 1=1";
                                                 if ($pre_selected_owner_id) {
-                                                    $hosting_query .= " AND owner_user_id = " . intval($pre_selected_owner_id);
+                                                    $hosting_query .= " AND h.owner_user_id = " . intval($pre_selected_owner_id);
                                                 }
-                                                
-                                                // Include pre-selected hosting even if it might be filtered out
-                                                if ($pre_selected_hosting_id) {
-                                                    $hosting_query .= " OR id = " . intval($pre_selected_hosting_id);
-                                                }
-                                                
+                                                $hosting_query .= " ORDER BY h.hosting_code";
+
                                                 $hostings = $wpdb->get_results($hosting_query);
-                                                
+
                                                 foreach ($hostings as $hosting) {
-                                                    // Get product_catalog_id from hosting, then get product name
-                                                    $product_catalog = $wpdb->get_row($wpdb->prepare(
-                                                        "SELECT * FROM $products_table WHERE id = %d", $hosting->product_catalog_id
-                                                    ));
-                                                    
-                                                    $product_name = $product_catalog ? $product_catalog->name : 'Unknown Product';
+                                                    $product_name = $hosting->product_name ?: 'Unknown Product';
                                                     $selected = ($pre_selected_hosting_id == $hosting->id) ? 'selected' : '';
                                                     $hosting_code = !empty($hosting->hosting_code) ? $hosting->hosting_code : 'HOST-' . $hosting->id;
-                                                    
-                                                    echo '<option value="' . $hosting->id . '" data-owner="' . $hosting->owner_user_id . '" ' . $selected . '>' . 
-                                                         esc_html($hosting_code . ' - ' . $product_name) . '</option>';
+
+                                                    $display_text = $hosting_code . ' - ' . $product_name;
+                                                    if (!empty($hosting->linked_website_name)) {
+                                                        $display_text .= ' (Đã liên kết: ' . $hosting->linked_website_name . ')';
+                                                    }
+
+                                                    echo '<option value="' . $hosting->id . '" data-owner="' . $hosting->owner_user_id . '" ' . $selected . '>' .
+                                                         esc_html($display_text) . '</option>';
                                                 }
                                                 ?>
                                             </select>
@@ -212,19 +228,28 @@ get_header();
                                             <select class="js-example-basic-single w-100" name="maintenance_package_id" id="maintenance_package_id">
                                                 <option value="">-- Chọn gói bảo trì --</option>
                                                 <?php
-                                                // Get available maintenance packages, filter by owner if pre-selected
-                                                $maintenance_query = "SELECT * FROM $maintenance_table WHERE id NOT IN (SELECT maintenance_package_id FROM $websites_table WHERE maintenance_package_id IS NOT NULL)";
+                                                // Get unique maintenance packages with one linked website name (if any), filter by owner if pre-selected
+                                                $maintenance_query = "SELECT m.*,
+                                                                             (SELECT w2.name FROM $websites_table w2 WHERE w2.maintenance_package_id = m.id LIMIT 1) AS linked_website_name
+                                                                      FROM $maintenance_table m
+                                                                      WHERE 1=1";
                                                 if ($pre_selected_owner_id) {
-                                                    $maintenance_query .= " AND owner_user_id = " . intval($pre_selected_owner_id);
+                                                    $maintenance_query .= " AND m.owner_user_id = " . intval($pre_selected_owner_id);
                                                 }
-                                                
+                                                $maintenance_query .= " ORDER BY m.order_code";
+
                                                 $maintenance_packages = $wpdb->get_results($maintenance_query);
-                                                
+
                                                 foreach ($maintenance_packages as $package) {
                                                     $selected = ($pre_selected_maintenance_id == $package->id) ? 'selected' : '';
                                                     $display_name = !empty($package->order_code) ? $package->order_code : 'MAINT-' . $package->id;
-                                                    
-                                                    echo '<option value="' . $package->id . '" data-owner="' . $package->owner_user_id . '" ' . $selected . '>' . esc_html($display_name . ' - Gói bảo trì website') . '</option>';
+
+                                                    $display_text = $display_name . ' - Gói bảo trì website';
+                                                    if (!empty($package->linked_website_name)) {
+                                                        $display_text .= ' (Đã liên kết: ' . $package->linked_website_name . ')';
+                                                    }
+
+                                                    echo '<option value="' . $package->id . '" data-owner="' . $package->owner_user_id . '" ' . $selected . '>' . esc_html($display_text) . '</option>';
                                                 }
                                                 ?>
                                             </select>
@@ -279,18 +304,10 @@ get_header();
                                             </div>
                                         </div>
 
-                                        <hr class="my-4">
-
                                         <div class="form-group mb-3">
-                                            <label class="fw-bold">Kiểm tra trạng thái website</label>
-                                            <div class="d-flex align-items-center mt-2">
-                                                <button type="button" id="checkWebsiteStatus" class="btn btn-info btn-icon-text me-2 d-flex align-items-center border-radius-9">
-                                                    <i class="ph ph-activity btn-icon-prepend fa-150p"></i>
-                                                    <span>Kiểm tra hoạt động</span>
-                                                </button>
-                                                <span id="statusResult" class="ms-3"></span>
-                                            </div>
-                                            <div id="statusDetails" class="mt-2"></div>
+                                            <label for="ip_address" class="fw-bold">Địa chỉ IP</label>
+                                            <input type="text" class="form-control" id="ip_address" name="ip_address" placeholder="Nhập địa chỉ IP">
+                                            <small class="form-text text-muted">Địa chỉ IP gốc của website (không qua Cloudflare)</small>
                                         </div>
                                     </div>
                                 </div>
@@ -300,7 +317,7 @@ get_header();
                         <?php
                         wp_nonce_field('add_website', 'add_website_field');
                         ?>
-                        <input type="hidden" id="check_website_status_nonce" value="<?php echo wp_create_nonce('check_website_status_nonce'); ?>">
+                        
                         <div class="form-group d-flex justify-content-center mt-3">
                             <button type="submit"
                                 class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
@@ -328,35 +345,62 @@ $(document).ready(function() {
     // Store all original options for filtering - Load all options regardless of pre-selection
     var allDomains = $('<select>');
     <?php
-    // Load all available domains for JavaScript
-    $all_domains = $wpdb->get_results("SELECT * FROM $domains_table WHERE website_id IS NULL OR website_id = 0 ORDER BY domain_name ASC");
+    // Load unique domains with one linked website name (if any) for JavaScript
+    $all_domains = $wpdb->get_results("
+        SELECT d.*,
+               (SELECT w2.name FROM $websites_table w2 WHERE w2.domain_id = d.id LIMIT 1) AS linked_website_name
+        FROM $domains_table d
+        ORDER BY d.domain_name ASC
+    ");
     foreach ($all_domains as $domain) {
-        $domain_code = !empty($domain->order_code) ? $domain->order_code : 'DOM-' . $domain->id;
-        $display_text = esc_js($domain_code . ' - ' . $domain->domain_name);
+        $display_text = $domain->domain_name;
+        if (!empty($domain->linked_website_name)) {
+            $display_text .= ' (Đã liên kết: ' . $domain->linked_website_name . ')';
+        }
+        $display_text = esc_js($display_text);
         echo "allDomains.append('<option value=\"{$domain->id}\" data-owner=\"{$domain->owner_user_id}\">{$display_text}</option>');";
     }
     ?>
     
     var allHostings = $('<select>');
     <?php
-    // Load all available hostings for JavaScript
-    $all_hostings = $wpdb->get_results("SELECT * FROM $hostings_table WHERE id NOT IN (SELECT hosting_id FROM $websites_table WHERE hosting_id IS NOT NULL)");
+    // Load unique hostings with one linked website name (if any) for JavaScript
+    $all_hostings = $wpdb->get_results("
+        SELECT h.*,
+               pc.name AS product_name,
+               (SELECT w2.name FROM $websites_table w2 WHERE w2.hosting_id = h.id LIMIT 1) AS linked_website_name
+        FROM $hostings_table h
+        LEFT JOIN $products_table pc ON h.product_catalog_id = pc.id
+        ORDER BY h.hosting_code
+    ");
     foreach ($all_hostings as $hosting) {
-        $product_catalog = $wpdb->get_row($wpdb->prepare("SELECT * FROM $products_table WHERE id = %d", $hosting->product_catalog_id));
-        $product_name = $product_catalog ? $product_catalog->name : 'Unknown Product';
-        $hosting_code = !empty($hosting->order_code) ? $hosting->order_code : 'HOST-' . $hosting->id;
-        $display_text = esc_js($hosting_code . ' - ' . $product_name);
+        $product_name = $hosting->product_name ?: 'Unknown Product';
+        $hosting_code = !empty($hosting->hosting_code) ? $hosting->hosting_code : 'HOST-' . $hosting->id;
+        $display_text = $hosting_code . ' - ' . $product_name;
+        if (!empty($hosting->linked_website_name)) {
+            $display_text .= ' (Đã liên kết: ' . $hosting->linked_website_name . ')';
+        }
+        $display_text = esc_js($display_text);
         echo "allHostings.append('<option value=\"{$hosting->id}\" data-owner=\"{$hosting->owner_user_id}\">{$display_text}</option>');";
     }
     ?>
-    
+
     var allMaintenancePackages = $('<select>');
     <?php
-    // Load all available maintenance packages for JavaScript  
-    $all_maintenance = $wpdb->get_results("SELECT * FROM $maintenance_table WHERE id NOT IN (SELECT maintenance_package_id FROM $websites_table WHERE maintenance_package_id IS NOT NULL)");
+    // Load unique maintenance packages with one linked website name (if any) for JavaScript
+    $all_maintenance = $wpdb->get_results("
+        SELECT m.*,
+               (SELECT w2.name FROM $websites_table w2 WHERE w2.maintenance_package_id = m.id LIMIT 1) AS linked_website_name
+        FROM $maintenance_table m
+        ORDER BY m.order_code
+    ");
     foreach ($all_maintenance as $package) {
         $display_name = !empty($package->order_code) ? $package->order_code : 'MAINT-' . $package->id;
-        $display_text = esc_js($display_name . ' - Gói bảo trì website');
+        $display_text = $display_name . ' - Gói bảo trì website';
+        if (!empty($package->linked_website_name)) {
+            $display_text .= ' (Đã liên kết: ' . $package->linked_website_name . ')';
+        }
+        $display_text = esc_js($display_text);
         echo "allMaintenancePackages.append('<option value=\"{$package->id}\" data-owner=\"{$package->owner_user_id}\">{$display_text}</option>');";
     }
     ?>
@@ -434,41 +478,5 @@ $(document).ready(function() {
             $('#domain_id, #hosting_id, #maintenance_package_id').trigger('change.select2');
         }
     }
-    
-    // Toggle password visibility
-    $('.toggle-password').on('click', function() {
-        const passwordField = $(this).siblings('input[type="password"], input[type="text"]');
-        const icon = $(this).find('i');
-        
-        if (passwordField.attr('type') === 'password') {
-            passwordField.attr('type', 'text');
-            icon.removeClass('ph-eye').addClass('ph-eye-slash');
-        } else {
-            passwordField.attr('type', 'password');
-            icon.removeClass('ph-eye-slash').addClass('ph-eye');
-        }
-    });
-    
-    // Website status check functionality
-    $('#checkWebsiteStatus').on('click', function() {
-        var websiteName = $('#website_name').val();
-        var adminUrl = $('#admin_url').val();
-        
-        if (!websiteName && !adminUrl) {
-            alert('Vui lòng nhập tên website hoặc URL trang quản trị để kiểm tra');
-            return;
-        }
-        
-        var checkUrl = adminUrl || 'https://' + websiteName;
-        
-        $('#statusResult').html('<span class="text-info">Đang kiểm tra...</span>');
-        $('#statusDetails').empty();
-        
-        // Simple status check (you can enhance this with AJAX call to backend)
-        setTimeout(function() {
-            $('#statusResult').html('<span class="text-success">Website hoạt động bình thường</span>');
-            $('#statusDetails').html('<small class="text-muted">Kiểm tra lúc: ' + new Date().toLocaleString('vi-VN') + '</small>');
-        }, 2000);
-    });
 });
 </script>

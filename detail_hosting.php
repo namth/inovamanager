@@ -25,6 +25,12 @@ if (!$hosting) {
     exit;
 }
 
+// Check if user has permission to view this hosting
+if (!can_user_view_item($hosting->owner_user_id, $hosting->partner_id)) {
+    wp_redirect(home_url('/danh-sach-hosting/'));
+    exit;
+}
+
 // Get user data
 $users_table = $wpdb->prefix . 'im_users';
 $user = $wpdb->get_row($wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $hosting->owner_user_id));
@@ -86,6 +92,7 @@ get_header();
                 <div class="justify-content-center">
                     <h3 class="mb-1">Chi tiết hosting <?php echo !empty($hosting->hosting_code) ? $hosting->hosting_code : 'HOST-' . $hosting->id; ?></h3>
                 </div>
+                <?php if (is_inova_admin()): ?>
                 <div>
                     <div class="d-flex flex-row justify-content-center gap-3">
                         <a href="<?php echo home_url('/sua-hosting/?hosting_id=' . $hosting_id); ?>" class="btn btn-info btn-icon-text d-flex align-items-center">
@@ -96,6 +103,7 @@ get_header();
                         </a>
                     </div>
                 </div>
+                <?php endif; ?>
             </div>
             
             <div class="mt-3">
@@ -382,7 +390,7 @@ get_header();
                                     <i class="ph ph-globe me-2 text-success" style="font-size: 24px;"></i>
                                     Websites sử dụng hosting này
                                 </h5>
-                                <a href="<?php echo home_url('/them-moi-website/?hosting_id=' . $hosting_id); ?>" class="d-flex align-items-center btn btn-sm btn-success">
+                                <a href="<?php echo home_url('/addnew-website/?hosting_id=' . $hosting_id); ?>" class="d-flex align-items-center btn btn-sm btn-success">
                                     <i class="ph ph-plus-circle me-1"></i> Thêm website mới
                                 </a>
                             </div>
@@ -461,7 +469,7 @@ get_header();
                             <div class="alert alert-light text-center py-4">
                                 <i class="ph ph-globe-slash mb-2" style="font-size: 32px;"></i>
                                 <p class="mb-2">Chưa có website nào được liên kết với hosting này</p>
-                                <a href="<?php echo home_url('/them-moi-website/?hosting_id=' . $hosting_id); ?>" class="btn btn-success">
+                                <a href="<?php echo home_url('/addnew-website/?hosting_id=' . $hosting_id); ?>" class="btn btn-success">
                                     <i class="ph ph-plus-circle me-1"></i> Thêm website mới
                                 </a>
                             </div>

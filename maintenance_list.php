@@ -8,23 +8,84 @@ $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
 $users_table = $wpdb->prefix . 'im_users';
 $websites_table = $wpdb->prefix . 'im_websites';
 
+// Handle delete request
+$message = '';
+$message_type = '';
+
+if (isset($_POST['delete_maintenance_id']) && !empty($_POST['delete_maintenance_id'])) {
+    $maintenance_id = intval($_POST['delete_maintenance_id']);
+
+    // Check if maintenance package exists
+    $maintenance = $wpdb->get_row($wpdb->prepare("
+        SELECT * FROM $maintenance_table WHERE id = %d
+    ", $maintenance_id));
+
+    if ($maintenance) {
+        // Check if maintenance is being used by any websites
+        $websites_using_maintenance = $wpdb->get_results($wpdb->prepare("
+            SELECT id, name FROM $websites_table WHERE maintenance_package_id = %d
+        ", $maintenance_id));
+
+        $force_delete = isset($_POST['force_delete']) && $_POST['force_delete'] == '1';
+
+        if ($websites_using_maintenance && !$force_delete) {
+            $message = "Không thể xóa gói bảo trì này vì đang được sử dụng bởi " . count($websites_using_maintenance) . " website(s). Sử dụng 'Xóa bắt buộc' nếu bạn muốn tiếp tục.";
+            $message_type = 'warning';
+        } else {
+            // If force delete, update maintenance_package_id of websites to NULL
+            if ($websites_using_maintenance && $force_delete) {
+                $wpdb->update(
+                    $websites_table,
+                    array('maintenance_package_id' => null),
+                    array('maintenance_package_id' => $maintenance_id),
+                    array('%s'),
+                    array('%d')
+                );
+            }
+
+            // Delete the maintenance package
+            $deleted = $wpdb->delete(
+                $maintenance_table,
+                array('id' => $maintenance_id),
+                array('%d')
+            );
+
+            if ($deleted) {
+                $order_code = !empty($maintenance->order_code) ? $maintenance->order_code : 'MAINT-' . $maintenance->id;
+                $message = "Gói bảo trì '{$order_code}' đã được xóa thành công!";
+                $message_type = 'success';
+            } else {
+                $message = "Có lỗi xảy ra khi xóa gói bảo trì.";
+                $message_type = 'danger';
+            }
+        }
+    } else {
+        $message = "Gói bảo trì không tồn tại.";
+        $message_type = 'danger';
+    }
+}
+
 // Get all maintenance packages with related data
+// Build permission WHERE clause (maintenance has partner_id field)
+$permission_where = get_user_permission_where_clause('m', 'owner_user_id', 'partner_id');
+
 $query = "
-    SELECT 
+    SELECT
         m.*,
         u.name AS owner_name,
         u.user_code AS owner_code,
         GROUP_CONCAT(DISTINCT w.name SEPARATOR ', ') AS websites_names,
         GROUP_CONCAT(DISTINCT w.id SEPARATOR ',') AS websites_ids
-    FROM 
+    FROM
         $maintenance_table m
-    LEFT JOIN 
+    LEFT JOIN
         $users_table u ON m.owner_user_id = u.id
-    LEFT JOIN 
+    LEFT JOIN
         $websites_table w ON w.maintenance_package_id = m.id
-    GROUP BY 
+    " . (!empty($permission_where) ? "WHERE 1=1 {$permission_where}" : "") . "
+    GROUP BY
         m.id
-    ORDER BY 
+    ORDER BY
         m.expiry_date ASC
 ";
 
@@ -46,13 +107,29 @@ get_header();
         <div class="col-lg-12 grid-margin stretch-card">
             <div class="card">
                 <div class="card-body">
+                    <?php if (!empty($message)): ?>
+                    <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
+                        <?php if ($message_type === 'success'): ?>
+                            <i class="ph ph-check-circle me-2"></i>
+                        <?php elseif ($message_type === 'warning'): ?>
+                            <i class="ph ph-warning me-2"></i>
+                        <?php else: ?>
+                            <i class="ph ph-x-circle me-2"></i>
+                        <?php endif; ?>
+                        <?php echo $message; ?>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                    <?php endif; ?>
+
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h4 class="card-title">Danh sách Gói Bảo Trì</h4>
                         <div class="d-flex gap-2 align-items-center">
+                            <?php if (is_inova_admin()): ?>
                             <button id="bulk-renew-btn" class="btn btn-secondary btn-icon-text" style="display: none;" onclick="handleBulkRenewal('maintenances', 'gói bảo trì', '<?php echo home_url('/them-moi-hoa-don/'); ?>')">
                                 <i class="ph ph-arrow-clockwise btn-icon-prepend"></i>
                                 <span>Gia hạn nhiều gói bảo trì</span>
                             </button>
+                            <?php endif; ?>
                             <div class="d-flex align-items-center">
                                 <i class="ph ph-funnel text-muted me-2 fa-150p"></i>
                                 <select class="form-select form-select-sm w180" onchange="window.location.href=this.value">
@@ -73,9 +150,11 @@ get_header();
                                     </option>
                                 </select>
                             </div>
+                            <?php if (is_inova_admin()): ?>
                             <a href="<?php echo home_url('/them-goi-bao-tri/'); ?>" class="fixed-bottom-right nav-link" title="Thêm mới gói bảo trì">
                                 <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
                             </a>
+                            <?php endif; ?>
                         </div>
                     </div>
                     
@@ -84,18 +163,22 @@ get_header();
                         <i class="ph ph-wrench icon-lg text-muted mb-3" style="font-size: 48px;"></i>
                         <h4>Chưa có gói bảo trì nào</h4>
                         <p class="text-muted">Bắt đầu bằng cách thêm gói bảo trì đầu tiên của bạn</p>
+                        <?php if (is_inova_admin()): ?>
                         <a href="<?php echo home_url('/them-goi-bao-tri/'); ?>" class="btn btn-primary">
                             <i class="ph ph-plus-circle me-2"></i> Thêm mới Gói Bảo Trì
                         </a>
+                        <?php endif; ?>
                     </div>
                     <?php else: ?>
                     <div class="table-responsive">
                         <table class="table table-hover">
                             <thead>
                                 <tr class="bg-light">
+                                    <?php if (is_inova_admin()): ?>
                                     <th style="width: 40px;">
                                         <input type="checkbox" id="select-all-maintenances" class="form-check form-check-danger">
                                     </th>
+                                    <?php endif; ?>
                                     <th style="width: 50px;">STT</th>
                                     <th>Mã gói bảo trì</th>
                                     <th>Website đang bảo trì</th>
@@ -111,14 +194,16 @@ get_header();
                                 <?php 
                                 if (!empty($maintenance_packages)) {
                                     $stt = 1;
-                                    foreach ($maintenance_packages as $package): 
+                                    foreach ($maintenance_packages as $package):
                                 ?>
                                 <tr>
+                                    <?php if (is_inova_admin()): ?>
                                     <td class="text-center">
-                                        <input type="checkbox" class="form-check form-check-danger maintenance-checkbox" 
-                                               value="<?php echo $package->id; ?>" 
+                                        <input type="checkbox" class="form-check form-check-danger maintenance-checkbox"
+                                               value="<?php echo $package->id; ?>"
                                                data-owner-id="<?php echo $package->owner_user_id; ?>">
                                     </td>
+                                    <?php endif; ?>
                                     <td class="text-center fw-bold text-muted"><?php echo $stt++; ?></td>
                                     <td>
                                         <div class="d-flex align-items-center">
@@ -237,25 +322,34 @@ get_header();
                                         </span>
                                     </td>
                                     <td>
+                                        <?php if (is_inova_admin()): ?>
                                         <div class="d-flex align-items-center">
                                             <a href="<?php echo home_url('/sua-goi-bao-tri/?maintenance_id=' . $package->id); ?>" class="nav-link text-warning me-2" title="Sửa gói bảo trì">
                                                 <i class="ph ph-pencil-simple btn-icon-prepend fa-150p"></i>
                                             </a>
-                                            
+
                                             <?php if (empty($package->websites_names)): ?>
                                             <a href="<?php echo home_url('/attach-product-to-website/?maintenance_id=' . $package->id); ?>" class="nav-link text-warning me-2" title="Tạo website mới">
                                                 <i class="ph ph-globe btn-icon-prepend fa-150p"></i>
                                             </a>
                                             <?php endif; ?>
-                                            
-                                            <a href="<?php echo home_url('/them-moi-hoa-don/?maintenance_id=' . $package->id); ?>" class="nav-link text-warning me-2" title="Tạo hóa đơn gia hạn">
-                                                <i class="ph ph-receipt btn-icon-prepend fa-150p"></i>
-                                            </a>
-                                            
-                                            <a href="<?php echo home_url('/xoa-goi-bao-tri/?id=' . $package->id); ?>" class="nav-link text-danger" title="Xóa gói bảo trì" onclick="return confirm('Bạn có chắc chắn muốn xóa gói bảo trì này?');">
+
+                                            <button type="button" class="btn btn-sm btn-icon p-0 me-2 add-to-cart-btn"
+                                                data-service-type="maintenance"
+                                                data-service-id="<?php echo $package->id; ?>"
+                                                title="Thêm vào giỏ hàng">
+                                                <i class="ph ph-shopping-cart text-info fa-150p"></i>
+                                            </button>
+
+                                            <button type="button" class="nav-link text-danger border-0 bg-transparent p-0"
+                                                    title="Xóa gói bảo trì"
+                                                    onclick="confirmDeleteMaintenance(<?php echo $package->id; ?>, '<?php echo esc_js(!empty($package->order_code) ? $package->order_code : 'MAINT-' . $package->id); ?>', <?php echo (!empty($package->websites_names)) ? 'true' : 'false'; ?>)">
                                                 <i class="ph ph-trash btn-icon-prepend fa-150p"></i>
-                                            </a>
+                                            </button>
                                         </div>
+                                        <?php else: ?>
+                                        <span class="text-muted">--</span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                                 <?php 
@@ -280,6 +374,101 @@ get_header();
         </div>
     </div>
 </div>
+
+<!-- Hidden form for deleting maintenance -->
+<form id="deleteMaintenanceForm" method="POST" style="display: none;">
+    <input type="hidden" name="delete_maintenance_id" id="delete_maintenance_id" value="">
+    <input type="hidden" name="force_delete" id="force_delete" value="0">
+</form>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteMaintenanceModal" tabindex="-1" aria-labelledby="deleteMaintenanceModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="deleteMaintenanceModalLabel">
+                    <i class="ph ph-warning-diamond me-2"></i>
+                    Xác nhận xóa gói bảo trì
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning" role="alert">
+                    <i class="ph ph-warning me-2"></i>
+                    <strong>Cảnh báo:</strong> Hành động này không thể hoàn tác!
+                </div>
+
+                <p>Bạn có chắc chắn muốn xóa gói bảo trì <strong id="maintenanceCodeToDelete"></strong>?</p>
+
+                <div id="websiteWarning" style="display: none;">
+                    <div class="alert alert-danger" role="alert">
+                        <i class="ph ph-exclamation-triangle me-2"></i>
+                        <strong>Gói bảo trì này đang được sử dụng bởi website!</strong>
+                        <br>Nếu bạn tiếp tục, website sẽ không còn liên kết với gói bảo trì nào.
+                    </div>
+
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="confirmForceDelete">
+                        <label class="form-check-label text-danger fw-bold" for="confirmForceDelete">
+                            Tôi hiểu và muốn xóa gói bảo trì kể cả khi đang được sử dụng
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="ph ph-x me-2"></i>Hủy bỏ
+                </button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                    <i class="ph ph-trash me-2"></i>Xác nhận xóa
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function confirmDeleteMaintenance(maintenanceId, maintenanceCode, hasWebsite) {
+    document.getElementById('delete_maintenance_id').value = maintenanceId;
+    document.getElementById('maintenanceCodeToDelete').textContent = maintenanceCode;
+
+    const websiteWarning = document.getElementById('websiteWarning');
+    const confirmForceDelete = document.getElementById('confirmForceDelete');
+
+    // Convert string 'true'/'false' to boolean
+    const hasWebsiteBoolean = hasWebsite === true || hasWebsite === 'true';
+
+    if (hasWebsiteBoolean) {
+        websiteWarning.style.display = 'block';
+        confirmForceDelete.checked = false;
+    } else {
+        websiteWarning.style.display = 'none';
+    }
+
+    const deleteModal = new bootstrap.Modal(document.getElementById('deleteMaintenanceModal'));
+    deleteModal.show();
+}
+
+document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
+    const hasWebsite = document.getElementById('websiteWarning').style.display !== 'none';
+    const forceDeleteChecked = document.getElementById('confirmForceDelete').checked;
+
+    if (hasWebsite && !forceDeleteChecked) {
+        alert('Vui lòng xác nhận để xóa gói bảo trì đang được sử dụng bởi website.');
+        document.getElementById('confirmForceDelete').focus();
+        document.getElementById('confirmForceDelete').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+    }
+
+    // If maintenance has website and user confirmed, or maintenance doesn't have website
+    if (hasWebsite && forceDeleteChecked) {
+        document.getElementById('force_delete').value = '1';
+    }
+
+    // Proceed with deletion
+    document.getElementById('deleteMaintenanceForm').submit();
+});
+</script>
 
 <!-- Bulk renewal functionality is now handled by custom.js -->
 

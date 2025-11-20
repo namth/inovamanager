@@ -150,8 +150,14 @@ get_header();
                                     <div class="card-body">
                                         <div class="form-group mb-3">
                                             <label for="domain_name" class="fw-bold">Tên miền <span class="text-danger">*</span></label>
-                                            <input type="text" class="form-control" id="domain_name" name="domain_name" value="<?php echo esc_attr($domain->domain_name); ?>" required>
+                                            <div class="input-group">
+                                                <input type="text" class="form-control" id="domain_name" name="domain_name" value="<?php echo esc_attr($domain->domain_name); ?>" required>
+                                                <button type="button" class="btn btn-secondary" id="lookup-whois-btn">
+                                                    <i class="ph ph-magnifying-glass me-1"></i> Looking up
+                                                </button>
+                                            </div>
                                             <small id="domain_type_info" class="form-text text-muted"></small>
+                                            <div id="whois-lookup-status" class="mt-2"></div>
                                         </div>
                                         
                                         <!-- Hidden input for product_catalog_id that will be set automatically -->
@@ -393,6 +399,106 @@ document.addEventListener('DOMContentLoaded', function() {
     if (registrationPeriodField) {
         registrationPeriodField.addEventListener('change', calculateExpiryDate);
     }
+
+    /**
+     * WHOIS lookup when clicking the button
+     */
+    $('#lookup-whois-btn').on('click', function() {
+        const domainName = $('#domain_name').val().trim();
+        const $button = $(this);
+        const $statusDiv = $('#whois-lookup-status');
+        const $registrationDate = $('#registration_date');
+        const $expiryDate = $('#expiry_date');
+
+        if (!domainName) {
+            $statusDiv.html('<div class="alert alert-warning"><i class="ph ph-warning me-1"></i>Vui lòng nhập tên miền trước.</div>');
+            return;
+        }
+
+        if (!domainName.includes('.')) {
+            $statusDiv.html('<div class="alert alert-warning"><i class="ph ph-warning me-1"></i>Tên miền không hợp lệ.</div>');
+            return;
+        }
+
+        console.log('Manual WHOIS lookup for:', domainName);
+
+        // Show loading state
+        $button.prop('disabled', true).html('<i class="ph ph-spinner ph-spin me-1"></i> Đang tra cứu...');
+        $statusDiv.html('<div class="alert alert-info"><i class="ph ph-info me-1"></i>Đang tra cứu thông tin WHOIS...</div>');
+        $registrationDate.prop('disabled', true).val('Đang tải...');
+        $expiryDate.prop('disabled', true).val('Đang tải...');
+
+        $.ajax({
+            url: AJAX.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'fetch_domain_info',
+                domain: domainName
+            },
+            success: function(response) {
+                console.log('WHOIS API Response:', response);
+
+                // Reset button state
+                $button.prop('disabled', false).html('<i class="ph ph-magnifying-glass me-1"></i> Looking up');
+
+                if (response.success && response.data) {
+                    let foundData = false;
+
+                    // Fill in registration date if available
+                    if (response.data.registration_date) {
+                        const regDate = new Date(response.data.registration_date);
+                        const regFormatted = ('0' + regDate.getDate()).slice(-2) + '/' +
+                                           ('0' + (regDate.getMonth() + 1)).slice(-2) + '/' +
+                                           regDate.getFullYear();
+                        $registrationDate.val(regFormatted);
+                        foundData = true;
+                    }
+
+                    // Fill in expiry date if available
+                    if (response.data.expiry_date) {
+                        const expDate = new Date(response.data.expiry_date);
+                        const expFormatted = ('0' + expDate.getDate()).slice(-2) + '/' +
+                                           ('0' + (expDate.getMonth() + 1)).slice(-2) + '/' +
+                                           expDate.getFullYear();
+                        $expiryDate.val(expFormatted);
+                        foundData = true;
+                    }
+
+                    // Show success notification
+                    if (foundData) {
+                        $statusDiv.html('<div class="alert alert-success"><i class="ph ph-check-circle me-1"></i>Đã tra cứu thành công thông tin WHOIS!</div>');
+                    } else {
+                        $statusDiv.html('<div class="alert alert-warning"><i class="ph ph-warning me-1"></i>Không tìm thấy thông tin ngày đăng ký/hết hạn.</div>');
+                    }
+                } else {
+                    const errorMsg = response.data && response.data.message ? response.data.message : 'Không thể tra cứu thông tin WHOIS';
+                    $statusDiv.html('<div class="alert alert-danger"><i class="ph ph-x-circle me-1"></i>' + errorMsg + '</div>');
+                }
+
+                // Re-enable fields
+                $registrationDate.prop('disabled', false);
+                $expiryDate.prop('disabled', false);
+
+                // If no data was returned, clear the fields
+                if (!response.success || !response.data || !response.data.registration_date) {
+                    $registrationDate.val('');
+                }
+                if (!response.success || !response.data || !response.data.expiry_date) {
+                    $expiryDate.val('');
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                console.error('AJAX error fetching domain information:', textStatus, errorThrown);
+
+                // Reset button state
+                $button.prop('disabled', false).html('<i class="ph ph-magnifying-glass me-1"></i> Looking up');
+
+                $statusDiv.html('<div class="alert alert-danger"><i class="ph ph-x-circle me-1"></i>Lỗi kết nối đến server.</div>');
+                $registrationDate.prop('disabled', false).val('');
+                $expiryDate.prop('disabled', false).val('');
+            }
+        });
+    });
 });
 </script>
 
