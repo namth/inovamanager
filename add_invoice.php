@@ -40,8 +40,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $service_type_clean = sanitize_text_field($service_type);
             $item_total = floatval($_POST['item_total'][$index]);
 
-            // Get VAT rate for this service type
-            $vat_rate = get_vat_rate_for_service($service_type_clean);
+            // Get VAT rate from form submission if available, otherwise from service type
+            if (isset($_POST['vat_rate'][$index]) && !empty($_POST['vat_rate'][$index])) {
+                $vat_rate = floatval($_POST['vat_rate'][$index]);
+            } else {
+                $vat_rate = get_vat_rate_for_service($service_type_clean);
+            }
             $vat_amount = calculate_vat_amount($item_total, $vat_rate);
 
             $item = [
@@ -73,31 +77,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
 
     if ($action === 'add_invoice') {
-        // Generate invoice code using the new helper function
-        $invoice_code = generate_invoice_code($user_id);
+         // Generate invoice code using the new helper function
+         $invoice_code = generate_invoice_code($user_id);
 
-        // Get user's VAT invoice preference
-        $user_vat_settings = get_user_meta($user_id, 'inova_vat_invoice_settings', true);
-        $requires_vat_invoice = 0;
-        if (!empty($user_vat_settings) && isset($user_vat_settings['requires_vat_invoice'])) {
-            $requires_vat_invoice = intval($user_vat_settings['requires_vat_invoice']);
-        }
+         // Get user's VAT invoice preference
+         $user_vat_settings = get_user_meta($user_id, 'inova_vat_invoice_settings', true);
+         $requires_vat_invoice = 0;
+         if (!empty($user_vat_settings) && isset($user_vat_settings['requires_vat_invoice'])) {
+             $requires_vat_invoice = intval($user_vat_settings['requires_vat_invoice']);
+         }
 
-        // Insert new invoice
-        $wpdb->insert($invoices_table, [
-            'invoice_code' => $invoice_code,
-            'user_id' => $user_id,
-            'invoice_date' => $formatted_invoice_date,
-            'due_date' => $formatted_due_date,
-            'sub_total' => $sub_total,
-            'discount_total' => $discount_total,
-            'tax_amount' => $tax_amount,
-            'total_amount' => $total_amount,
-            'notes' => $notes,
-            'status' => isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft',
-            'requires_vat_invoice' => $requires_vat_invoice,
-            'created_by_type' => 'admin',
-            'created_by_id' => get_current_user_id(),
+         // Get partner_id from invoice items (hosting/maintenance)
+         $partner_id = get_partner_id_from_items($items);
+
+         // Insert new invoice
+         $wpdb->insert($invoices_table, [
+             'invoice_code' => $invoice_code,
+             'user_id' => $user_id,
+             'invoice_date' => $formatted_invoice_date,
+             'due_date' => $formatted_due_date,
+             'sub_total' => $sub_total,
+             'discount_total' => $discount_total,
+             'tax_amount' => $tax_amount,
+             'total_amount' => $total_amount,
+             'notes' => $notes,
+             'status' => isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft',
+             'requires_vat_invoice' => $requires_vat_invoice,
+             'created_by_type' => 'admin',
+             'created_by_id' => get_current_user_id(),
+             'partner_id' => $partner_id,
         ]);
 
         $new_invoice_id = $wpdb->insert_id;
@@ -127,6 +135,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $wpdb->insert($invoice_items_table, $insert_data);
         }
+
+        // Create commissions for invoice (Phase 2 integration)
+        create_commissions_for_invoice($new_invoice_id);
 
         echo '<div class="alert alert-success">Hóa đơn đã được tạo thành công!</div>';
 
@@ -610,6 +621,24 @@ $website_data = null;
 // Get all users for dropdown first (needed for legacy variables)
 $users = $wpdb->get_results("SELECT id, name, user_code, email FROM $users_table ORDER BY name");
 
+// Get partner info from invoice items (if admin creating invoice)
+$partner_info = null;
+if (!empty($renewal_products)) {
+    $partner_id = get_partner_id_from_items(array_map(function($p) {
+        return [
+            'service_type' => $p['type'],
+            'service_id' => $p['id']
+        ];
+    }, $renewal_products));
+    
+    if ($partner_id) {
+        $partner_info = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, name, user_code, email FROM $users_table WHERE id = %d",
+            $partner_id
+        ));
+    }
+}
+
 // If we have a single item renewal, populate the legacy variables
 if (!empty($renewal_products) && count($renewal_products) == 1 && 
     in_array($service_type, ['domain', 'hosting', 'maintenance'])) {
@@ -789,7 +818,20 @@ get_header();
                                                 <input type="text" class="form-control" name="invoice_code_display" value="<?php echo $existing_invoice ? esc_attr($existing_invoice->invoice_code) : '(sẽ được tạo tự động)'; ?>" readonly>
                                                 <small class="text-muted">Mã hóa đơn được tạo tự động</small>
                                             </div>
-                                        </div>
+                                            </div>
+                                            
+                                            <?php if ($partner_info): ?>
+                                            <div class="row">
+                                            <div class="col-md-12 mb-3">
+                                                <div class="alert alert-info alert-with-icon" data-notify="container">
+                                                    <span data-notify="icon" class="nc-icon nc-pin-3 me-2"></span>
+                                                    <span data-notify="message">
+                                                        <strong>Đối tác liên quan:</strong> <?php echo esc_html($partner_info->user_code); ?> - <?php echo esc_html($partner_info->name); ?>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            </div>
+                                            <?php endif; ?>
                                         
                                         <div class="row">
                                             <div class="col-md-6 mb-3">
@@ -848,11 +890,12 @@ get_header();
                                                             $vat_amount = isset($item->vat_amount) ? $item->vat_amount : calculate_vat_amount($item->item_total, $vat_rate);
                                                     ?>
                                                     <tr class="invoice-item">
-                                                        <td>
-                                                            <input type="hidden" name="item_id[]" value="<?php echo $item->id; ?>">
-                                                            <input type="hidden" name="service_type[]" value="<?php echo $item->service_type; ?>">
-                                                            <input type="hidden" name="service_id[]" value="<?php echo $item->service_id; ?>">
-                                                            <strong><?php echo ucfirst($item->service_type); ?>:</strong> <?php echo esc_html($item->service_name); ?>
+                                                         <td>
+                                                             <input type="hidden" name="item_id[]" value="<?php echo $item->id; ?>">
+                                                             <input type="hidden" name="service_type[]" value="<?php echo $item->service_type; ?>">
+                                                             <input type="hidden" name="service_id[]" value="<?php echo $item->service_id; ?>">
+                                                             <input type="hidden" name="vat_rate[]" value="<?php echo $vat_rate; ?>">
+                                                             <strong><?php echo ucfirst($item->service_type); ?>:</strong> <?php echo esc_html($item->service_name); ?>
                                                             <?php if (isset($item->website_name) && !empty($item->website_name) && in_array($item->service_type, ['hosting', 'maintenance'])): ?>
                                                                 <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($item->website_name); ?></small>
                                                             <?php endif; ?>
@@ -915,13 +958,14 @@ get_header();
                                                         $item_vat_amount = calculate_vat_amount($unit_price, $item_vat_rate);
                                                     ?>
                                                     <tr class="invoice-item">
-                                                        <td>
-                                                            <input type="hidden" name="item_id[]" value="0">
-                                                            <input type="hidden" name="service_type[]" value="<?php echo $service_type; ?>">
-                                                            <input type="hidden" name="service_id[]" value="<?php echo $service_type == 'domain' ? $domain_id : ($service_type == 'hosting' ? $hosting_id : $maintenance_id); ?>">
-                                                            <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
-                                                            <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
-                                                            <strong><?php echo ucfirst($service_type); ?>:</strong>
+                                                         <td>
+                                                             <input type="hidden" name="item_id[]" value="0">
+                                                             <input type="hidden" name="service_type[]" value="<?php echo $service_type; ?>">
+                                                             <input type="hidden" name="service_id[]" value="<?php echo $service_type == 'domain' ? $domain_id : ($service_type == 'hosting' ? $hosting_id : $maintenance_id); ?>">
+                                                             <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
+                                                             <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
+                                                             <input type="hidden" name="vat_rate[]" value="<?php echo $item_vat_rate; ?>">
+                                                             <strong><?php echo ucfirst($service_type); ?>:</strong>
                                                             <?php
                                                             if ($service_type == 'domain'):
                                                                 echo esc_html($product_data->domain_name);
@@ -989,13 +1033,14 @@ get_header();
                                                             $product_vat_amount = calculate_vat_amount($item_total, $product_vat_rate);
                                                     ?>
                                                     <tr class="invoice-item">
-                                                        <td>
-                                                            <input type="hidden" name="item_id[]" value="0">
-                                                            <input type="hidden" name="service_type[]" value="<?php echo $product['type']; ?>">
-                                                            <input type="hidden" name="service_id[]" value="<?php echo $product['id']; ?>">
-                                                            <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
-                                                            <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
-                                                            <strong><?php echo ucfirst($product['type']); ?>:</strong>
+                                                         <td>
+                                                             <input type="hidden" name="item_id[]" value="0">
+                                                             <input type="hidden" name="service_type[]" value="<?php echo $product['type']; ?>">
+                                                             <input type="hidden" name="service_id[]" value="<?php echo $product['id']; ?>">
+                                                             <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
+                                                             <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
+                                                             <input type="hidden" name="vat_rate[]" value="<?php echo $product_vat_rate; ?>">
+                                                             <strong><?php echo ucfirst($product['type']); ?>:</strong>
                                                             <?php echo esc_html($product['name']); ?>
                                                             <?php if (isset($product['website_name']) && !empty($product['website_name']) && in_array($product['type'], ['hosting', 'maintenance'])): ?>
                                                                 <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($product['website_name']); ?></small>

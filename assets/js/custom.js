@@ -716,6 +716,9 @@ jQuery(document).ready(function($) {
                 var vatRate = getVATRate(serviceType);
                 var vatAmount = calculateVATAmount(total, vatRate);
 
+                // Update vat_rate hidden input so it gets sent to server
+                $row.find('input[name="vat_rate[]"]').val(vatRate);
+
                 var $vatDisplay = $row.find('.item-vat-display');
                 if ($vatDisplay.length > 0) {
                     if (vatAmount > 0) {

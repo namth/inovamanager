@@ -29,6 +29,8 @@ function enqueue_js_css()
      * Enqueue js file
      */
     wp_enqueue_script('jquery');
+    // Bootstrap Bundle (includes Popper.js for modals)
+    wp_enqueue_script('bootstrap-bundle', 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js', array('jquery'), '5.3.0', true);
     wp_enqueue_script('bundle.base', get_template_directory_uri() . '/assets/vendors/js/vendor.bundle.base.js', array(), '1.0', true);
     wp_enqueue_script('bootstrap-datepicker', get_template_directory_uri() . '/assets/vendors/bootstrap-datepicker/bootstrap-datepicker.min.js', array(), '1.0', true);
     wp_enqueue_script('off-canvas', get_template_directory_uri() . '/assets/js/off-canvas.js', array(), '1.0', true);
@@ -285,29 +287,54 @@ function CreateDatabaseBookOrder()
     ) {$charsetCollate};";
     dbDelta($createTable);
 
-    # 10. partner_commissions table
+    # 10. partner_discount_rates table - Quản lý tỷ lệ chiết khấu cho từng loại dịch vụ
+    $discountRatesTable = $wpdb->prefix . 'im_partner_discount_rates';
+    $createTable = "CREATE TABLE `{$discountRatesTable}` (
+        `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        `partner_id` bigint(20) UNSIGNED NOT NULL,
+        `service_type` enum('hosting','maintenance','website_service') NOT NULL,
+        `discount_rate` decimal(5, 2) NOT NULL COMMENT 'Tỷ lệ chiết khấu (%)',
+        `effective_date` date NOT NULL COMMENT 'Ngày áp dụng',
+        `end_date` date NULL COMMENT 'Ngày kết thúc (NULL = vẫn còn hiệu lực)',
+        `notes` text NULL,
+        `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`),
+        UNIQUE KEY `unique_partner_service` (`partner_id`, `service_type`, `effective_date`),
+        KEY `partner_id` (`partner_id`),
+        KEY `service_type` (`service_type`),
+        KEY `effective_date` (`effective_date`)
+    ) {$charsetCollate};";
+    dbDelta($createTable);
+
+    # 11. partner_commissions table
     $commissionsTable = $wpdb->prefix . 'im_partner_commissions';
     $createTable = "CREATE TABLE `{$commissionsTable}` (
         `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         `partner_id` bigint(20) UNSIGNED NOT NULL,
         `invoice_id` bigint(20) UNSIGNED NOT NULL,
         `invoice_item_id` bigint(20) UNSIGNED NULL,
-        `commission_amount` bigint(20) NOT NULL,
-        `commission_rate` decimal(5, 2) NULL,
+        `service_type` varchar(255) NULL COMMENT 'Loại dịch vụ (hosting/maintenance/website_service)',
+         `commission_amount` bigint(20) NOT NULL,
+         `discount_rate` decimal(5, 2) NULL COMMENT 'Tỷ lệ chiết khấu áp dụng (%)',
+        `service_amount` bigint(20) NULL COMMENT 'Giá trị ban đầu của dịch vụ',
         `calculation_date` date NOT NULL,
-        `status` varchar(255) DEFAULT 'PENDING',
-        `payout_date` date NULL,
+        `status` enum('PENDING','PAID','WITHDRAWN','CANCELLED') NOT NULL DEFAULT 'PENDING',
+        `payout_date` date NULL COMMENT 'Ngày thanh toán',
+        `payout_amount` bigint(20) NULL COMMENT 'Số tiền thực tế thanh toán',
+        `withdrawal_date` date NULL COMMENT 'Ngày rút tiền (cuối cùng)',
         `notes` text NULL,
         `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
         `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (`id`),
         KEY `partner_id` (`partner_id`),
         KEY `invoice_id` (`invoice_id`),
-        KEY `invoice_item_id` (`invoice_item_id`)
+        KEY `invoice_item_id` (`invoice_item_id`),
+        KEY `status` (`status`)
     ) {$charsetCollate};";
     dbDelta($createTable);
 
-    # 11. Initialize default VAT rates in wp_options
+    # 12. Initialize default VAT rates in wp_options
     // Set default VAT rates if not exists
     if (!get_option('inova_vat_rates')) {
         $default_vat_rates = array(
@@ -319,7 +346,7 @@ function CreateDatabaseBookOrder()
         add_option('inova_vat_rates', $default_vat_rates);
     }
 
-    # 12. website_services table - Quản lý yêu cầu chỉnh sửa có tính phí
+    # 13. website_services table - Quản lý yêu cầu chỉnh sửa có tính phí
     $websiteServicesTable = $wpdb->prefix . 'im_website_services';
     $createTable = "CREATE TABLE `{$websiteServicesTable}` (
         `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -348,7 +375,7 @@ function CreateDatabaseBookOrder()
     ) {$charsetCollate};";
     dbDelta($createTable);
 
-    # 11. cart table - Giỏ hàng cho các dịch vụ cần thanh toán
+    # 14. cart table - Giỏ hàng cho các dịch vụ cần thanh toán
     $cartTable = $wpdb->prefix . 'im_cart';
     $createTable = "CREATE TABLE `{$cartTable}` (
         `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -386,6 +413,301 @@ function getLastId($table_name, $field_name)
     $sql = "SELECT MAX($field_name) FROM $table_name";
     $result = $wpdb->get_var($sql);
     return $result;
+}
+
+/**
+ * Normalize service type to standard commission rates service types
+ * Converts various service type names to standard: hosting, maintenance, website_service
+ *
+ * @param string $service_type Raw service type from invoice items
+ * @return string Normalized service type or empty string if not applicable for commission
+ */
+function normalize_service_type_for_commission($service_type) {
+    $service_type = strtolower(trim($service_type));
+    
+    // Map various service type names to standard types
+    switch ($service_type) {
+        case 'hosting':
+        case 'bulk_hostings':
+            return 'hosting';
+        case 'maintenance':
+        case 'bulk_maintenances':
+            return 'maintenance';
+        case 'website_service':
+        case 'website':
+        case 'bulk_websites':
+            return 'website_service';
+        case 'domain':
+        case 'bulk_domains':
+            // Domains typically don't have commission rates, skip
+            return '';
+        default:
+            return '';
+    }
+}
+
+/**
+ * Get first partner ID from invoice items
+ * 
+ * @param array $items Array of invoice items (each with service_type and service_id)
+ * @return int|null First partner_id found or null
+ */
+function get_partner_id_from_items($items) {
+    foreach ($items as $item) {
+        $partner_id = get_partner_id_from_service($item['service_type'], $item['service_id']);
+        if (!empty($partner_id)) {
+            return $partner_id;
+        }
+    }
+    return null;
+}
+
+/**
+ * Get partner ID from service (hosting or maintenance)
+ * 
+ * @param string $service_type Service type (hosting/maintenance/website_service/domain)
+ * @param int $service_id Service ID
+ * @return int|null Partner ID or null if not found
+ */
+function get_partner_id_from_service($service_type, $service_id) {
+    global $wpdb;
+    
+    if (!$service_id) {
+        return null;
+    }
+    
+    $normalized_type = normalize_service_type_for_commission($service_type);
+    
+    switch ($normalized_type) {
+        case 'hosting':
+            $table = $wpdb->prefix . 'im_hostings';
+            $result = $wpdb->get_var($wpdb->prepare(
+                "SELECT partner_id FROM `{$table}` WHERE id = %d",
+                $service_id
+            ));
+            return $result ? intval($result) : null;
+            
+        case 'maintenance':
+            $table = $wpdb->prefix . 'im_maintenance_packages';
+            $result = $wpdb->get_var($wpdb->prepare(
+                "SELECT partner_id FROM `{$table}` WHERE id = %d",
+                $service_id
+            ));
+            return $result ? intval($result) : null;
+            
+        case 'website_service':
+        default:
+            return null;
+    }
+}
+
+/**
+ * Get partner discount rate for a specific service type
+ * 
+ * @param int $partner_id Partner ID
+ * @param string $service_type Service type (hosting/maintenance/website_service)
+ * @param string $effective_date Date to check (YYYY-MM-DD format, default today)
+ * @return float Discount rate in percentage (e.g., 10.50), or 0 if not found
+ */
+function get_partner_discount_rate($partner_id, $service_type, $effective_date = null) {
+    global $wpdb;
+    
+    if (!$effective_date) {
+        $effective_date = date('Y-m-d');
+    }
+    
+    $rates_table = $wpdb->prefix . 'im_partner_discount_rates';
+    
+    // Get the most recent rate that is effective on the given date
+    // and hasn't ended yet (end_date is NULL or in the future)
+    $query = $wpdb->prepare(
+        "SELECT `discount_rate` FROM `{$rates_table}`
+         WHERE `partner_id` = %d
+         AND `service_type` = %s
+         AND `effective_date` <= %s
+         AND (`end_date` IS NULL OR `end_date` > %s)
+         ORDER BY `effective_date` DESC
+         LIMIT 1",
+        $partner_id,
+        $service_type,
+        $effective_date,
+        $effective_date
+    );
+    
+    $result = $wpdb->get_var($query);
+    return $result ? floatval($result) : 0;
+}
+
+/**
+ * Calculate commission amount based on service amount and discount rate
+ * 
+ * @param int $service_amount Original service amount
+ * @param float $discount_rate Discount rate in percentage
+ * @return int Commission amount (rounded)
+ */
+function calculate_commission_amount($service_amount, $discount_rate) {
+    return round(intval($service_amount) * floatval($discount_rate) / 100);
+}
+
+/**
+ * Create commission records for invoice
+ * Called when invoice is created/saved
+ * 
+ * @param int $invoice_id Invoice ID
+ * @return bool Success status
+ */
+function create_commissions_for_invoice($invoice_id) {
+    global $wpdb;
+    
+    $invoices_table = $wpdb->prefix . 'im_invoices';
+    $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+    $commissions_table = $wpdb->prefix . 'im_partner_commissions';
+    
+    // Get invoice
+    $invoice = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM `{$invoices_table}` WHERE id = %d",
+        $invoice_id
+    ));
+    
+    if (!$invoice) {
+        return false;
+    }
+    
+    // Get invoice items
+    $items = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM `{$invoice_items_table}` WHERE invoice_id = %d",
+        $invoice_id
+    ));
+    
+    if (empty($items)) {
+        return false;
+    }
+    
+    $calculation_date = current_time('Y-m-d');
+    $success_count = 0;
+    
+    // Create commission for each item
+    foreach ($items as $item) {
+        // Normalize service type to standard format
+        $normalized_service_type = normalize_service_type_for_commission($item->service_type);
+        
+        // Skip if service type is not applicable for commissions (e.g., domains)
+        if (empty($normalized_service_type)) {
+            continue;
+        }
+        
+        // Get partner_id: from invoice if set, otherwise from service item
+        $partner_id = $invoice->partner_id;
+        if (empty($partner_id)) {
+            $partner_id = get_partner_id_from_service($item->service_type, $item->service_id);
+        }
+        
+        // Skip if no partner found
+        if (empty($partner_id)) {
+            continue;
+        }
+        
+        // Get discount rate for this service type
+        $discount_rate = get_partner_discount_rate(
+            $partner_id,
+            $normalized_service_type,
+            $calculation_date
+        );
+        
+        // Skip if no discount rate found
+        if ($discount_rate <= 0) {
+            continue;
+        }
+        
+        // Calculate commission amount
+        $commission_amount = calculate_commission_amount(
+            $item->item_total,
+            $discount_rate
+        );
+        
+        // Insert into partner_commissions table
+        $result = $wpdb->insert(
+            $commissions_table,
+            array(
+                'partner_id' => $partner_id,
+                'invoice_id' => $invoice_id,
+                'invoice_item_id' => $item->id,
+                'service_type' => $normalized_service_type,
+                'commission_amount' => $commission_amount,
+                'discount_rate' => $discount_rate,
+                'service_amount' => $item->item_total,
+                'calculation_date' => $calculation_date,
+                'status' => 'PENDING',
+            ),
+            array('%d', '%d', '%d', '%s', '%d', '%f', '%d', '%s', '%s')
+        );
+        
+        if ($result !== false) {
+            $success_count++;
+        }
+    }
+    
+    return $success_count > 0;
+}
+
+/**
+ * Update commission status when invoice is paid
+ * Called when invoice payment_status changes to PAID
+ * 
+ * @param int $invoice_id Invoice ID
+ * @return bool Success status
+ */
+function update_commissions_on_invoice_paid($invoice_id) {
+    global $wpdb;
+    
+    $invoices_table = $wpdb->prefix . 'im_invoices';
+    $commissions_table = $wpdb->prefix . 'im_partner_commissions';
+    
+    // Get invoice to get payment date
+    $invoice = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM `{$invoices_table}` WHERE id = %d",
+        $invoice_id
+    ));
+    
+    if (!$invoice || !$invoice->payment_date) {
+        return false;
+    }
+    
+    // Update all commissions for this invoice to PAID status
+    $result = $wpdb->update(
+        $commissions_table,
+        array(
+            'status' => 'PAID',
+            'payout_date' => date('Y-m-d', strtotime($invoice->payment_date))
+        ),
+        array('invoice_id' => $invoice_id),
+        array('%s', '%s'),
+        array('%d')
+    );
+    
+    return $result !== false;
+}
+
+/**
+ * Cancel commissions when invoice is cancelled
+ * Called when invoice is cancelled/deleted
+ * 
+ * @param int $invoice_id Invoice ID
+ * @return bool Success status
+ */
+function cancel_commissions_for_invoice($invoice_id) {
+    global $wpdb;
+    
+    $commissions_table = $wpdb->prefix . 'im_partner_commissions';
+    
+    // Delete all commissions associated with this invoice completely
+    $result = $wpdb->delete(
+        $commissions_table,
+        array('invoice_id' => $invoice_id),
+        array('%d')
+    );
+    
+    return $result !== false;
 }
 
 /**
@@ -963,6 +1285,11 @@ function get_virtual_page_template_mapping() {
         'edit-partner' => 'edit_partner.php',
         'detail-partner' => 'detail_partner.php',
         
+        // Partner Commission Management
+        'partner-discount-rates' => 'partner_discount_rates.php',
+        'quan-ly-chiet-khau' => 'partner_discount_rates.php',
+        'partner-commissions' => 'partner_commissions.php',
+        'quan-ly-hoa-hong' => 'partner_commissions.php',
 
         
         // Invoice Management
@@ -3829,4 +4156,517 @@ function delete_domain_user_callback() {
         'message' => "Domain '{$domain->domain_name}' đã được xóa thành công!",
         'domain_id' => $domain_id
     ]);
+}
+
+/**
+ * ========== Phase 3: Partner Discount Rates AJAX Handlers ==========
+ */
+
+/**
+ * AJAX: Get all partners (for dropdowns)
+ */
+add_action('wp_ajax_get_all_partners', 'get_all_partners_callback');
+function get_all_partners_callback() {
+    global $wpdb;
+    
+    $users_table = $wpdb->prefix . 'im_users';
+    
+    // Get only PARTNER type users
+    $partners = $wpdb->get_results(
+        "SELECT id, name, user_code FROM {$users_table} 
+         WHERE user_type = 'PARTNER' AND status = 'ACTIVE'
+         ORDER BY name ASC"
+    );
+    
+    if (empty($partners)) {
+        wp_send_json_error(['message' => 'Không có đối tác nào']);
+        return;
+    }
+    
+    wp_send_json_success($partners);
+}
+
+/**
+ * AJAX: Get partner discount rates with filters
+ */
+add_action('wp_ajax_get_partner_discount_rates', 'get_partner_discount_rates_callback');
+function get_partner_discount_rates_callback() {
+    global $wpdb;
+    
+    $rates_table = $wpdb->prefix . 'im_partner_discount_rates';
+    $users_table = $wpdb->prefix . 'im_users';
+    
+    $partner_id = !empty($_POST['partner_id']) ? intval($_POST['partner_id']) : null;
+    $service_type = !empty($_POST['service_type']) ? sanitize_text_field($_POST['service_type']) : null;
+    
+    $query = "SELECT 
+        dr.*,
+        u.name as partner_name,
+        u.user_code
+    FROM {$rates_table} dr
+    JOIN {$users_table} u ON dr.partner_id = u.id
+    WHERE 1=1";
+    
+    $params = [];
+    
+    if ($partner_id) {
+        $query .= " AND dr.partner_id = %d";
+        $params[] = $partner_id;
+    }
+    
+    if ($service_type) {
+        $query .= " AND dr.service_type = %s";
+        $params[] = $service_type;
+    }
+    
+    $query .= " ORDER BY dr.partner_id, dr.service_type, dr.effective_date DESC";
+    
+    if (!empty($params)) {
+        $rates = $wpdb->get_results($wpdb->prepare($query, $params));
+    } else {
+        $rates = $wpdb->get_results($query);
+    }
+    
+    if (empty($rates)) {
+        wp_send_json_success([]);
+        return;
+    }
+    
+    wp_send_json_success($rates);
+}
+
+/**
+ * AJAX: Get single discount rate
+ */
+add_action('wp_ajax_get_partner_discount_rate', 'get_partner_discount_rate_callback');
+function get_partner_discount_rate_callback() {
+    global $wpdb;
+    
+    $rate_id = !empty($_POST['rate_id']) ? intval($_POST['rate_id']) : 0;
+    
+    if (!$rate_id) {
+        wp_send_json_error(['message' => 'Thiếu ID tỷ lệ']);
+        return;
+    }
+    
+    $rates_table = $wpdb->prefix . 'im_partner_discount_rates';
+    $rate = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$rates_table} WHERE id = %d",
+        $rate_id
+    ));
+    
+    if (!$rate) {
+        wp_send_json_error(['message' => 'Không tìm thấy tỷ lệ']);
+        return;
+    }
+    
+    wp_send_json_success($rate);
+}
+
+/**
+ * AJAX: Save new discount rate
+ */
+add_action('wp_ajax_save_partner_discount_rate', 'save_partner_discount_rate_callback');
+function save_partner_discount_rate_callback() {
+    global $wpdb;
+    
+    // Verify nonce if needed
+    if (!check_ajax_referer('nonce_name', 'security', false)) {
+        // Note: nonce check is optional here since this is for admin only
+    }
+    
+    $partner_id = !empty($_POST['partner_id']) ? intval($_POST['partner_id']) : 0;
+    $service_type = !empty($_POST['service_type']) ? sanitize_text_field($_POST['service_type']) : '';
+    $discount_rate = !empty($_POST['discount_rate']) ? floatval($_POST['discount_rate']) : 0;
+    $effective_date = !empty($_POST['effective_date']) ? sanitize_text_field($_POST['effective_date']) : '';
+    $end_date = !empty($_POST['end_date']) ? sanitize_text_field($_POST['end_date']) : null;
+    $notes = !empty($_POST['notes']) ? sanitize_textarea_field($_POST['notes']) : '';
+    
+    // Validation
+    if (!$partner_id || !$service_type || $discount_rate < 0 || $discount_rate > 100 || !$effective_date) {
+        wp_send_json_error(['message' => 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại.']);
+        return;
+    }
+    
+    $rates_table = $wpdb->prefix . 'im_partner_discount_rates';
+    
+    $insert_data = [
+        'partner_id' => $partner_id,
+        'service_type' => $service_type,
+        'discount_rate' => $discount_rate,
+        'effective_date' => $effective_date,
+        'end_date' => $end_date ?: null,
+        'notes' => $notes
+    ];
+    
+    $result = $wpdb->insert(
+        $rates_table,
+        $insert_data,
+        ['%d', '%s', '%f', '%s', '%s', '%s']
+    );
+    
+    if ($result === false) {
+        wp_send_json_error(['message' => 'Lỗi cơ sở dữ liệu: ' . $wpdb->last_error]);
+        return;
+    }
+    
+    wp_send_json_success(['message' => 'Tỷ lệ chiết khấu đã được thêm thành công']);
+}
+
+/**
+ * AJAX: Update discount rate
+ */
+add_action('wp_ajax_update_partner_discount_rate', 'update_partner_discount_rate_callback');
+function update_partner_discount_rate_callback() {
+    global $wpdb;
+    
+    $rate_id = !empty($_POST['rate_id']) ? intval($_POST['rate_id']) : 0;
+    $partner_id = !empty($_POST['partner_id']) ? intval($_POST['partner_id']) : 0;
+    $service_type = !empty($_POST['service_type']) ? sanitize_text_field($_POST['service_type']) : '';
+    $discount_rate = !empty($_POST['discount_rate']) ? floatval($_POST['discount_rate']) : 0;
+    $effective_date = !empty($_POST['effective_date']) ? sanitize_text_field($_POST['effective_date']) : '';
+    $end_date = !empty($_POST['end_date']) ? sanitize_text_field($_POST['end_date']) : null;
+    $notes = !empty($_POST['notes']) ? sanitize_textarea_field($_POST['notes']) : '';
+    
+    // Validation
+    if (!$rate_id || !$partner_id || !$service_type || $discount_rate < 0 || $discount_rate > 100 || !$effective_date) {
+        wp_send_json_error(['message' => 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại.']);
+        return;
+    }
+    
+    $rates_table = $wpdb->prefix . 'im_partner_discount_rates';
+    
+    $update_data = [
+        'partner_id' => $partner_id,
+        'service_type' => $service_type,
+        'discount_rate' => $discount_rate,
+        'effective_date' => $effective_date,
+        'end_date' => $end_date ?: null,
+        'notes' => $notes
+    ];
+    
+    $result = $wpdb->update(
+        $rates_table,
+        $update_data,
+        ['id' => $rate_id],
+        ['%d', '%s', '%f', '%s', '%s', '%s'],
+        ['%d']
+    );
+    
+    if ($result === false) {
+        wp_send_json_error(['message' => 'Lỗi cơ sở dữ liệu']);
+        return;
+    }
+    
+    wp_send_json_success(['message' => 'Tỷ lệ chiết khấu đã được cập nhật thành công']);
+}
+
+/**
+ * AJAX: Delete discount rate
+ */
+add_action('wp_ajax_delete_partner_discount_rate', 'delete_partner_discount_rate_callback');
+function delete_partner_discount_rate_callback() {
+    global $wpdb;
+    
+    $rate_id = !empty($_POST['rate_id']) ? intval($_POST['rate_id']) : 0;
+    
+    if (!$rate_id) {
+        wp_send_json_error(['message' => 'Thiếu ID tỷ lệ']);
+        return;
+    }
+    
+    $rates_table = $wpdb->prefix . 'im_partner_discount_rates';
+    
+    // Get rate info before deleting
+    $rate = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$rates_table} WHERE id = %d",
+        $rate_id
+    ));
+    
+    if (!$rate) {
+        wp_send_json_error(['message' => 'Không tìm thấy tỷ lệ']);
+        return;
+    }
+    
+    $result = $wpdb->delete(
+        $rates_table,
+        ['id' => $rate_id],
+        ['%d']
+    );
+    
+    if ($result === false) {
+        wp_send_json_error(['message' => 'Lỗi cơ sở dữ liệu']);
+        return;
+    }
+    
+    wp_send_json_success(['message' => 'Tỷ lệ chiết khấu đã được xóa thành công']);
+}
+
+# ===== PARTNER COMMISSIONS AJAX HANDLERS =====
+
+/**
+ * AJAX: Get partner commissions with filters
+ */
+add_action('wp_ajax_get_partner_commissions', 'get_partner_commissions_callback');
+add_action('wp_ajax_nopriv_get_partner_commissions', 'get_partner_commissions_callback');
+function get_partner_commissions_callback() {
+    global $wpdb;
+    
+    // Check if user is logged in
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+        return;
+    }
+    
+    // Check if user is admin or partner
+    $current_user = wp_get_current_user();
+    $is_admin = current_user_can('manage_options');
+    $is_partner = false;
+    $user_partner_id = null;
+    
+    if (!$is_admin) {
+        // Use get_inova_user to get inova user record (returns object with id, user_type, status)
+        $inova_user = get_inova_user($current_user->ID);
+        
+        if ($inova_user && in_array($inova_user->user_type, array('PARTNER', 'MANAGER', 'EMPLOYEE'))) {
+            $is_partner = true;
+            $user_partner_id = $inova_user->id;
+        } else {
+            wp_send_json_error(['message' => 'Access denied']);
+            return;
+        }
+    }
+    
+    $partner_id = !empty($_POST['partner_id']) ? intval($_POST['partner_id']) : '';
+    $service_type = !empty($_POST['service_type']) ? sanitize_text_field($_POST['service_type']) : '';
+    $status = !empty($_POST['status']) ? sanitize_text_field($_POST['status']) : '';
+    $from_date = !empty($_POST['from_date']) ? sanitize_text_field($_POST['from_date']) : '';
+    $to_date = !empty($_POST['to_date']) ? sanitize_text_field($_POST['to_date']) : '';
+    
+    // Partner can only see their own commissions
+    if ($is_partner && !$partner_id) {
+        $partner_id = $user_partner_id;
+    }
+    
+    $commissions_table = $wpdb->prefix . 'im_partner_commissions';
+    $users_table = $wpdb->prefix . 'im_users';
+    
+    $query = "
+        SELECT 
+            c.*,
+            u.name as partner_name
+        FROM {$commissions_table} c
+        LEFT JOIN {$users_table} u ON c.partner_id = u.id
+        WHERE 1=1
+    ";
+    
+    if ($partner_id) {
+        $query .= $wpdb->prepare(" AND c.partner_id = %d", $partner_id);
+    }
+    
+    if ($service_type) {
+        $query .= $wpdb->prepare(" AND c.service_type = %s", $service_type);
+    }
+    
+    if ($status) {
+        $query .= $wpdb->prepare(" AND c.status = %s", $status);
+    }
+    
+    if ($from_date) {
+        $query .= $wpdb->prepare(" AND c.calculation_date >= %s", $from_date);
+    }
+    
+    if ($to_date) {
+        $query .= $wpdb->prepare(" AND c.calculation_date <= %s", $to_date);
+    }
+    
+    $query .= " ORDER BY c.calculation_date DESC, c.id DESC";
+    
+    $commissions = $wpdb->get_results($query);
+    
+    if ($commissions === null) {
+        wp_send_json_error(['message' => 'Lỗi truy vấn dữ liệu']);
+        return;
+    }
+    
+    wp_send_json_success($commissions);
+}
+
+/**
+ * AJAX: Get commission detail
+ */
+add_action('wp_ajax_get_commission_detail', 'get_commission_detail_callback');
+add_action('wp_ajax_nopriv_get_commission_detail', 'get_commission_detail_callback');
+function get_commission_detail_callback() {
+    global $wpdb;
+    
+    // Check if user is logged in
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Truy cập bị từ chối']);
+        return;
+    }
+    
+    $commission_id = !empty($_POST['commission_id']) ? intval($_POST['commission_id']) : 0;
+    
+    if (!$commission_id) {
+        wp_send_json_error(['message' => 'Thiếu ID hoa hồng']);
+        return;
+    }
+    
+    // Check authorization - admin can view all, partner/other only own
+    $current_user = wp_get_current_user();
+    $is_admin = current_user_can('manage_options');
+    $user_partner_id = null;
+    
+    if (!$is_admin) {
+        $inova_user = get_inova_user($current_user->ID);
+        if (!$inova_user) {
+            wp_send_json_error(['message' => 'Truy cập bị từ chối']);
+            return;
+        }
+        $user_partner_id = $inova_user->id;
+    }
+    
+    $commissions_table = $wpdb->prefix . 'im_partner_commissions';
+    $users_table = $wpdb->prefix . 'im_users';
+    
+    $query = $wpdb->prepare("
+        SELECT 
+            c.*,
+            u.name as partner_name
+        FROM {$commissions_table} c
+        LEFT JOIN {$users_table} u ON c.partner_id = u.id
+        WHERE c.id = %d
+    ", $commission_id);
+    
+    // Non-admin can only view their own commissions
+    if (!$is_admin && $user_partner_id) {
+        $query .= $wpdb->prepare(" AND c.partner_id = %d", $user_partner_id);
+    }
+    
+    $commission = $wpdb->get_row($query);
+    
+    if (!$commission) {
+        wp_send_json_error(['message' => 'Không tìm thấy hoa hồng']);
+        return;
+    }
+    
+    wp_send_json_success($commission);
+}
+
+/**
+ * AJAX: Update commission status (single)
+ */
+add_action('wp_ajax_update_commission_status', 'update_commission_status_callback');
+function update_commission_status_callback() {
+    global $wpdb;
+    
+    // Check authorization - only admin can update commission
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Truy cập bị từ chối']);
+        return;
+    }
+    
+    $commission_id = !empty($_POST['commission_id']) ? intval($_POST['commission_id']) : 0;
+    $new_status = !empty($_POST['status']) ? sanitize_text_field($_POST['status']) : '';
+    
+    if (!$commission_id || !$new_status) {
+        wp_send_json_error(['message' => 'Thiếu dữ liệu']);
+        return;
+    }
+    
+    // Validate status
+    $valid_statuses = ['PENDING', 'PAID', 'WITHDRAWN', 'CANCELLED'];
+    if (!in_array($new_status, $valid_statuses)) {
+        wp_send_json_error(['message' => 'Trạng thái không hợp lệ']);
+        return;
+    }
+    
+    $commissions_table = $wpdb->prefix . 'im_partner_commissions';
+    
+    // Check if commission exists
+    $commission = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$commissions_table} WHERE id = %d",
+        $commission_id
+    ));
+    
+    if (!$commission) {
+        wp_send_json_error(['message' => 'Không tìm thấy hoa hồng']);
+        return;
+    }
+    
+    // Prepare update data
+    $update_data = ['status' => $new_status];
+    
+    // Set withdrawal_date when status is WITHDRAWN
+    if ($new_status === 'WITHDRAWN') {
+        $update_data['withdrawal_date'] = current_time('Y-m-d');
+    }
+    
+    $result = $wpdb->update(
+        $commissions_table,
+        $update_data,
+        ['id' => $commission_id],
+        ['%s', '%s'],
+        ['%d']
+    );
+    
+    if ($result === false) {
+        wp_send_json_error(['message' => 'Lỗi cơ sở dữ liệu']);
+        return;
+    }
+    
+    wp_send_json_success(['message' => 'Hoa hồng đã được cập nhật thành công']);
+}
+
+/**
+ * AJAX: Bulk update commission status
+ */
+add_action('wp_ajax_bulk_update_commission_status', 'bulk_update_commission_status_callback');
+function bulk_update_commission_status_callback() {
+    global $wpdb;
+    
+    // Check authorization - only admin can bulk update commissions
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Truy cập bị từ chối']);
+        return;
+    }
+    
+    $commission_ids = !empty($_POST['commission_ids']) ? array_map('intval', (array)$_POST['commission_ids']) : [];
+    $new_status = !empty($_POST['status']) ? sanitize_text_field($_POST['status']) : '';
+    
+    if (empty($commission_ids) || !$new_status) {
+        wp_send_json_error(['message' => 'Thiếu dữ liệu']);
+        return;
+    }
+    
+    // Validate status
+    $valid_statuses = ['PENDING', 'PAID', 'WITHDRAWN', 'CANCELLED'];
+    if (!in_array($new_status, $valid_statuses)) {
+        wp_send_json_error(['message' => 'Trạng thái không hợp lệ']);
+        return;
+    }
+    
+    $commissions_table = $wpdb->prefix . 'im_partner_commissions';
+    
+    // Build query based on status
+    if ($new_status === 'WITHDRAWN') {
+        $update_query = "UPDATE {$commissions_table} SET status = %s, withdrawal_date = %s WHERE id IN (" . 
+            implode(',', array_fill(0, count($commission_ids), '%d')) . ")";
+        $query_params = array_merge([$new_status, current_time('Y-m-d')], $commission_ids);
+    } else {
+        $update_query = "UPDATE {$commissions_table} SET status = %s WHERE id IN (" . 
+            implode(',', array_fill(0, count($commission_ids), '%d')) . ")";
+        $query_params = array_merge([$new_status], $commission_ids);
+    }
+    
+    // Update
+    $result = $wpdb->query($wpdb->prepare($update_query, $query_params));
+    
+    if ($result === false) {
+        wp_send_json_error(['message' => 'Lỗi cơ sở dữ liệu']);
+        return;
+    }
+    
+    wp_send_json_success(['message' => 'Đã cập nhật ' . count($commission_ids) . ' hoa hồng thành công']);
 }

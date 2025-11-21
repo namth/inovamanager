@@ -23,6 +23,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             // First delete related invoice items
             $wpdb->delete($invoice_items_table, array('invoice_id' => $invoice_id));
             
+            // Cancel commissions associated with this invoice (Phase 2 integration)
+            cancel_commissions_for_invoice($invoice_id);
+            
             // Then delete the invoice
             $result = $wpdb->delete($invoice_table, array('id' => $invoice_id));
             

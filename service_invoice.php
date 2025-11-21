@@ -49,21 +49,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $wpdb->query('START TRANSACTION');
         
         try {
-            // Delete invoice items first
-            $wpdb->delete($invoice_items_table, array('invoice_id' => $existing_invoice->id));
-            
-            // Delete the invoice
-            $result = $wpdb->delete($invoice_table, array('id' => $existing_invoice->id));
-            
-            if ($result === false) {
-                throw new Exception('Failed to delete invoice');
-            }
-            
-            $wpdb->query('COMMIT');
-            $message = '<div class="alert alert-success"><strong>Thành công!</strong> Hóa đơn đã được xóa. Bạn có thể tạo hóa đơn mới.</div>';
-            
-            // Reset existing invoice to allow creating new one
-            $existing_invoice = null;
+             // Delete invoice items first
+             $wpdb->delete($invoice_items_table, array('invoice_id' => $existing_invoice->id));
+             
+             // Cancel commissions associated with this invoice (Phase 2 integration)
+             cancel_commissions_for_invoice($existing_invoice->id);
+             
+             // Delete the invoice
+             $result = $wpdb->delete($invoice_table, array('id' => $existing_invoice->id));
+             
+             if ($result === false) {
+                 throw new Exception('Failed to delete invoice');
+             }
+             
+             $wpdb->query('COMMIT');
+             $message = '<div class="alert alert-success"><strong>Thành công!</strong> Hóa đơn đã được xóa. Bạn có thể tạo hóa đơn mới.</div>';
+             
+             // Reset existing invoice to allow creating new one
+             $existing_invoice = null;
             
         } catch (Exception $e) {
             $wpdb->query('ROLLBACK');
@@ -109,6 +112,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 // Create first invoice for 50%
                 $first_amount = $total_amount * 0.5;
+                // Get partner_id from service (if hosting/maintenance)
+                $partner_id = get_partner_id_from_service('website_service', $service_id);
+                
                 $invoice_data = array(
                     'invoice_code' => $first_invoice_code,
                     'user_id' => $service->owner_user_id,
@@ -124,6 +130,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     'notes' => $invoice_notes . "\n\nThanh toán 50% trước khi bắt đầu thực hiện dịch vụ.",
                     'created_by_type' => 'system',
                     'created_by_id' => get_current_user_id(),
+                    'partner_id' => $partner_id,
                     'created_at' => current_time('mysql'),
                     'updated_at' => current_time('mysql')
                 );
@@ -211,11 +218,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     throw new Exception('Failed to create second invoice item');
                 }
 
+                // Create commissions for invoices (Phase 2 integration)
+                create_commissions_for_invoice($first_invoice_id);
+                create_commissions_for_invoice($second_invoice_id);
+                
                 $message = '<div class="alert alert-success"><strong>Thành công!</strong> Đã tạo 2 hóa đơn: ' . $first_invoice_code . ' (50% trước) và ' . $second_invoice_code . ' (50% sau khi hoàn thành).</div>';
                 $created_invoice_id = $first_invoice_id; // Store for redirect
             } else {
                 // Generate single invoice code
                 $invoice_code = generate_invoice_code($service->owner_user_id);
+
+                // Get partner_id from service (if hosting/maintenance)
+                $partner_id = get_partner_id_from_service('website_service', $service_id);
 
                 // Create single full payment invoice
                 $invoice_data = array(
@@ -233,6 +247,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     'notes' => $invoice_notes,
                     'created_by_type' => 'system',
                     'created_by_id' => get_current_user_id(),
+                    'partner_id' => $partner_id,
                     'created_at' => current_time('mysql'),
                     'updated_at' => current_time('mysql')
                 );
@@ -267,6 +282,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     throw new Exception('Failed to create invoice item');
                 }
 
+                // Create commissions for invoice (Phase 2 integration)
+                create_commissions_for_invoice($invoice_id);
+                
                 $message = '<div class="alert alert-success"><strong>Thành công!</strong> Hóa đơn ' . $invoice_code . ' đã được tạo.</div>';
                 $created_invoice_id = $invoice_id; // Store for redirect
             }

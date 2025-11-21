@@ -174,3 +174,9 @@ select.form-control, select.typeahead, select.tt-query, select.tt-hint, .select2
     left: 25px;
     top: -2px;
 }
+tr:last-child td:first-child {
+  border-bottom-left-radius: 14px;
+}
+tr:last-child td:last-child {
+  border-bottom-right-radius: 14px;
+}

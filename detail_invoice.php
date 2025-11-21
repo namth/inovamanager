@@ -152,6 +152,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                         }
                     }
 
+                    // Update commission status when invoice is paid (Phase 2 integration)
+                    update_commissions_on_invoice_paid($invoice_id);
+
                     $wpdb->query('COMMIT');
                     $success_message = 'Hóa đơn đã được đánh dấu là đã thanh toán. Ngày hết hạn của các sản phẩm/dịch vụ đã được cập nhật.';
 
@@ -179,6 +182,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                 $result = $wpdb->update($invoice_table, $update_data, array('id' => $invoice_id));
                 
                 if ($result !== false) {
+                    // If status is cancelled, update commissions (Phase 2 integration)
+                    if ($new_status === 'cancelled' || $new_status === 'canceled') {
+                        cancel_commissions_for_invoice($invoice_id);
+                    }
+                    
                     $success_message = 'Trạng thái hóa đơn đã được cập nhật.';
                 } else {
                     $error_message = 'Có lỗi xảy ra khi cập nhật trạng thái hóa đơn.';
@@ -197,7 +205,8 @@ $invoice = $wpdb->get_row($wpdb->prepare("
         u.email AS customer_email,
         u.tax_code,
         u.address AS customer_address,
-        u.phone_number AS customer_phone
+        u.phone_number AS customer_phone,
+        u.requires_vat_invoice
     FROM 
         $invoice_table i
     LEFT JOIN 
@@ -212,10 +221,17 @@ if (!$invoice) {
     exit;
 }
 
+// Check user permission - only admin/manager can edit invoice
+$can_edit_invoice = current_user_can('manage_options') || 
+                    current_user_can('edit_users') || 
+                    (is_user_logged_in() && get_current_user_id() == $invoice->user_id && current_user_can('manage_own_invoice'));
+
+
 // Get invoice items with service details and website names
 $websites_table = $wpdb->prefix . 'im_websites';
 $hostings_table = $wpdb->prefix . 'im_hostings';
 $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+$commissions_table = $wpdb->prefix . 'im_partner_commissions';
 
 $invoice_items = $wpdb->get_results($wpdb->prepare("
     SELECT
@@ -232,7 +248,8 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
             WHEN ii.service_type = 'hosting' THEN (SELECT w2.name FROM $websites_table w2 WHERE w2.hosting_id = ii.service_id LIMIT 1)
             WHEN ii.service_type = 'maintenance' THEN (SELECT w3.name FROM $websites_table w3 WHERE w3.maintenance_package_id = ii.service_id LIMIT 1)
             ELSE NULL
-        END AS website_name
+        END AS website_name,
+        COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status IN ('WITHDRAWN', 'PAID')), 0) AS withdrawn_commission
     FROM
         $invoice_items_table ii
     LEFT JOIN
@@ -241,6 +258,17 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
         ii.invoice_id = %d
     ORDER BY ii.id
 ", $invoice_id));
+
+// Calculate totals and check if has commissions to show
+$has_commission_deduction = false;
+$total_commission_deduction = 0;
+
+foreach ($invoice_items as $item) {
+    if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0) {
+        $has_commission_deduction = true;
+        $total_commission_deduction += $item->withdrawn_commission;
+    }
+}
 
 // Check for related invoices (for 50% payment system)
 $related_invoices = $wpdb->get_results($wpdb->prepare("
@@ -330,6 +358,7 @@ get_header();
                                     </span>
                                 </div>
                             </div>
+                            <?php if ($can_edit_invoice): ?>
                             <div class="dropdown">
                                 <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                                     <i class="ph ph-gear me-2"></i>Thao tác
@@ -352,6 +381,7 @@ get_header();
                                     </a></li>
                                 </ul>
                             </div>
+                            <?php endif; ?>
                         </div>
 
                         <!-- Invoice Info -->
@@ -399,98 +429,139 @@ get_header();
                         </div>
 
                         <!-- Invoice Items -->
-                        <h6 class="text-muted mb-3">Chi tiết dịch vụ</h6>
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Dịch vụ</th>
-                                        <th class="text-center">Số lượng</th>
-                                        <th class="text-end">Đơn giá</th>
-                                        <th class="text-end">Thành tiền</th>
-                                        <th class="text-end">VAT</th>
-                                        <th class="text-end">Tổng</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($invoice_items as $item): ?>
-                                    <tr>
-                                        <td>
-                                            <div>
-                                                <strong><?php echo esc_html($item->service_title ?: $item->description); ?></strong>
-                                                <?php if ($item->service_reference): ?>
-                                                    <br><small class="text-muted"><?php echo esc_html($item->service_reference); ?></small>
-                                                <?php endif; ?>
-                                                <?php if (isset($item->website_name) && !empty($item->website_name) && in_array($item->service_type, ['hosting', 'maintenance'])): ?>
-                                                    <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> Website: <?php echo esc_html($item->website_name); ?></small>
-                                                <?php endif; ?>
-                                            </div>
-                                        </td>
-                                        <td class="text-center"><?php echo number_format($item->quantity); ?></td>
-                                        <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
-                                        <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
-                                        <td class="text-end">
-                                            <?php if (isset($item->vat_amount) && $item->vat_amount > 0): ?>
-                                                <?php echo number_format($item->vat_amount); ?> VNĐ
-                                                <br><small class="text-muted">(<?php echo number_format($item->vat_rate, 1); ?>%)</small>
-                                            <?php else: ?>
-                                                <span class="text-muted">-</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="text-end"><strong><?php echo number_format($item->item_total + (isset($item->vat_amount) ? $item->vat_amount : 0)); ?> VNĐ</strong></td>
-                                    </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                         <h6 class="text-muted mb-3">Chi tiết dịch vụ</h6>
+                         <div class="table-responsive">
+                             <table class="table table-striped">
+                                 <thead class="table-light">
+                                     <tr>
+                                         <th>Dịch vụ</th>
+                                         <th class="text-center">Số lượng</th>
+                                         <th class="text-end">Đơn giá</th>
+                                         <th class="text-end">Thành tiền</th>
+                                         <th class="text-end">VAT</th>
+                                         <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
+                                         <th class="text-end">Chiết khấu</th>
+                                         <?php endif; ?>
+                                         <th class="text-end">Tổng</th>
+                                     </tr>
+                                 </thead>
+                                 <tbody>
+                                     <?php foreach ($invoice_items as $item): ?>
+                                     <tr>
+                                         <td>
+                                             <div>
+                                                 <strong><?php echo esc_html($item->service_title ?: $item->description); ?></strong>
+                                                 <?php if ($item->service_reference): ?>
+                                                     <br><small class="text-muted"><?php echo esc_html($item->service_reference); ?></small>
+                                                 <?php endif; ?>
+                                                 <?php if (isset($item->website_name) && !empty($item->website_name) && in_array($item->service_type, ['hosting', 'maintenance'])): ?>
+                                                     <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> Website: <?php echo esc_html($item->website_name); ?></small>
+                                                 <?php endif; ?>
+                                             </div>
+                                         </td>
+                                         <td class="text-center"><?php echo number_format($item->quantity); ?></td>
+                                         <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
+                                         <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                                         <td class="text-end">
+                                             <?php
+                                             // Calculate VAT for this item
+                                             $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
+                                             $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
+                                             
+                                             if ($item_vat_calculated > 0): ?>
+                                                 <?php echo number_format($item_vat_calculated); ?> VNĐ
+                                                 <br><small class="text-muted">(<?php echo number_format($item_vat_rate, 1); ?>%)</small>
+                                             <?php else: ?>
+                                                 <span class="text-muted">-</span>
+                                             <?php endif; ?>
+                                         </td>
+                                         <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
+                                         <td class="text-end">
+                                             <?php if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0): ?>
+                                                 <span class="text-danger">-<?php echo number_format($item->withdrawn_commission); ?> VNĐ</span>
+                                             <?php else: ?>
+                                                 <span class="text-muted">-</span>
+                                             <?php endif; ?>
+                                         </td>
+                                         <?php endif; ?>
+                                         <td class="text-end"><strong><?php 
+                                             // Use calculated VAT rate
+                                             $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
+                                             $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
+                                             $item_total_final = $item->item_total + $item_vat - $item_commission;
+                                             echo number_format($item_total_final); 
+                                         ?> VNĐ</strong></td>
+                                     </tr>
+                                     <?php endforeach; ?>
+                                 </tbody>
+                             </table>
+                         </div>
 
                         <!-- Invoice Totals -->
-                        <div class="row justify-content-end">
-                            <div class="col-md-6">
-                                <table class="table table-sm">
-                                    <tr>
-                                        <td class="text-muted">Tạm tính:</td>
-                                        <td class="text-end"><?php echo number_format($invoice->sub_total); ?> VNĐ</td>
-                                    </tr>
-                                    <?php if ($invoice->discount_total > 0): ?>
-                                    <tr>
-                                        <td class="text-muted">Giảm giá:</td>
-                                        <td class="text-end text-danger">-<?php echo number_format($invoice->discount_total); ?> VNĐ</td>
-                                    </tr>
-                                    <?php endif; ?>
-                                    <?php if ($invoice->tax_amount > 0): ?>
-                                    <tr>
-                                        <td class="text-muted">Thuế:</td>
-                                        <td class="text-end"><?php echo number_format($invoice->tax_amount); ?> VNĐ</td>
-                                    </tr>
-                                    <?php endif; ?>
-                                    <tr class="table-primary">
-                                        <td><strong>Tổng cộng:</strong></td>
-                                        <td class="text-end"><strong><?php echo number_format($invoice->total_amount); ?> VNĐ</strong></td>
-                                    </tr>
-                                    <?php if ($invoice->paid_amount > 0): ?>
-                                    <tr class="table-success">
-                                        <td><strong>Đã thanh toán:</strong></td>
-                                        <td class="text-end text-success"><strong><?php echo number_format($invoice->paid_amount); ?> VNĐ</strong></td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Còn lại:</strong></td>
-                                        <td class="text-end"><strong><?php echo number_format($invoice->total_amount - $invoice->paid_amount); ?> VNĐ</strong></td>
-                                    </tr>
-                                    <?php endif; ?>
-                                </table>
-                            </div>
-                        </div>
+                         <div class="row justify-content-end">
+                             <div class="col-md-6">
+                                 <table class="table table-sm">
+                                     <tr>
+                                         <td class="text-muted">Tạm tính:</td>
+                                         <td class="text-end"><?php echo number_format($invoice->sub_total); ?> VNĐ</td>
+                                     </tr>
+                                     <?php if ($invoice->discount_total > 0): ?>
+                                     <tr>
+                                         <td class="text-muted">Giảm giá:</td>
+                                         <td class="text-end text-danger">-<?php echo number_format($invoice->discount_total); ?> VNĐ</td>
+                                     </tr>
+                                     <?php endif; ?>
+                                     <?php if ($invoice->tax_amount > 0): ?>
+                                     <tr>
+                                         <td class="text-muted">Thuế:</td>
+                                         <td class="text-end"><?php echo number_format($invoice->tax_amount); ?> VNĐ</td>
+                                     </tr>
+                                     <?php endif; ?>
+                                     
+                                     <!-- Commission deduction for pending invoices -->
+                                     <?php if ($total_commission_deduction > 0 && $invoice->status === 'pending'): ?>
+                                     <tr class="table-light">
+                                         <td class="text-muted">Chiết khấu (rút tiền hoa hồng):</td>
+                                         <td class="text-end text-danger">-<?php echo number_format($total_commission_deduction); ?> VNĐ</td>
+                                     </tr>
+                                     <?php endif; ?>
+                                     
+                                     <tr class="table-primary">
+                                         <td><strong>Tổng cộng:</strong></td>
+                                         <td class="text-end"><strong><?php 
+                                             $final_total = $invoice->total_amount;
+                                             if ($invoice->status === 'pending') {
+                                                 $final_total -= $total_commission_deduction;
+                                             }
+                                             echo number_format($final_total); 
+                                         ?> VNĐ</strong></td>
+                                     </tr>
+                                     <?php if ($invoice->paid_amount > 0): ?>
+                                     <tr class="table-success">
+                                         <td><strong>Đã thanh toán:</strong></td>
+                                         <td class="text-end text-success"><strong><?php echo number_format($invoice->paid_amount); ?> VNĐ</strong></td>
+                                     </tr>
+                                     <tr>
+                                         <td><strong>Còn lại:</strong></td>
+                                         <td class="text-end"><strong><?php 
+                                             $remaining = $final_total - $invoice->paid_amount;
+                                             echo number_format(max(0, $remaining)); 
+                                         ?> VNĐ</strong></td>
+                                     </tr>
+                                     <?php endif; ?>
+                                 </table>
+                             </div>
+                         </div>
 
-                        <!-- Notes -->
-                        <?php if ($invoice->notes): ?>
-                        <div class="mt-4">
-                            <h6 class="text-muted mb-2">Ghi chú</h6>
-                            <div class="alert alert-light">
-                                <?php echo nl2br(esc_html($invoice->notes)); ?>
-                            </div>
-                        </div>
-                        <?php endif; ?>
+                        <!-- Notes - only visible to admins -->
+                         <?php if ($can_edit_invoice && $invoice->notes): ?>
+                         <div class="mt-4">
+                             <h6 class="text-muted mb-2">Ghi chú</h6>
+                             <div class="alert alert-light">
+                                 <?php echo nl2br(esc_html($invoice->notes)); ?>
+                             </div>
+                         </div>
+                         <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -539,6 +610,13 @@ get_header();
                                 <tr>
                                     <td class="text-muted"><small>Nội dung CK:</small></td>
                                     <td><strong><small><?php echo esc_html($qr_add_info); ?></small></strong></td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted"><small>Số tiền:</small></td>
+                                    <td><strong><small><?php 
+                                        $qr_amount = $remaining_amount - $total_commission_deduction;
+                                        echo number_format(max(0, $qr_amount)); 
+                                    ?> VNĐ</small></strong></td>
                                 </tr>
                             </table>
                         </div>
@@ -595,30 +673,32 @@ get_header();
                         </h6>
                         
                         <div class="d-flex flex-column">
-                            <?php if ($invoice->status !== 'paid'): ?>
-                            <button type="button" class="btn btn-success mb-2" data-bs-toggle="modal" data-bs-target="#paymentModal">
-                                <i class="ph ph-credit-card me-2"></i>Đánh dấu đã thanh toán
-                            </button>
-                            <?php endif; ?>
-                            
-                            <button type="button" class="btn btn-danger mb-2" data-bs-toggle="modal" data-bs-target="#statusModal">
-                                <i class="ph ph-arrow-clockwise me-2"></i>Cập nhật trạng thái
-                            </button>
-                            
-                            <a href="<?php echo home_url('/danh-sach-hoa-don/'); ?>" class="btn btn-secondary mb-2">
-                                <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
-                            </a>
+                             <?php if ($can_edit_invoice): ?>
+                             <?php if ($invoice->status !== 'paid'): ?>
+                             <button type="button" class="btn btn-success mb-2" data-bs-toggle="modal" data-bs-target="#paymentModal">
+                                 <i class="ph ph-credit-card me-2"></i>Đánh dấu đã thanh toán
+                             </button>
+                             <?php endif; ?>
+                             
+                             <button type="button" class="btn btn-danger mb-2" data-bs-toggle="modal" data-bs-target="#statusModal">
+                                 <i class="ph ph-arrow-clockwise me-2"></i>Cập nhật trạng thái
+                             </button>
+                             <?php endif; ?>
+                             
+                             <a href="<?php echo home_url('/danh-sach-hoa-don/'); ?>" class="btn btn-secondary mb-2">
+                                 <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
+                             </a>
 
-                            <a href="<?php echo admin_url('admin-ajax.php?action=generate_invoice_pdf&invoice_id=' . $invoice->id); ?>"
-                               class="btn btn-primary mb-2" target="_blank">
-                                <i class="ph ph-file-pdf me-2"></i>Xuất PDF
-                            </a>
+                             <a href="<?php echo admin_url('admin-ajax.php?action=generate_invoice_pdf&invoice_id=' . $invoice->id); ?>"
+                                class="btn btn-primary mb-2" target="_blank">
+                                 <i class="ph ph-file-pdf me-2"></i>Xuất PDF
+                             </a>
 
-                            <a href="<?php echo home_url('/print-invoice/?invoice_id=' . $invoice->id); ?>"
-                               class="btn btn-info" target="_blank">
-                                <i class="ph ph-printer me-2"></i>In hóa đơn
-                            </a>
-                        </div>
+                             <a href="<?php echo home_url('/print-invoice/?invoice_id=' . $invoice->id); ?>"
+                                class="btn btn-info" target="_blank">
+                                 <i class="ph ph-printer me-2"></i>In hóa đơn
+                             </a>
+                         </div>
                     </div>
                 </div>
             </div>
@@ -626,7 +706,8 @@ get_header();
     </div>
 </div>
 
-<!-- Payment Modal -->
+<!-- Payment Modal - only visible to admins -->
+<?php if ($can_edit_invoice): ?>
 <div class="modal fade" id="paymentModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -686,7 +767,7 @@ get_header();
     </div>
 </div>
 
-<!-- Status Update Modal -->
+<!-- Status Update Modal - only visible to admins -->
 <div class="modal fade" id="statusModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -737,6 +818,7 @@ get_header();
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <?php if ($auto_open_payment && $invoice->status !== 'paid'): ?>
 <script>

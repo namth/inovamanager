@@ -79,8 +79,33 @@ $user_type = get_inova_user_type();
              </a>
          </li>
          <?php endif; ?>
+        
+        <!-- Commission View - PARTNER ONLY -->
+        <?php if (!$is_admin && ($user_type === 'PARTNER' || $user_type === 'MANAGER' || $user_type === 'EMPLOYEE')): ?>
+        <li class="nav-item nav-category">Hoa hồng</li>
+        <li class="nav-item">
+            <a class="nav-link" href="<?php echo home_url('/partner-commissions/'); ?>">
+                <i class="menu-icon ph ph-wallet"></i>
+                <span class="menu-title">Hoa hồng của tôi</span>
+            </a>
+        </li>
+        <?php endif; ?>
 
         <?php if ($is_admin): ?>
+        <!-- Commission Management - ADMIN ONLY -->
+        <li class="nav-item nav-category">Quản lý Hoa hồng</li>
+        <li class="nav-item">
+            <a class="nav-link" href="<?php echo home_url('/partner-commissions/'); ?>">
+                <i class="menu-icon ph ph-wallet"></i>
+                <span class="menu-title">Hoa hồng Đối tác</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" href="<?php echo home_url('/partner-discount-rates/'); ?>">
+                <i class="menu-icon ph ph-percent"></i>
+                <span class="menu-title">Tỷ lệ Chiết khấu</span>
+            </a>
+        </li>
         <!-- Admin Section - ADMIN ONLY -->
         <li class="nav-item nav-category">Dành cho quản trị viên</li>
         <li class="nav-item">
