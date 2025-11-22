@@ -1293,12 +1293,16 @@ function get_virtual_page_template_mapping() {
 
         
         // Invoice Management
-        'invoice-list' => 'list_invoice.php',
-        'list-invoice' => 'list_invoice.php',
-        'invoices' => 'list_invoice.php',
-        'add-invoice' => 'add_invoice.php',
-        'detail-invoice' => 'detail_invoice.php',
-        'invoice-success' => 'invoice_success.php',
+         'invoice-list' => 'list_invoice.php',
+         'list-invoice' => 'list_invoice.php',
+         'invoices' => 'list_invoice.php',
+         'danh-sach-hoa-don' => 'list_invoice.php',
+         'add-invoice' => 'add_invoice.php',
+         'detail-invoice' => 'detail_invoice.php',
+         'chi-tiet-hoa-don' => 'detail_invoice.php',
+         'invoice-success' => 'invoice_success.php',
+         'public-invoice' => 'public_invoice.php',
+         'xem-hoa-don' => 'public_invoice.php',
 
         // Cart Management
         'gio-hang' => 'cart.php',
@@ -2136,6 +2140,35 @@ function generate_payment_qr_code($amount, $add_info = '', $requires_vat_invoice
         $url .= '?' . http_build_query($params);
     }
 
+    return $url;
+}
+
+/**
+ * Generate public invoice view link with security token
+ * Allows non-authenticated users to view invoice with token
+ *
+ * @param int $invoice_id Invoice ID
+ * @return string Public invoice URL with token
+ */
+function get_public_invoice_url($invoice_id) {
+    global $wpdb;
+    $invoice_table = $wpdb->prefix . 'im_invoices';
+    
+    // Get invoice to extract creation date
+    $invoice = $wpdb->get_row($wpdb->prepare("
+        SELECT id, created_at FROM $invoice_table WHERE id = %d
+    ", $invoice_id));
+    
+    if (!$invoice) {
+        return '';
+    }
+    
+    // Generate token based on invoice ID and creation date
+    $token = base64_encode($invoice->id . '|' . $invoice->created_at);
+    
+    // Build URL with token
+    $url = home_url('/public-invoice/?invoice_id=' . $invoice_id . '&token=' . urlencode($token));
+    
     return $url;
 }
 

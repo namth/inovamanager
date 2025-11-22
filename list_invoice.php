@@ -128,6 +128,50 @@ $query = "
 // Execute query
 $invoices = $wpdb->get_results($query);
 
+// Get invoice items for each invoice
+$invoice_items_map = array();
+$websites_table = $wpdb->prefix . 'im_websites';
+
+if (!empty($invoices)) {
+    $invoice_ids = wp_list_pluck($invoices, 'id');
+    $invoice_ids_placeholders = implode(',', array_fill(0, count($invoice_ids), '%d'));
+    
+    $items_query = $wpdb->prepare("
+        SELECT id, invoice_id, service_type, service_id, description, quantity, unit_price, item_total
+        FROM $invoice_items_table
+        WHERE invoice_id IN ($invoice_ids_placeholders)
+        ORDER BY invoice_id ASC, id ASC
+    ", $invoice_ids);
+    
+    $all_items = $wpdb->get_results($items_query);
+    
+    // Map items to invoices and get website information
+    foreach ($all_items as $item) {
+        // Get website names for hosting and maintenance services
+        $website_names = array();
+        if (in_array($item->service_type, ['hosting', 'maintenance'])) {
+            $website_infos = $wpdb->get_results($wpdb->prepare("
+                SELECT name FROM $websites_table 
+                WHERE (hosting_id = %d OR maintenance_package_id = %d)
+                ORDER BY name ASC
+            ", $item->service_id, $item->service_id));
+            
+            if (!empty($website_infos)) {
+                foreach ($website_infos as $website_info) {
+                    $website_names[] = $website_info->name;
+                }
+            }
+        }
+        
+        $item->website_names = $website_names;
+        
+        if (!isset($invoice_items_map[$item->invoice_id])) {
+            $invoice_items_map[$item->invoice_id] = array();
+        }
+        $invoice_items_map[$item->invoice_id][] = $item;
+    }
+}
+
 get_header();
 ?>
 
@@ -203,6 +247,7 @@ get_header();
                                 <tr>
                                     <th>Mã hóa đơn</th>
                                     <th>Khách hàng</th>
+                                    <th>Sản phẩm/Dịch vụ</th>
                                     <th>Ngày xuất</th>
                                     <th>Hạn thanh toán</th>
                                     <th>Tổng tiền</th>
@@ -214,7 +259,7 @@ get_header();
                             <tbody>
                                 <?php if (empty($invoices)): ?>
                                 <tr>
-                                    <td colspan="8" class="text-center">Không tìm thấy hóa đơn nào</td>
+                                    <td colspan="9" class="text-center">Không tìm thấy hóa đơn nào</td>
                                 </tr>
                                 <?php else: ?>
                                     <?php foreach ($invoices as $invoice): ?>
@@ -225,9 +270,27 @@ get_header();
                                             </a>
                                         </td>
                                         <td>
-                                            <span><?php echo esc_html($invoice->user_code . ' - ' . $invoice->customer_name); ?></span>
-                                        </td>
-                                        <td><?php echo date('d/m/Y', strtotime($invoice->invoice_date)); ?></td>
+                                             <span><?php echo esc_html($invoice->user_code . ' - ' . $invoice->customer_name); ?></span>
+                                         </td>
+                                         <td>
+                                              <div class="d-flex flex-column">
+                                                  <?php
+                                                  if (isset($invoice_items_map[$invoice->id]) && !empty($invoice_items_map[$invoice->id])) {
+                                                      foreach ($invoice_items_map[$invoice->id] as $item) {
+                                                          echo '<span class="mb-2">' . esc_html($item->description);
+                                                          if (!empty($item->website_names)) {
+                                                              $websites_string = implode(', ', array_map('esc_html', $item->website_names));
+                                                              echo '<br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> (' . $websites_string . ')</small>';
+                                                          }
+                                                          echo '</span>';
+                                                      }
+                                                  } else {
+                                                      echo '<span class="text-muted">Không có sản phẩm</span>';
+                                                  }
+                                                  ?>
+                                              </div>
+                                          </td>
+                                         <td><?php echo date('d/m/Y', strtotime($invoice->invoice_date)); ?></td>
                                         <td><?php echo date('d/m/Y', strtotime($invoice->due_date)); ?></td>
                                         <td><?php echo number_format($invoice->total_amount, 0, ',', '.'); ?> VNĐ</td>
                                         <td><?php echo number_format($invoice->paid_amount, 0, ',', '.'); ?> VNĐ</td>

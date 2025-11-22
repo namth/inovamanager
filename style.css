@@ -180,3 +180,6 @@ tr:last-child td:first-child {
 tr:last-child td:last-child {
   border-bottom-right-radius: 14px;
 }
+.bg-light-danger {
+    background: #f95e521f;
+}

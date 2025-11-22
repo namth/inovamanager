@@ -629,6 +629,35 @@ get_header();
                         </div>
                     </div>
                 </div>
+
+                <!-- Copy Invoice Link Box -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <i class="ph ph-link me-2"></i>Chia sẻ hóa đơn
+                        </h6>
+                        <p class="text-muted small mb-3">Copy link để gửi cho khách hàng</p>
+
+                        <?php
+                        // Generate public invoice link
+                        $public_invoice_link = home_url('/public-invoice/?invoice_id=' . $invoice->id . '&token=' . urlencode(base64_encode($invoice->id . '|' . $invoice->created_at)));
+                        ?>
+
+                        <div class="input-group mb-2">
+                            <input type="text" class="form-control" id="invoiceLinkInput" 
+                                   value="<?php echo esc_attr($public_invoice_link); ?>" readonly>
+                            <button class="btn btn-outline-primary" type="button" id="copyInvoiceLinkBtn" 
+                                    data-link="<?php echo esc_attr($public_invoice_link); ?>">
+                                <i class="ph ph-copy me-1"></i>Copy
+                            </button>
+                        </div>
+
+                        <small class="text-muted d-block">
+                            <i class="ph ph-info me-1"></i>
+                            Khách hàng có thể xem hóa đơn chi tiết qua link này.
+                        </small>
+                    </div>
+                </div>
                 <?php
                     endif;
                 endif;
@@ -839,8 +868,56 @@ jQuery(document).ready(function($) {
 <?php endif; ?>
 
 <script>
-// Form validation for payment modal
+// Form validation for payment modal and copy invoice link
 jQuery(document).ready(function($) {
+    /**
+     * Copy invoice link handler
+     */
+    $(document).on('click', '#copyInvoiceLinkBtn', function(e) {
+        e.preventDefault();
+        const link = $(this).data('link');
+        const inputField = $('#invoiceLinkInput');
+        
+        // Select the input field and copy
+        inputField.select();
+        
+        // Use modern clipboard API if available, fallback to exec command
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(link).then(function() {
+                // Show success feedback
+                const btn = $('#copyInvoiceLinkBtn');
+                const originalHtml = btn.html();
+                btn.html('<i class="ph ph-check me-1"></i>Đã copy');
+                btn.addClass('btn-success').removeClass('btn-outline-primary');
+                
+                setTimeout(function() {
+                    btn.html(originalHtml);
+                    btn.removeClass('btn-success').addClass('btn-outline-primary');
+                }, 2000);
+            }).catch(function() {
+                // Fallback to exec command if clipboard API fails
+                document.execCommand('copy');
+                showCopyFeedback();
+            });
+        } else {
+            // Fallback for older browsers
+            document.execCommand('copy');
+            showCopyFeedback();
+        }
+        
+        function showCopyFeedback() {
+            const btn = $('#copyInvoiceLinkBtn');
+            const originalHtml = btn.html();
+            btn.html('<i class="ph ph-check me-1"></i>Đã copy');
+            btn.addClass('btn-success').removeClass('btn-outline-primary');
+            
+            setTimeout(function() {
+                btn.html(originalHtml);
+                btn.removeClass('btn-success').addClass('btn-outline-primary');
+            }, 2000);
+        }
+    });
+
     const paymentForm = document.querySelector('#paymentModal form');
     if (paymentForm) {
         paymentForm.addEventListener('submit', function(e) {
