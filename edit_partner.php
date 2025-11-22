@@ -128,7 +128,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <select class="js-example-basic-single w-100" name="partner_id">
                                         <option value="">-- Không có đối tác quản lý --</option>
                                         <?php
-                                        $partners = $wpdb->get_results("SELECT * FROM $users_table WHERE user_type = 'PARTNER' ORDER BY name");
+                                        $partners = $wpdb->get_results("SELECT * FROM $users_table ORDER BY name");
                                         foreach ($partners as $partner) {
                                             $selected = ($user->partner_id == $partner->id) ? 'selected' : '';
                                             echo '<option value="' . $partner->id . '" ' . $selected . '>' . $partner->user_code . ' - ' . $partner->name . '</option>';

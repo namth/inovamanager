@@ -196,11 +196,11 @@ function get_invoice_pdf_html($invoice_id) {
     $html .= '
         <div class="header clearfix">
             <div class="company-info">
-                <div class="company-name">INOVA MANAGER</div>
-                <div>Địa chỉ: 123 Đường ABC, Quận XYZ, TP.HCM</div>
-                <div>Điện thoại: 1900-xxxx</div>
+                <div class="company-name">Công ty TNHH Công Nghệ INOVA</div>
+                <div>Địa chỉ: Số 5 hẻm 95/81/62 Vũ Xuân Thiều, P. Sài Đồng, Q. Long Biên, Hà Nội</div>
+                <div>Điện thoại: 0366.096.339</div>
                 <div>Email: info@inova.vn</div>
-                <div>Mã số thuế: 0123456789</div>
+                <div>Mã số thuế: 0109882536</div>
             </div>
             <div class="invoice-info">
                 <div class="invoice-title">HÓA ĐƠN</div>

@@ -29,20 +29,20 @@ function enqueue_js_css()
      * Enqueue js file
      */
     wp_enqueue_script('jquery');
-    // Bootstrap Bundle (includes Popper.js for modals)
+    // Bootstrap Bundle (includes Popper.js for modals) - must load after jquery
     wp_enqueue_script('bootstrap-bundle', 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js', array('jquery'), '5.3.0', true);
-    wp_enqueue_script('bundle.base', get_template_directory_uri() . '/assets/vendors/js/vendor.bundle.base.js', array(), '1.0', true);
-    wp_enqueue_script('bootstrap-datepicker', get_template_directory_uri() . '/assets/vendors/bootstrap-datepicker/bootstrap-datepicker.min.js', array(), '1.0', true);
-    wp_enqueue_script('off-canvas', get_template_directory_uri() . '/assets/js/off-canvas.js', array(), '1.0', true);
-    wp_enqueue_script('template', get_template_directory_uri() . '/assets/js/template.js', array(), '1.0', true);
-    wp_enqueue_script('settings', get_template_directory_uri() . '/assets/js/settings.js', array(), '1.0', true);
-    wp_enqueue_script('hoverable-collapse', get_template_directory_uri() . '/assets/js/hoverable-collapse.js', array(), '1.0', true);
-    wp_enqueue_script('todolist', get_template_directory_uri() . '/assets/js/todolist.js', array(), '1.0', true);
+    wp_enqueue_script('bundle.base', get_template_directory_uri() . '/assets/vendors/js/vendor.bundle.base.js', array('jquery'), '1.0', true);
+    wp_enqueue_script('bootstrap-datepicker', get_template_directory_uri() . '/assets/vendors/bootstrap-datepicker/bootstrap-datepicker.min.js', array('jquery'), '1.0', true);
+    wp_enqueue_script('off-canvas', get_template_directory_uri() . '/assets/js/off-canvas.js', array('jquery'), '1.0', true);
+    wp_enqueue_script('template', get_template_directory_uri() . '/assets/js/template.js', array('jquery'), '1.0', true);
+    wp_enqueue_script('settings', get_template_directory_uri() . '/assets/js/settings.js', array('jquery'), '1.0', true);
+    wp_enqueue_script('hoverable-collapse', get_template_directory_uri() . '/assets/js/hoverable-collapse.js', array('jquery'), '1.0', true);
+    wp_enqueue_script('todolist', get_template_directory_uri() . '/assets/js/todolist.js', array('jquery'), '1.0', true);
     wp_enqueue_script('phosphor-icon', 'https://unpkg.com/@phosphor-icons/web', array(), '1.0', true);
-    wp_enqueue_script('select2.base', get_template_directory_uri() . '/assets/vendors/select2/select2.min.js', array(), '1.0', true);
-    wp_enqueue_script('select2', get_template_directory_uri() . '/assets/js/select2.js', array(), '1.0', true);
-    wp_enqueue_script('datepicker', get_template_directory_uri() . '/assets/js/datepicker.js', array(), '1.0', true);
-    wp_enqueue_script('custom', get_template_directory_uri() . '/assets/js/custom.js', array('jquery'), '1.0', true);
+    wp_enqueue_script('select2.base', get_template_directory_uri() . '/assets/vendors/select2/select2.min.js', array('jquery'), '1.0', true);
+    wp_enqueue_script('select2', get_template_directory_uri() . '/assets/js/select2.js', array('jquery', 'select2.base'), '1.0', true);
+    wp_enqueue_script('datepicker', get_template_directory_uri() . '/assets/js/datepicker.js', array('jquery', 'bootstrap-datepicker'), '1.0', true);
+    wp_enqueue_script('custom', get_template_directory_uri() . '/assets/js/custom.js', array('jquery', 'bootstrap-bundle'), '1.0', true);
     wp_localize_script('custom', 'AJAX', array(
         'ajaxurl' => admin_url('admin-ajax.php'),
         'vat_rates' => get_option('inova_vat_rates', array(

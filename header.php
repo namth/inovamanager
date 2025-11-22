@@ -62,6 +62,10 @@ $current_user = wp_get_current_user();
             </a>
           </li>
 
+          <li class="nav-item">
+            Xin chào, <span class="fw-semibold"><?php echo $current_user->display_name; ?></span>
+          </li>
+
           <li class="nav-item dropdown d-none d-lg-block user-dropdown">
             <a class="nav-link" id="UserDropdown" href="#" data-bs-toggle="dropdown" aria-expanded="false">
               <img class="img-xs rounded-circle"
@@ -71,17 +75,12 @@ $current_user = wp_get_current_user();
                       ?>" alt="Profile image">
             </a>
             <div class="dropdown-menu dropdown-menu-right navbar-dropdown" aria-labelledby="UserDropdown">
-              <div class="dropdown-header text-center">
-                <a class="nav-link" id="UserDropdown" href="<?php 
-                                                              # display admin url
-                                                              echo admin_url();
-                                                              ?>">
-                  <img class="img-md rounded-circle"
-                    src="<?php 
-                          # get user avatar and display url of avatar
-                          echo get_avatar_url($current_user->ID);
-                        ?>" alt="Profile image">
-                </a>
+              <div class="dropdown-header text-center" style="cursor: pointer;" onclick="window.location.href='<?php echo esc_url(admin_url()); ?>'">
+                <img class="img-md rounded-circle"
+                  src="<?php 
+                        # get user avatar and display url of avatar
+                        echo get_avatar_url($current_user->ID);
+                      ?>" alt="Profile image">
                 <p class="mb-1 mt-3 fw-semibold"><?php echo $current_user->display_name; ?></p>
                 <p class="fw-light text-muted mb-0"><?php echo $current_user->user_email; ?></p>
               </div>
