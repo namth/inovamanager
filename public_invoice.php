@@ -457,15 +457,15 @@ get_header('nologin');
     <div class="public-invoice-container">
         <!-- Header -->
          <div class="invoice-header">
-             <h1 class="text-dark">HÓA ĐƠN</h1>
-             <p class="text-muted"><?php echo esc_html($invoice->invoice_code); ?></p>
+             <h1 class="text-dark">HÓA ĐƠN DỊCH VỤ</h1>
+             <p class="text-muted"><?php echo 'Hạn thanh toán: ' . date('d/m/Y', strtotime($invoice->due_date)); ?></p>
              <p>
                  <?php
                  $badge_class = 'bg-secondary';
                  if ($invoice->status === 'paid') {
                      $badge_class = 'bg-light-success text-success';
                  } elseif ($invoice->status === 'pending') {
-                     $badge_class = 'bg-light-warning text-dark';
+                     $badge_class = 'bg-light-warning text-warning';
                  } elseif ($invoice->status === 'canceled') {
                      $badge_class = 'bg-light-danger text-danger';
                  }
@@ -479,19 +479,19 @@ get_header('nologin');
             <!-- Invoice and Customer Info -->
              <div class="invoice-info-row">
                  <div class="info-section">
-                     <h3 class="text-muted">Thông tin hóa đơn</h3>
+                     <h3 class="text-muted">Thông tin nhà cung cấp</h3>
                     <table class="info-table">
                         <tr>
-                            <td>Mã hóa đơn:</td>
-                            <td><?php echo esc_html($invoice->invoice_code); ?></td>
+                            <td>Tên công ty:</td>
+                            <td>CÔNG TY TNHH CÔNG NGHỆ INOVA</td>
                         </tr>
                         <tr>
-                            <td>Ngày hóa đơn:</td>
-                            <td><?php echo date('d/m/Y', strtotime($invoice->invoice_date)); ?></td>
+                            <td>Mã số thuế:</td>
+                            <td>0109882536</td>
                         </tr>
                         <tr>
-                            <td>Hạn thanh toán:</td>
-                            <td><?php echo date('d/m/Y', strtotime($invoice->due_date)); ?></td>
+                            <td>Email:</td>
+                            <td>inovavietnam@gmail.com</td>
                         </tr>
                         <?php if ($invoice->payment_date): ?>
                         <tr>
