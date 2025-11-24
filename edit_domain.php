@@ -61,6 +61,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $expiry_date = date('Y-m-d', strtotime($registration_date . " + {$registration_period_years} years"));
             }
 
+            // Encrypt management_password before updating if provided
+            $encrypted_password = !empty($management_password) ? im_encrypt_password($management_password) : $domain->management_password;
+            
             $data = array(
                 'domain_name' => $domain_name,
                 'owner_user_id' => $owner_user_id,
@@ -74,7 +77,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'dns_management' => $dns_management,
                 'management_url' => $management_url,
                 'management_username' => $management_username,
-                'management_password' => $management_password,
+                'management_password' => $encrypted_password,
                 'notes' => $notes
             );
             
@@ -322,14 +325,14 @@ get_header();
                                         </div>
                                         
                                         <div class="form-group mb-3">
-                                            <label for="management_password" class="fw-bold">Password</label>
-                                            <div class="input-group">
-                                                <input type="password" class="form-control" id="management_password" name="management_password" value="<?php echo esc_attr($domain->management_password); ?>">
-                                                <button class="btn btn-secondary toggle-password" type="button">
-                                                    <i class="ph ph-eye"></i>
-                                                </button>
-                                            </div>
-                                        </div>
+                                             <label for="management_password" class="fw-bold">Password</label>
+                                             <div class="input-group">
+                                                 <input type="password" class="form-control" id="management_password" name="management_password" value="<?php echo esc_attr(im_decrypt_password($domain->management_password)); ?>">
+                                                 <button class="btn btn-secondary toggle-password" type="button">
+                                                     <i class="ph ph-eye"></i>
+                                                 </button>
+                                             </div>
+                                         </div>
                                     </div>
                                 </div>
                             </div>

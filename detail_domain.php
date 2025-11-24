@@ -261,11 +261,12 @@ get_header();
                                                 <th>Mật khẩu</th>
                                                 <td>
                                                     <div class="input-group">
-                                                        <input type="password" class="form-control" id="domain-password" value="<?php echo esc_attr($domain->management_password); ?>" readonly>
+                                                        <?php $decrypted_password = im_decrypt_password($domain->management_password); ?>
+                                                        <input type="password" class="form-control" id="domain-password" value="<?php echo esc_attr($decrypted_password); ?>" readonly>
                                                         <button class="btn btn-inverse-secondary border-secondary toggle-password" type="button">
                                                             <i class="ph ph-eye"></i>
                                                         </button>
-                                                        <button class="btn btn-secondary" type="button" onclick="navigator.clipboard.writeText('<?php echo esc_js($domain->management_password); ?>')">
+                                                        <button class="btn btn-secondary" type="button" onclick="navigator.clipboard.writeText('<?php echo esc_js($decrypted_password); ?>')">
                                                             <i class="ph ph-copy"></i>
                                                         </button>
                                                     </div>

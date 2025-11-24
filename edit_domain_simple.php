@@ -66,17 +66,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
             }
             
+            // Encrypt management_password before updating if provided
+            $encrypted_password = !empty($management_password) ? im_encrypt_password($management_password) : $domain->management_password;
+            
             // Build data array
-            $data = array(
-                'domain_name' => $domain_name,
-                'registration_date' => $registration_date,
-                'registration_period_years' => $registration_period_years,
-                'expiry_date' => $expiry_date,
-                'management_url' => $management_url,
-                'management_username' => $management_username,
-                'management_password' => $management_password,
-                'notes' => $notes
-            );
+             $data = array(
+                 'domain_name' => $domain_name,
+                 'registration_date' => $registration_date,
+                 'registration_period_years' => $registration_period_years,
+                 'expiry_date' => $expiry_date,
+                 'management_url' => $management_url,
+                 'management_username' => $management_username,
+                 'management_password' => $encrypted_password,
+                 'notes' => $notes
+             );
             
             // Update database
             $update = $wpdb->update(
@@ -235,14 +238,14 @@ get_header();
                                 </div>
 
                                 <div class="form-group mb-3">
-                                    <label for="management_password" class="fw-bold">Password</label>
-                                    <div class="input-group">
-                                        <input type="password" class="form-control" id="management_password" name="management_password" placeholder="Password" value="<?php echo esc_attr($domain->management_password); ?>">
-                                        <button class="btn btn-secondary toggle-password" type="button">
-                                            <i class="ph ph-eye"></i>
-                                        </button>
-                                    </div>
-                                </div>
+                                     <label for="management_password" class="fw-bold">Password</label>
+                                     <div class="input-group">
+                                         <input type="password" class="form-control" id="management_password" name="management_password" placeholder="Password" value="<?php echo esc_attr(im_decrypt_password($domain->management_password)); ?>">
+                                         <button class="btn btn-secondary toggle-password" type="button">
+                                             <i class="ph ph-eye"></i>
+                                         </button>
+                                     </div>
+                                 </div>
 
                                 <!-- Notes -->
                                 <div class="form-group mb-3">

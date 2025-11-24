@@ -9,6 +9,7 @@ $users_table = $wpdb->prefix . 'im_users';
 $domains_table = $wpdb->prefix . 'im_domains';
 $hostings_table = $wpdb->prefix . 'im_hostings';
 $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+$website_services_table = $wpdb->prefix . 'im_website_services';
 $product_catalog_table = $wpdb->prefix . 'im_product_catalog';
 
 // Get all cart items grouped by user
@@ -106,6 +107,7 @@ get_header();
                                                 $service_price = 0;
                                                 $expiry_date = '';
                                                 $service_icon = '';
+                                                $service_type_text = '';
 
                                                 switch ($cart_item->service_type) {
                                                     case 'domain':
@@ -155,7 +157,29 @@ get_header();
                                                         $service_icon = 'ph-wrench';
                                                         $service_type_text = 'Bảo trì';
                                                         break;
-                                                }
+
+                                                    case 'website_service':
+                                                        $service = $wpdb->get_row($wpdb->prepare("
+                                                            SELECT ws.title, ws.fixed_price, ws.daily_rate, ws.estimated_manday, ws.pricing_type, w.name AS website_name
+                                                            FROM {$website_services_table} ws
+                                                            LEFT JOIN {$wpdb->prefix}im_websites w ON ws.website_id = w.id
+                                                            WHERE ws.id = %d
+                                                        ", $cart_item->service_id));
+                                                        if ($service) {
+                                                            $service_name = $service->title;
+                                                            if ($service->pricing_type === 'FIXED' && $service->fixed_price) {
+                                                                $service_price = $service->fixed_price;
+                                                            } elseif ($service->pricing_type === 'DAILY' && $service->daily_rate && $service->estimated_manday) {
+                                                                $service_price = $service->daily_rate * $service->estimated_manday;
+                                                            } else {
+                                                                $service_price = 0;
+                                                            }
+                                                            $expiry_date = '';
+                                                        }
+                                                        $service_icon = 'ph-gear';
+                                                        $service_type_text = 'Dịch vụ Website';
+                                                        break;
+                                                    }
 
                                                 $item_total = $service_price * $cart_item->quantity;
                                                 $total += $item_total;

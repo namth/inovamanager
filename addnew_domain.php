@@ -60,6 +60,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $expiry_date = date('Y-m-d', strtotime($registration_date . " + {$registration_period_years} years"));
             }
 
+            // Encrypt management_password before inserting
+            $encrypted_password = !empty($management_password) ? im_encrypt_password($management_password) : '';
+            
             $data = array(
                 'domain_name' => $domain_name,
                 'owner_user_id' => $owner_user_id,
@@ -75,7 +78,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'dns_management' => $dns_management,
                 'management_url' => $management_url,
                 'management_username' => $management_username,
-                'management_password' => $management_password,
+                'management_password' => $encrypted_password,
                 'notes' => $notes
             );
             

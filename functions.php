@@ -5,6 +5,55 @@ require_once get_template_directory() . '/vendor/autoload.php';
 /* Include API functions */
 require_once get_template_directory() . '/api.php';
 
+/* ===== PASSWORD ENCRYPTION/DECRYPTION FUNCTIONS ===== */
+/**
+ * Encrypt sensitive password fields (management_password, admin_password)
+ * Uses AES-256-CBC encryption with a fixed key stored in code
+ * 
+ * @param string $data Plain text password to encrypt
+ * @return string Base64 encoded encrypted password
+ */
+function im_encrypt_password($data) {
+    if (empty($data)) {
+        return $data;
+    }
+    
+    // Fixed encryption key (base64 encoded 32-byte key for AES-256)
+    $key = base64_decode('WDJzUWxSM3d1L3VkZmhzajlrMjI3M2lvcXc4ZWZnMmM=');
+    $iv = openssl_random_pseudo_bytes(openssl_cipher_iv_length('aes-256-cbc'));
+    
+    $encrypted = openssl_encrypt($data, 'aes-256-cbc', $key, 0, $iv);
+    
+    // Combine IV + encrypted data and encode in base64 for storage
+    return base64_encode($iv . $encrypted);
+}
+
+/**
+ * Decrypt sensitive password fields (management_password, admin_password)
+ * Uses AES-256-CBC decryption with a fixed key stored in code
+ * 
+ * @param string $data Base64 encoded encrypted password from database
+ * @return string Plain text password
+ */
+function im_decrypt_password($data) {
+    if (empty($data)) {
+        return $data;
+    }
+    
+    // Fixed encryption key (same as im_encrypt_password)
+    $key = base64_decode('WDJzUWxSM3d1L3VkZmhzajlrMjI3M2lvcXc4ZWZnMmM=');
+    
+    // Decode the base64 data
+    $data = base64_decode($data);
+    
+    // Extract IV and encrypted data
+    $ivLength = openssl_cipher_iv_length('aes-256-cbc');
+    $iv = substr($data, 0, $ivLength);
+    $encrypted = substr($data, $ivLength);
+    
+    return openssl_decrypt($encrypted, 'aes-256-cbc', $key, 0, $iv);
+}
+
 /* enqueue js css function */
 function enqueue_js_css()
 {
@@ -380,7 +429,7 @@ function CreateDatabaseBookOrder()
     $createTable = "CREATE TABLE `{$cartTable}` (
         `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         `user_id` bigint(20) UNSIGNED NOT NULL,
-        `service_type` enum('domain','hosting','maintenance') NOT NULL,
+        `service_type` enum('domain','hosting','maintenance','website_service') NOT NULL,
         `service_id` bigint(20) UNSIGNED NOT NULL,
         `quantity` int(11) DEFAULT 1,
         `notes` text NULL,
@@ -901,6 +950,83 @@ function add_to_cart_ajax() {
 }
 
 /**
+ * AJAX handler to add website service to cart
+ */
+add_action('wp_ajax_add_website_service_to_cart', 'add_website_service_to_cart_ajax');
+add_action('wp_ajax_nopriv_add_website_service_to_cart', 'add_website_service_to_cart_ajax');
+function add_website_service_to_cart_ajax() {
+    global $wpdb;
+    
+    $service_id = !empty($_POST['service_id']) ? intval($_POST['service_id']) : 0;
+    
+    if (!$service_id) {
+        wp_send_json_error(array('message' => 'Thiếu ID dịch vụ'));
+        return;
+    }
+    
+    // Get service details from im_website_services table
+    $service_table = $wpdb->prefix . 'im_website_services';
+    $service = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$service_table} WHERE id = %d",
+        $service_id
+    ));
+    
+    if (!$service) {
+        wp_send_json_error(array('message' => 'Không tìm thấy dịch vụ'));
+        return;
+    }
+    
+    // Check if service is APPROVED
+    if ($service->status !== 'APPROVED') {
+        wp_send_json_error(array('message' => 'Dịch vụ chưa được duyệt'));
+        return;
+    }
+    
+    // Get user ID from service's requested_by field
+    $user_id = $service->requested_by;
+    if (!$user_id) {
+        wp_send_json_error(array('message' => 'Không tìm thấy chủ sở hữu dịch vụ'));
+        return;
+    }
+    
+    // Add to cart table (im_cart)
+    $cart_table = $wpdb->prefix . 'im_cart';
+    
+    // Check if already in cart
+    $existing = $wpdb->get_row($wpdb->prepare(
+        "SELECT id FROM {$cart_table} WHERE user_id = %d AND service_type = %s AND service_id = %d",
+        $user_id,
+        'website_service',
+        $service_id
+    ));
+    
+    if ($existing) {
+        // Update quantity
+        $wpdb->update(
+            $cart_table,
+            array('quantity' => intval($existing->quantity) + 1),
+            array('id' => $existing->id),
+            array('%d'),
+            array('%d')
+        );
+    } else {
+        // Insert new cart item
+        $wpdb->insert(
+            $cart_table,
+            array(
+                'user_id' => $user_id,
+                'service_type' => 'website_service',
+                'service_id' => $service_id,
+                'quantity' => 1
+            ),
+            array('%d', '%s', '%d', '%d')
+        );
+    }
+    
+    wp_send_json_success(array('message' => 'Dịch vụ đã được thêm vào giỏ hàng'));
+}
+
+/**
  * AJAX handler to remove item from cart
  */
 add_action('wp_ajax_remove_from_cart', 'remove_from_cart_ajax');
@@ -1324,17 +1450,6 @@ function get_virtual_page_template_mapping() {
         // Cloudflare
         'cloudflare-import' => 'cloudflare_import.php',
         'them-nhanh-tu-cloudflare' => 'cloudflare_import.php',
-        
-        // Alternative and shorter slugs
-        'website' => 'website_list.php',
-        'domain' => 'domain_list.php',
-        'hosting' => 'hosting_list.php',
-        'maintenance' => 'maintenance_list.php',
-        'service' => 'service_list.php',
-        'product' => 'product_catalog_list.php',
-        'partner' => 'list_partner.php',
-        'invoice' => 'list_invoice.php',
-        'contact' => 'addnew_contact.php'
     );
 }
 

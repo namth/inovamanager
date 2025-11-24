@@ -76,24 +76,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $notes = sanitize_textarea_field($_POST['notes']);
         
         // Validate required fields
-        if (!empty($name) && !empty($owner_user_id)) {
-            $data = array(
-                'name' => $name,
-                'owner_user_id' => $owner_user_id,
-                'domain_id' => $domain_id,
-                'hosting_id' => $hosting_id,
-                'maintenance_package_id' => $maintenance_package_id,
-                'admin_url' => $admin_url,
-                'admin_username' => $admin_username,
-                'ip_address' => $ip_address,
-                'notes' => $notes,
-                'updated_at' => current_time('mysql')
-            );
+         if (!empty($name) && !empty($owner_user_id)) {
+             $data = array(
+                 'name' => $name,
+                 'owner_user_id' => $owner_user_id,
+                 'domain_id' => $domain_id,
+                 'hosting_id' => $hosting_id,
+                 'maintenance_package_id' => $maintenance_package_id,
+                 'admin_url' => $admin_url,
+                 'admin_username' => $admin_username,
+                 'ip_address' => $ip_address,
+                 'notes' => $notes,
+                 'updated_at' => current_time('mysql')
+             );
 
-            // Only update password if a new one was provided
-            if (!empty($admin_password)) {
-                $data['admin_password'] = $admin_password;
-            }
+             // Only update password if a new one was provided
+             if (!empty($admin_password)) {
+                 $data['admin_password'] = im_encrypt_password($admin_password);
+             }
 
             $format = array(
                 '%s', '%d', '%d', '%d', '%d', '%s', '%s', '%s', '%s', '%s'

@@ -97,6 +97,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
             }
             
+            // Encrypt management_password before inserting
+            $encrypted_password = !empty($management_password) ? im_encrypt_password($management_password) : '';
+            
             $data = array(
                 'owner_user_id' => $owner_user_id,
                 'create_by' => $current_user_id,
@@ -111,7 +114,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'ip_address' => $ip_address,
                 'management_url' => $management_url,
                 'management_username' => $management_username,
-                'management_password' => $management_password,
+                'management_password' => $encrypted_password,
                 'notes' => $notes
             );
             

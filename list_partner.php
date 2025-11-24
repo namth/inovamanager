@@ -6,6 +6,12 @@ Template Name: List Partner
 global $wpdb;
 $table_name = $wpdb->prefix . 'im_users';
 
+// Check if current user is administrator
+if (!is_inova_admin()) {
+    wp_redirect(home_url('/partner/'));
+    exit;
+}
+
 // Get filter parameter
 $type_filter = isset($_GET['type']) ? sanitize_text_field($_GET['type']) : '';
 

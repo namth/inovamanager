@@ -268,6 +268,9 @@ if ($from_cart && $user_id > 0) {
             case 'maintenance':
                 $bulk_maintenances .= ($bulk_maintenances ? ',' : '') . $cart_item->service_id;
                 break;
+            case 'website_service':
+                $bulk_websites .= ($bulk_websites ? ',' : '') . $cart_item->service_id;
+                break;
         }
     }
 }
@@ -488,8 +491,60 @@ if (!empty($bulk_maintenances)) {
     }
 }
 
-// Process bulk websites (get all associated products)
+// Process bulk website services (from cart)
 if (!empty($bulk_websites)) {
+    $website_services_ids = array_map('intval', explode(',', $bulk_websites));
+    $website_services_ids = array_filter($website_services_ids);
+    
+    if (!empty($website_services_ids)) {
+        $placeholders = implode(',', array_fill(0, count($website_services_ids), '%d'));
+        
+        $website_services = $wpdb->get_results($wpdb->prepare(
+            "SELECT ws.*, w.name as website_name
+            FROM {$wpdb->prefix}im_website_services ws
+            LEFT JOIN {$wpdb->prefix}im_websites w ON ws.website_id = w.id
+            WHERE ws.id IN ($placeholders)
+            ORDER BY ws.title",
+            ...$website_services_ids
+        ));
+        
+        if (!empty($website_services)) {
+            if (empty($user_id)) {
+                $user_id = $website_services[0]->requested_by;
+            }
+            
+            foreach ($website_services as $ws_data) {
+                // Get price based on pricing type
+                if ($ws_data->pricing_type === 'FIXED' && $ws_data->fixed_price) {
+                    $ws_price = $ws_data->fixed_price;
+                } elseif ($ws_data->pricing_type === 'DAILY' && $ws_data->daily_rate && $ws_data->estimated_manday) {
+                    $ws_price = $ws_data->daily_rate * $ws_data->estimated_manday;
+                } else {
+                    $ws_price = 0;
+                }
+                
+                // Get quantity from cart if available, otherwise default to 1
+                $cart_key = 'website_service-' . $ws_data->id;
+                $quantity = $cart_quantities[$cart_key] ?? 1;
+                
+                $renewal_products[] = array(
+                    'type' => 'website_service',
+                    'id' => $ws_data->id,
+                    'name' => $ws_data->title,
+                    'website_name' => $ws_data->website_name,
+                    'price' => $ws_price,
+                    'quantity' => $quantity,
+                    'description' => $ws_data->description ?: $ws_data->title,
+                    'period' => 1,
+                    'period_type' => 'service'
+                );
+            }
+        }
+    }
+}
+
+// Process bulk websites (get all associated products) - only if not from cart
+if (!empty($bulk_websites) && !$from_cart) {
     $websites_data = processBulkItems($bulk_websites, 'website', $wpdb, $websites_table);
 
     if (!empty($websites_data)) {
@@ -1041,10 +1096,10 @@ get_header();
                                                              <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
                                                              <input type="hidden" name="vat_rate[]" value="<?php echo $product_vat_rate; ?>">
                                                              <strong><?php echo ucfirst($product['type']); ?>:</strong>
-                                                            <?php echo esc_html($product['name']); ?>
-                                                            <?php if (isset($product['website_name']) && !empty($product['website_name']) && in_array($product['type'], ['hosting', 'maintenance'])): ?>
-                                                                <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($product['website_name']); ?></small>
-                                                            <?php endif; ?>
+                                                             <?php echo esc_html($product['name']); ?>
+                                                             <?php if (isset($product['website_name']) && !empty($product['website_name']) && in_array($product['type'], ['hosting', 'maintenance', 'website_service'])): ?>
+                                                                 <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($product['website_name']); ?></small>
+                                                             <?php endif; ?>
                                                         </td>
                                                         <td>
                                                             <input type="text" class="form-control" name="description[]" value="<?php echo esc_attr($product['description']); ?>" required>

@@ -56,6 +56,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
              $admin_inova_user = get_inova_user($current_user_id);
              $created_by = $admin_inova_user ? $admin_inova_user->id : null;
              
+             // Encrypt admin_password before inserting
+             $encrypted_password = !empty($admin_password) ? im_encrypt_password($admin_password) : '';
+             
              $result = $wpdb->insert(
                  $websites_table,
                  array(
@@ -67,7 +70,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                      'maintenance_package_id' => $maintenance_package_id,
                      'admin_url' => $admin_url,
                      'admin_username' => $admin_username,
-                     'admin_password' => $admin_password,
+                     'admin_password' => $encrypted_password,
                      'ip_address' => $ip_address,
                      'notes' => $notes,
                      'created_at' => current_time('mysql'),

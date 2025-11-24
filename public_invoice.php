@@ -73,14 +73,9 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
             ELSE ii.description
         END AS service_title,
         CASE
-            WHEN ii.service_type = 'website_service' THEN CONCAT('Yêu cầu dịch vụ #', ws.id)
+            WHEN ii.service_type = 'website_service' THEN ws.description
             ELSE ''
         END AS service_reference,
-        CASE
-            WHEN ii.service_type = 'hosting' THEN (SELECT w2.name FROM $websites_table w2 WHERE w2.hosting_id = ii.service_id LIMIT 1)
-            WHEN ii.service_type = 'maintenance' THEN (SELECT w3.name FROM $websites_table w3 WHERE w3.maintenance_package_id = ii.service_id LIMIT 1)
-            ELSE NULL
-        END AS website_name,
         COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status IN ('WITHDRAWN', 'PAID')), 0) AS withdrawn_commission
     FROM
         $invoice_items_table ii
@@ -90,6 +85,37 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
         ii.invoice_id = %d
     ORDER BY ii.id
 ", $invoice_id));
+
+// Get website names for each invoice item
+foreach ($invoice_items as $item) {
+    $website_names = array();
+    if (in_array($item->service_type, ['hosting', 'maintenance'])) {
+        $website_infos = $wpdb->get_results($wpdb->prepare("
+            SELECT name FROM $websites_table 
+            WHERE (hosting_id = %d OR maintenance_package_id = %d)
+            ORDER BY name ASC
+        ", $item->service_id, $item->service_id));
+        
+        if (!empty($website_infos)) {
+            foreach ($website_infos as $website_info) {
+                $website_names[] = $website_info->name;
+            }
+        }
+    } elseif ($item->service_type === 'website_service') {
+        // Get website name from website_services table
+        $service_table = $wpdb->prefix . 'im_website_services';
+        $ws_info = $wpdb->get_row($wpdb->prepare("
+            SELECT w.name FROM {$service_table} ws
+            LEFT JOIN $websites_table w ON ws.website_id = w.id
+            WHERE ws.id = %d
+        ", $item->service_id));
+        
+        if ($ws_info && !empty($ws_info->name)) {
+            $website_names[] = $ws_info->name;
+        }
+    }
+    $item->website_names = $website_names;
+}
 
 // Calculate totals and check if has commissions
 $has_commission_deduction = false;
@@ -152,299 +178,258 @@ get_header('nologin');
         overflow: hidden;
     }
         
-        .invoice-header {
-            padding: 40px 30px;
-            text-align: center;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .invoice-header img {
-            max-width: 120px;
-            margin-bottom: 20px;
-        }
-        
-        .invoice-header h1 {
-            font-size: 28px;
-            font-weight: 600;
-            margin: 15px 0 5px;
-        }
-        
-        .invoice-header p {
-            margin: 5px 0;
-            font-size: 14px;
-        }
-        
-        .invoice-content {
-            padding: 40px 30px;
-        }
-        
+    .invoice-header {
+        padding: 40px 30px;
+        text-align: center;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .invoice-header img {
+        max-width: 120px;
+        margin-bottom: 20px;
+    }
+    
+    .invoice-header h1 {
+        font-size: 28px;
+        font-weight: 600;
+        margin: 15px 0 5px;
+    }
+    
+    .invoice-header p {
+        margin: 5px 0;
+        font-size: 14px;
+    }
+    
+    .invoice-content {
+        padding: 40px 30px;
+    }
+    
+    .invoice-info-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+        margin-bottom: 40px;
+    }
+    
+    @media (max-width: 768px) {
         .invoice-info-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
-            margin-bottom: 40px;
+            grid-template-columns: 1fr;
         }
+    }
+    
+    .info-section h3 {
+            font-size: 13px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+    }
         
-        @media (max-width: 768px) {
-            .invoice-info-row {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        .info-section h3 {
-             font-size: 13px;
-             text-transform: uppercase;
-             margin-bottom: 12px;
-             font-weight: 600;
-             letter-spacing: 0.5px;
-        }
-         
-         .info-table {
-             width: 100%;
-             border-collapse: collapse;
-         }
-         
-         .info-table td {
-             padding: 6px 0;
-             border: none;
-         }
-         
-         .info-table td:first-child {
-             width: 40%;
-             font-size: 13px;
-         }
-         
-         .info-table td:last-child {
-             font-weight: 500;
-         }
-        
-        .items-section {
-            margin-bottom: 40px;
-        }
-        
-        .items-section h3 {
-             font-size: 13px;
-             text-transform: uppercase;
-             margin-bottom: 15px;
-             font-weight: 600;
-             letter-spacing: 0.5px;
-        }
-        
-        .items-table {
+        .info-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 0;
         }
         
-        .items-table thead {
-             background-color: #f8f9fa;
-             border-top: 1px solid #eee;
-             border-bottom: 1px solid #eee;
-         }
-         
-         .items-table th {
-             padding: 12px 10px;
-             text-align: left;
-             font-size: 12px;
-             font-weight: 600;
-             text-transform: uppercase;
-             letter-spacing: 0.3px;
+        .info-table td {
+            padding: 6px 0;
+            border: none;
         }
         
-        .items-table th.text-end {
-            text-align: right;
+        .info-table td:first-child {
+            width: 40%;
+            font-size: 13px;
         }
         
-        .items-table tbody tr {
-            border-bottom: 1px solid #eee;
-        }
-        
-        .items-table td {
-             padding: 12px 10px;
-             font-size: 13px;
-        }
-        
-        .items-table td.text-end {
-            text-align: right;
-        }
-        
-        .items-table td.text-center {
-            text-align: center;
-        }
-        
-        .service-name {
+        .info-table td:last-child {
             font-weight: 500;
         }
-        
-        .service-desc {
-             font-size: 12px;
-             margin-top: 3px;
-        }
-        
-        .totals-section {
-            display: grid;
-            grid-template-columns: 1fr 350px;
-            gap: 30px;
-            margin-bottom: 40px;
-            align-items: start;
-        }
-        
-        @media (max-width: 768px) {
-            .totals-section {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        .totals-table {
-            width: 100%;
-            border-collapse: collapse;
+    
+    .items-section {
+        margin-bottom: 40px;
+    }
+    
+    .items-section h3 {
+            font-size: 13px;
+            text-transform: uppercase;
+            margin-bottom: 15px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+    }
+    
+    .items-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 0;
+    }
+    
+    .items-table thead {
             background-color: #f8f9fa;
-            border-radius: 6px;
-            overflow: hidden;
+            border-top: 1px solid #eee;
+            border-bottom: 1px solid #eee;
         }
         
-        .totals-table tr:last-child {
-            border-bottom: none;
+        .items-table th {
+            padding: 12px 10px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+    }
+    
+    .items-table th.text-end {
+        text-align: right;
+    }
+    
+    .items-table tbody tr {
+        border-bottom: 1px solid #eee;
+    }
+    
+    .items-table td {
+            padding: 12px 10px;
+            font-size: 13px;
+    }
+    
+    .items-table td.text-end {
+        text-align: right;
+    }
+    
+    .items-table td.text-center {
+        text-align: center;
+    }
+    
+    .service-name {
+        font-weight: 500;
+    }
+    
+    .service-desc {
+            font-size: 12px;
+            margin-top: 3px;
+    }
+    
+    .totals-section {
+        display: grid;
+        grid-template-columns: 1fr 350px;
+        gap: 30px;
+        margin-bottom: 40px;
+        align-items: start;
+    }
+    
+    @media (max-width: 768px) {
+        .totals-section {
+            grid-template-columns: 1fr;
         }
+    }
+    
+    .totals-table {
+        width: 100%;
+        border-collapse: collapse;
+        background-color: #f8f9fa;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+    
+    .totals-table tr:last-child {
+        border-bottom: none;
+    }
+    
+    .totals-table td {
+            padding: 10px 15px;
+            font-size: 13px;
+    }
         
-        .totals-table td {
-             padding: 10px 15px;
-             font-size: 13px;
-        }
-         
-         .totals-table td:first-child {
-             width: 60%;
-        }
-         
-         .totals-table td:last-child {
-             text-align: right;
-             font-weight: 500;
-        }
+        .totals-table td:first-child {
+            width: 60%;
+    }
+        
+        .totals-table td:last-child {
+            text-align: right;
+            font-weight: 500;
+    }
 
-         
-         .totals-table tr.total-row td {
-             padding: 12px 15px;
-             font-size: 14px;
-             font-weight: 600;
-        }
-         
-         .totals-table tr.paid-row {
-             background-color: #d4edda;
+        
+    .totals-table tr.total-row td {
+        padding: 12px 15px;
+        font-size: 14px;
+        font-weight: 600;
+    }
+        
+    .totals-table tr.paid-row {
+        background-color: #d4edda;
+    }
+    
+    .qr-section {
+        text-align: center;
+    }
+    
+    .qr-section h4 {
+        font-size: 13px;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+    }
+        
+    .qr-code-img {
+        max-width: 200px;
+        width: 100%;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 8px;
+        background: white;
+        margin-bottom: 15px;
+    }
+        
+    .qr-info {
+        width: fit-content;
+        margin: 0 auto;
+        background-color: #fff3cd;
+        border: 1px solid #ffc107;
+        border-radius: 6px;
+        padding: 12px;
+        font-size: 12px;
+    }
+        
+    .qr-info-row {
+        display: flex;
+        gap: 20px;
+        justify-content: space-between;
+        margin-bottom: 6px;
+    }
+        
+    .qr-info-row:last-child {
+        margin-bottom: 0;
+    }
+        
+    .qr-info-label {
+        font-weight: 500;
+    }
+        
+    .qr-info-value {
+        font-weight: bold;
+        font-size: 12px;
+    }
+    
+    @media print {
+        .content-wrapper {
+            background: white;
+            padding: 0;
         }
         
-        .qr-section {
-            text-align: center;
+        .public-invoice-container {
+            max-width: 100%;
+            box-shadow: none;
+            border-radius: 0;
         }
         
-        .qr-section h4 {
-             font-size: 13px;
-             text-transform: uppercase;
-             margin-bottom: 12px;
-             font-weight: 600;
-             letter-spacing: 0.5px;
-        }
-         
-         .qr-code-img {
-             max-width: 200px;
-             width: 100%;
-             border: 1px solid #ddd;
-             border-radius: 6px;
-             padding: 8px;
-             background: white;
-             margin-bottom: 15px;
-        }
-         
-         .qr-info {
-             background-color: #fff3cd;
-             border: 1px solid #ffc107;
-             border-radius: 6px;
-             padding: 12px;
-             font-size: 12px;
-        }
-         
-         .qr-info-row {
-             display: flex;
-             justify-content: space-between;
-             margin-bottom: 6px;
-        }
-         
-         .qr-info-row:last-child {
-             margin-bottom: 0;
-        }
-         
-         .qr-info-label {
-             font-weight: 500;
-        }
-         
-         .qr-info-value {
-             font-weight: 600;
-        }
-        
-        .status-badge {
-             display: inline-block;
-             padding: 4px 12px;
-             border-radius: 20px;
-             font-size: 11px;
-             font-weight: 600;
-             text-transform: uppercase;
-             letter-spacing: 0.3px;
-        }
-         
-         .status-badge.pending {
-             background-color: #fff3cd;
-        }
-         
-         .status-badge.paid {
-             background-color: #d4edda;
-        }
-         
-         .status-badge.draft {
-             background-color: #e2e3e5;
-        }
-         
-         .status-badge.canceled {
-             background-color: #f8d7da;
+        .logo-section {
+            display: none;
         }
         
         .print-button {
-            text-align: center;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
+            display: none;
         }
-        
-        .btn-print {
-             display: inline-block;
-             padding: 10px 24px;
-             background-color: #667eea;
-             border: none;
-             border-radius: 6px;
-             cursor: pointer;
-             font-size: 13px;
-             font-weight: 500;
-             text-decoration: none;
-             transition: background-color 0.3s;
-        }
-
-        @media print {
-            .content-wrapper {
-                background: white;
-                padding: 0;
-            }
-            
-            .public-invoice-container {
-                max-width: 100%;
-                box-shadow: none;
-                border-radius: 0;
-            }
-            
-            .logo-section {
-                display: none;
-            }
-            
-            .print-button {
-                display: none;
-            }
-        }
+    }
 </style>
 
 <div class="content-wrapper d-flex align-items-center justify-content-center loginbg">
@@ -470,7 +455,7 @@ get_header('nologin');
                      $badge_class = 'bg-light-danger text-danger';
                  }
                  ?>
-                 <span class="status-badge <?php echo $badge_class; ?>"><?php echo $status_options[$invoice->status] ?? $invoice->status; ?></span>
+                 <span class="btn btn-sm <?php echo $badge_class; ?>" style="font-weight: bold; text-transform: uppercase;"><?php echo $status_options[$invoice->status] ?? $invoice->status; ?></span>
              </p>
          </div>
 
@@ -549,8 +534,11 @@ get_header('nologin');
                                  <?php if ($item->service_reference): ?>
                                      <div class="service-desc text-muted"><?php echo esc_html($item->service_reference); ?></div>
                                  <?php endif; ?>
-                                 <?php if (isset($item->website_name) && !empty($item->website_name) && in_array($item->service_type, ['hosting', 'maintenance'])): ?>
-                                     <div class="service-desc text-muted">Website: <?php echo esc_html($item->website_name); ?></div>
+                                 <?php if (!empty($item->website_names)): ?>
+                                     <div class="service-desc text-muted">
+                                         <i class="ph ph-globe-hemisphere-west"></i>
+                                         (<?php echo implode(', ', array_map('esc_html', $item->website_names)); ?>)
+                                     </div>
                                  <?php endif; ?>
                             </td>
                             <td class="text-center"><?php echo number_format($item->quantity); ?></td>
@@ -622,25 +610,29 @@ get_header('nologin');
             </div>
 
             <!-- QR Code Section -->
-             <?php
-             $has_qr_settings = (
-                 (get_option('payment_bank_code_no_vat') && get_option('payment_account_number_no_vat')) ||
-                 (get_option('payment_bank_code_with_vat') && get_option('payment_account_number_with_vat')) ||
-                 (get_option('payment_bank_code') && get_option('payment_account_number'))
-             );
+            <?php
+            $has_qr_settings = (
+                (get_option('payment_bank_code_no_vat') && get_option('payment_account_number_no_vat')) ||
+                (get_option('payment_bank_code_with_vat') && get_option('payment_account_number_with_vat')) ||
+                (get_option('payment_bank_code') && get_option('payment_account_number'))
+            );
 
-             if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
-                 $remaining_amount = $invoice->total_amount - $invoice->paid_amount;
-                 $qr_add_info = 'HD ' . $invoice->invoice_code;
-                 $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
-                 $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
+            if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
+                $remaining_amount = $invoice->total_amount - $invoice->paid_amount;
+                $qr_add_info = 'HD ' . $invoice->invoice_code;
+                $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
+                $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
 
-                 if ($qr_code_url):
-             ?>
+                if ($qr_code_url):
+            ?>
              <div class="qr-section">
-                 <h4 class="text-muted">Thông tin thanh toán</h4>
+                <h4 class="text-muted">Thông tin thanh toán</h4>
                 <img src="<?php echo esc_url($qr_code_url); ?>" alt="Payment QR Code" class="qr-code-img">
                 <div class="qr-info">
+                    <div class="qr-info-row">
+                        <span class="qr-info-label">Số tài khoản:</span>
+                        <span class="qr-info-value"><?php echo get_option('payment_account_number'); ?></span>
+                    </div>
                     <div class="qr-info-row">
                         <span class="qr-info-label">Nội dung CK:</span>
                         <span class="qr-info-value"><?php echo esc_html($qr_add_info); ?></span>
@@ -657,8 +649,8 @@ get_header('nologin');
                 ?>
 
                 <!-- Print Button -->
-            <div class="print-button">
-                <button class="btn-print" onclick="window.print()">
+            <div class="d-flex align-items-center justify-content-center mt-4 print-button">
+                <button class="btn btn-danger" onclick="window.print()">
                     <i class="ph ph-printer me-2"></i>In hóa đơn
                 </button>
             </div>

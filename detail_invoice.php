@@ -241,14 +241,9 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
             ELSE ii.description
         END AS service_title,
         CASE
-            WHEN ii.service_type = 'website_service' THEN CONCAT('Yêu cầu dịch vụ #', ws.id)
+            WHEN ii.service_type = 'website_service' THEN ws.description
             ELSE ''
         END AS service_reference,
-        CASE
-            WHEN ii.service_type = 'hosting' THEN (SELECT w2.name FROM $websites_table w2 WHERE w2.hosting_id = ii.service_id LIMIT 1)
-            WHEN ii.service_type = 'maintenance' THEN (SELECT w3.name FROM $websites_table w3 WHERE w3.maintenance_package_id = ii.service_id LIMIT 1)
-            ELSE NULL
-        END AS website_name,
         COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status IN ('WITHDRAWN', 'PAID')), 0) AS withdrawn_commission
     FROM
         $invoice_items_table ii
@@ -258,6 +253,36 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
         ii.invoice_id = %d
     ORDER BY ii.id
 ", $invoice_id));
+
+// Get website names for each invoice item
+foreach ($invoice_items as $item) {
+    $website_names = array();
+    if (in_array($item->service_type, ['hosting', 'maintenance'])) {
+        $website_infos = $wpdb->get_results($wpdb->prepare("
+            SELECT name FROM $websites_table 
+            WHERE (hosting_id = %d OR maintenance_package_id = %d)
+            ORDER BY name ASC
+        ", $item->service_id, $item->service_id));
+        
+        if (!empty($website_infos)) {
+            foreach ($website_infos as $website_info) {
+                $website_names[] = $website_info->name;
+            }
+        }
+    } elseif ($item->service_type === 'website_service') {
+        // Get website name from website_services table
+        $ws_info = $wpdb->get_row($wpdb->prepare("
+            SELECT w.name FROM {$service_table} ws
+            LEFT JOIN $websites_table w ON ws.website_id = w.id
+            WHERE ws.id = %d
+        ", $item->service_id));
+        
+        if ($ws_info && !empty($ws_info->name)) {
+            $website_names[] = $ws_info->name;
+        }
+    }
+    $item->website_names = $website_names;
+}
 
 // Calculate totals and check if has commissions to show
 $has_commission_deduction = false;
@@ -454,8 +479,8 @@ get_header();
                                                  <?php if ($item->service_reference): ?>
                                                      <br><small class="text-muted"><?php echo esc_html($item->service_reference); ?></small>
                                                  <?php endif; ?>
-                                                 <?php if (isset($item->website_name) && !empty($item->website_name) && in_array($item->service_type, ['hosting', 'maintenance'])): ?>
-                                                     <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> Website: <?php echo esc_html($item->website_name); ?></small>
+                                                 <?php if (!empty($item->website_names)): ?>
+                                                     <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> (<?php echo implode(', ', array_map('esc_html', $item->website_names)); ?>)</small>
                                                  <?php endif; ?>
                                              </div>
                                          </td>
@@ -646,7 +671,7 @@ get_header();
                         <div class="input-group mb-2">
                             <input type="text" class="form-control" id="invoiceLinkInput" 
                                    value="<?php echo esc_attr($public_invoice_link); ?>" readonly>
-                            <button class="btn btn-outline-primary" type="button" id="copyInvoiceLinkBtn" 
+                            <button class="btn btn-info" type="button" id="copyInvoiceLinkBtn" 
                                     data-link="<?php echo esc_attr($public_invoice_link); ?>">
                                 <i class="ph ph-copy me-1"></i>Copy
                             </button>

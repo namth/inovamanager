@@ -71,21 +71,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
             }
             
+            // Encrypt management_password before inserting
+            $encrypted_password = !empty($management_password) ? im_encrypt_password($management_password) : '';
+            
             // Build data array
-            $data = array(
-                'domain_name' => $domain_name,
-                'owner_user_id' => $inova_user_id,
-                'create_by' => $current_user_id,
-                'registration_date' => $registration_date,
-                'registration_period_years' => $registration_period_years,
-                'expiry_date' => $expiry_date,
-                'managed_by_inova' => 0,
-                'management_url' => $management_url,
-                'management_username' => $management_username,
-                'management_password' => $management_password,
-                'notes' => $notes,
-                'status' => 'ACTIVE'
-            );
+             $data = array(
+                 'domain_name' => $domain_name,
+                 'owner_user_id' => $inova_user_id,
+                 'create_by' => $current_user_id,
+                 'registration_date' => $registration_date,
+                 'registration_period_years' => $registration_period_years,
+                 'expiry_date' => $expiry_date,
+                 'managed_by_inova' => 0,
+                 'management_url' => $management_url,
+                 'management_username' => $management_username,
+                 'management_password' => $encrypted_password,
+                 'notes' => $notes,
+                 'status' => 'ACTIVE'
+             );
             
             // Insert into database
             $insert = $wpdb->insert(

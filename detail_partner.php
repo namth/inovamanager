@@ -26,11 +26,13 @@ if ($action == 'delete_contact') {
     exit;
 }
 
-// get user id from url
-$user_id = isset($_GET['id']) ? $_GET['id'] : null;
+// get user id from url, or use current user's inova_id as fallback
+$current_user_id = get_current_user_id();
+$user_id = isset($_GET['id']) ? intval($_GET['id']) : get_user_inova_id($current_user_id);
+
 // if have user id, then get user data to show in form
 // if not, go to list user page
-if (isset($user_id)) {
+if ($user_id) {
     $user = $wpdb->get_row($wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $user_id));
     if (!$user) {
         wp_redirect(home_url('/danh-sach-doi-tac/'));
@@ -41,6 +43,9 @@ if (isset($user_id)) {
     exit;
 }
 
+// Check if current user is administrator
+$is_admin = is_inova_admin();
+
 get_header();
 
 ?>
@@ -49,9 +54,11 @@ get_header();
         <div class="col-sm-12" id="relative">
             <div class="statistics-details d-flex flex-column gap-3 justify-content-center text-center align-items-center mt-5">
                 <!-- add back button in the left side -->
+                <?php if ($is_admin): ?>
                 <a href="<?php echo home_url('/danh-sach-doi-tac'); ?>" class="abs-top-left nav-link">
                     <i class="ph ph-arrow-bend-up-left btn-icon-prepend fa-150p"></i>
                 </a>
+                <?php endif; ?>
                 <?php
                 // each user_type will have different icon and color
                 switch ($user->user_type) {
@@ -129,7 +136,7 @@ get_header();
                                                 <td>' . $user->address . '</td>
                                             </tr>';
                                     }
-                                    if (!empty($user->notes)) {
+                                    if (!empty($user->notes) && $is_admin) {
                                         echo '<tr>
                                                 <td class="fw-bold p-2">Ghi chú</td>
                                                 <td>' . $user->notes . '</td>
@@ -305,9 +312,11 @@ get_header();
     </div>
 
     <!-- Add a button fixed on bottom right corner, with plus icon, border dash, link to addnew_user page -->
+    <?php if ($is_admin): ?>
     <a href="<?php echo home_url('/them-doi-tac-moi'); ?>" class="fixed-bottom-right nav-link">
         <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
     </a>
+    <?php endif; ?>
 </div>
 
 <?php

@@ -290,6 +290,11 @@ get_header();
                                                     <a class="nav-link text-warning" href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>">
                                                         <i class="ph ph-receipt fa-150p"></i>
                                                     </a>
+                                                    
+                                                    <!-- Add to Cart (if APPROVED) -->
+                                                    <button class="nav-link text-success add-service-to-cart" data-service-id="<?php echo $service->id; ?>" title="Thêm vào giỏ hàng">
+                                                        <i class="ph ph-shopping-cart fa-150p"></i>
+                                                    </button>
                                                     <?php endif; ?>
                                                     
                                                     <!-- Stage 4: Execution (if APPROVED or IN_PROGRESS) -->
@@ -377,6 +382,50 @@ get_header();
 </div>
 
 <script>
+jQuery(document).ready(function($) {
+    /**
+     * Add website service to cart
+     */
+    $(document).on('click', '.add-service-to-cart', function(e) {
+        e.preventDefault();
+        
+        var $btn = $(this);
+        var serviceId = $btn.data('service-id');
+        var $icon = $btn.find('i');
+        
+        // Disable button and show loading
+        $btn.prop('disabled', true);
+        $icon.removeClass('ph-shopping-cart-plus').addClass('ph-spinner ph-spin');
+        
+        $.ajax({
+            url: AJAX.ajaxurl,
+            type: 'POST',
+            dataType: 'json',
+            data: {
+                action: 'add_website_service_to_cart',
+                service_id: serviceId
+            },
+            success: function(response) {
+                if (response.success) {
+                    alert('Dịch vụ đã được thêm vào giỏ hàng');
+                    // Redirect to cart page
+                    window.location.href = '<?php echo home_url('/gio-hang/'); ?>';
+                } else {
+                    alert(response.data.message || 'Lỗi khi thêm vào giỏ hàng');
+                    $btn.prop('disabled', false);
+                    $icon.removeClass('ph-spinner ph-spin').addClass('ph-shopping-cart-plus');
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', error);
+                alert('Đã có lỗi xảy ra');
+                $btn.prop('disabled', false);
+                $icon.removeClass('ph-spinner ph-spin').addClass('ph-shopping-cart-plus');
+            }
+        });
+    });
+});
+
 function confirmDelete(serviceId) {
     if (confirm('Bạn có chắc chắn muốn xóa dịch vụ này? Thao tác này không thể hoàn tác.')) {
         // Implement delete functionality

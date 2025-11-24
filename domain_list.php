@@ -311,7 +311,7 @@ get_header();
                                                 <?php echo esc_html($domain->management_username); ?>
                                             </span>
                                             <?php if (!empty($domain->management_password)): ?>
-                                            <button class="btn btn-sm btn-icon p-0 ms-1 show-password-btn" data-password="<?php echo esc_attr($domain->management_password); ?>">
+                                            <button class="btn btn-sm btn-icon p-0 ms-1 show-password-btn" data-password="<?php echo esc_attr(im_decrypt_password($domain->management_password)); ?>">
                                                 <i class="ph ph-eye"></i>
                                             </button>
                                             <?php endif; ?>

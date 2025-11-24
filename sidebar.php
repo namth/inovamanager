@@ -57,7 +57,7 @@ $user_type = get_inova_user_type();
         <?php endif; ?>
 
         <!-- Invoice - ALL USERS (data will be filtered) -->
-         <li class="nav-item nav-category">Hóa đơn</li>
+         <li class="nav-item nav-category">Quản lý thanh toán</li>
          <li class="nav-item">
              <a class="nav-link" href="<?php echo home_url('/danh-sach-hoa-don/'); ?>">
                  <i class="menu-icon ph ph-file-text"></i>
@@ -81,8 +81,7 @@ $user_type = get_inova_user_type();
          <?php endif; ?>
         
         <!-- Commission View - PARTNER ONLY -->
-        <?php if (!$is_admin && ($user_type === 'PARTNER' || $user_type === 'MANAGER' || $user_type === 'EMPLOYEE')): ?>
-        <li class="nav-item nav-category">Hoa hồng</li>
+        <?php if (!$is_admin && ($user_type === 'PARTNER')): ?>
         <li class="nav-item">
             <a class="nav-link" href="<?php echo home_url('/partner-commissions/'); ?>">
                 <i class="menu-icon ph ph-wallet"></i>
@@ -93,7 +92,6 @@ $user_type = get_inova_user_type();
 
         <?php if ($is_admin): ?>
         <!-- Commission Management - ADMIN ONLY -->
-        <li class="nav-item nav-category">Quản lý Hoa hồng</li>
         <li class="nav-item">
             <a class="nav-link" href="<?php echo home_url('/partner-commissions/'); ?>">
                 <i class="menu-icon ph ph-wallet"></i>
@@ -115,14 +113,24 @@ $user_type = get_inova_user_type();
             </a>
         </li>
         <li class="nav-item">
+            <a class="nav-link" href="<?php echo home_url('/quan-ly-user/'); ?>">
+                <i class="menu-icon ph ph-users"></i>
+                <span class="menu-title">Quản lý User</span>
+            </a>
+        </li>
+        <li class="nav-item">
             <a class="nav-link" href="<?php echo home_url('/danh-sach-san-pham/'); ?>">
                 <i class="menu-icon ph ph-package"></i>
                 <span class="menu-title">Danh mục sản phẩm</span>
             </a>
         </li>
+        <?php endif; ?>
 
-        <!-- Settings - ADMIN ONLY -->
+
+        <!-- Account & Logout - ALL USERS -->
         <li class="nav-item nav-category">Cài đặt</li>
+        <?php if ($is_admin): ?>
+        <!-- Settings - ADMIN ONLY -->
         <li class="nav-item">
             <a class="nav-link" href="<?php echo home_url('/api-settings/'); ?>">
                 <i class="menu-icon ph ph-key"></i>
@@ -132,29 +140,21 @@ $user_type = get_inova_user_type();
         <li class="nav-item">
             <a class="nav-link" href="<?php echo home_url('/system-settings'); ?>">
                 <i class="menu-icon ph ph-gear"></i>
-                <span class="menu-title">Cài đặt hệ thống</span>
-            </a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link" href="<?php echo home_url('/quan-ly-user/'); ?>">
-                <i class="menu-icon ph ph-users"></i>
-                <span class="menu-title">Quản lý User</span>
+                <span class="menu-title">Kết nối hệ thống khác</span>
             </a>
         </li>
         <?php endif; ?>
 
-        <!-- Account & Logout - ALL USERS -->
-        <li class="nav-item nav-category">Tài khoản</li>
-        <li class="nav-item">
-            <a class="nav-link" href="<?php echo admin_url(); ?>">
-                <i class="menu-icon ph ph-user-circle"></i>
-                <span class="menu-title">Tài khoản</span>
-            </a>
-        </li>
+         <li class="nav-item">
+             <a class="nav-link" href="<?php echo $is_admin ? admin_url() : home_url('/partner/'); ?>">
+                 <i class="menu-icon ph ph-user-gear"></i>
+                 <span class="menu-title">Tài khoản</span>
+             </a>
+         </li>
         <li class="nav-item">
             <a class="nav-link" href="<?php echo home_url('/cau-hinh-email-thong-bao/'); ?>">
-                <i class="menu-icon ph ph-user-gear"></i>
-                <span class="menu-title">Cài đặt tài khoản</span>
+                <i class="menu-icon ph ph-envelope-simple-open"></i>
+                <span class="menu-title">Email thông báo</span>
             </a>
         </li>
         <li class="nav-item">

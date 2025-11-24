@@ -19,8 +19,37 @@ if (!$website) {
     exit;
 }
 // print_r($website);
-// Permission check - user can only edit their own websites
-if ($website->owner_user_id != $inova_user_id ) {
+// Permission check - user/partner can edit their own websites or managed services
+$permission_where = get_website_permission_where_clause();
+$user_has_access = false;
+
+if (is_inova_admin()) {
+    $user_has_access = true;
+} else {
+    // Check if user owns the website
+    if ($website->owner_user_id == $inova_user_id) {
+        $user_has_access = true;
+    } else {
+        // Check if partner manages hosting or maintenance for this website
+        $hosting_check = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$wpdb->prefix}im_hostings WHERE id = %d AND partner_id = %d",
+            $website->hosting_id,
+            $inova_user_id
+        ));
+        
+        $maintenance_check = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$wpdb->prefix}im_maintenance_packages WHERE id = %d AND partner_id = %d",
+            $website->maintenance_package_id,
+            $inova_user_id
+        ));
+        
+        if ($hosting_check || $maintenance_check) {
+            $user_has_access = true;
+        }
+    }
+}
+
+if (!$user_has_access) {
     wp_die('Bạn không có quyền sửa website này.');
 }
 
@@ -36,23 +65,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $notes = sanitize_textarea_field($_POST['notes']);
         
         // Validate required fields (only website name is required)
-        if (!empty($name)) {
-            $result = $wpdb->update(
-                $websites_table,
-                array(
-                    'name' => $name,
-                    'admin_url' => $admin_url,
-                    'admin_username' => $admin_username,
-                    'admin_password' => $admin_password,
-                    'notes' => $notes,
-                    'updated_at' => current_time('mysql')
-                ),
-                array('id' => $website_id),
-                array(
-                    '%s', '%s', '%s', '%s', '%s', '%s'
-                ),
-                array('%d')
-            );
+         if (!empty($name)) {
+             // Encrypt admin_password before updating if provided
+             $encrypted_password = !empty($admin_password) ? im_encrypt_password($admin_password) : $website->admin_password;
+             
+             $result = $wpdb->update(
+                 $websites_table,
+                 array(
+                     'name' => $name,
+                     'admin_url' => $admin_url,
+                     'admin_username' => $admin_username,
+                     'admin_password' => $encrypted_password,
+                     'notes' => $notes,
+                     'updated_at' => current_time('mysql')
+                 ),
+                 array('id' => $website_id),
+                 array(
+                     '%s', '%s', '%s', '%s', '%s', '%s'
+                 ),
+                 array('%d')
+             );
             
             if ($result !== false) {
                 // Redirect to website list after successful update
@@ -125,7 +157,7 @@ get_header();
                                     <label for="admin_password" class="fw-bold">Mật khẩu</label>
                                     <div class="input-group">
                                         <input type="password" class="form-control" id="admin_password" name="admin_password" 
-                                              placeholder="Nhập mật khẩu quản trị" value="<?php echo esc_attr($website->admin_password); ?>">
+                                              placeholder="Nhập mật khẩu quản trị" value="<?php echo esc_attr(im_decrypt_password($website->admin_password)); ?>">
                                         <button class="btn btn-secondary toggle-password" type="button">
                                             <i class="ph ph-eye"></i>
                                         </button>

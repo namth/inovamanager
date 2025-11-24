@@ -22,24 +22,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $notes = sanitize_textarea_field($_POST['notes']);
         
         // Validate required fields (only website name is required)
-         if (!empty($name)) {
-             $result = $wpdb->insert(
-                 $websites_table,
-                 array(
-                     'name' => $name,
-                     'owner_user_id' => $inova_user_id,
-                     'created_by' => $current_user_id,
-                     'admin_url' => $admin_url,
-                     'admin_username' => $admin_username,
-                     'admin_password' => $admin_password,
-                     'notes' => $notes,
-                     'created_at' => current_time('mysql'),
-                     'updated_at' => current_time('mysql')
-                 ),
-                 array(
-                     '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s'
-                 )
-             );
+          if (!empty($name)) {
+              // Encrypt admin_password before inserting
+              $encrypted_password = !empty($admin_password) ? im_encrypt_password($admin_password) : '';
+              
+              $result = $wpdb->insert(
+                  $websites_table,
+                  array(
+                      'name' => $name,
+                      'owner_user_id' => $inova_user_id,
+                      'created_by' => $current_user_id,
+                      'admin_url' => $admin_url,
+                      'admin_username' => $admin_username,
+                      'admin_password' => $encrypted_password,
+                      'notes' => $notes,
+                      'created_at' => current_time('mysql'),
+                      'updated_at' => current_time('mysql')
+                  ),
+                  array(
+                      '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s'
+                  )
+              );
             
             if ($result) {
                 // Redirect to website list after successful creation

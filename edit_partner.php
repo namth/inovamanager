@@ -21,6 +21,9 @@ if (isset($user_id)) {
     exit;
 }
 
+// Check if current user is administrator
+$is_admin = is_inova_admin();
+
 /* 
 * Process data when form is submitted
 */
@@ -90,11 +93,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <label for="user_name" class="fw-bold">Tên người dùng <span class="text-danger">*</span></label>
                                     <input type="text" class="form-control" id="user_name" name="user_name" value="<?php echo esc_attr($user->name); ?>" required>
                                 </div>
+                                <?php if ($is_admin): ?>
                                 <div class="form-group">
                                     <label for="user_code" class="fw-bold">Mã người dùng <span class="text-danger">*</span></label>
                                     <input type="text" class="form-control" id="user_code" name="user_code" value="<?php echo esc_attr($user->user_code); ?>" required>
                                     <small class="form-text text-muted">Mã người dùng là duy nhất trong hệ thống</small>
                                 </div>
+                                <?php else: ?>
+                                <input type="hidden" name="user_code" value="<?php echo esc_attr($user->user_code); ?>">
+                                <?php endif; ?>
+                                <?php if ($is_admin): ?>
                                 <div class="form-group">
                                     <label for="user_type" class="fw-bold">Loại người dùng <span class="text-danger">*</span></label>
                                     <select class="form-control" id="user_type" name="user_type" required>
@@ -105,6 +113,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         <option value="ADMIN" <?php selected($user->user_type, 'ADMIN'); ?>>Quản trị viên</option>
                                     </select>
                                 </div>
+                                <?php else: ?>
+                                <input type="hidden" name="user_type" value="<?php echo esc_attr($user->user_type); ?>">
+                                <?php endif; ?>
                                 <div class="form-group">
                                     <label for="email" class="fw-bold">Email</label>
                                     <input type="email" class="form-control" id="email" name="email" value="<?php echo esc_attr($user->email); ?>">
@@ -122,7 +133,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <input type="text" class="form-control" id="address" name="address" value="<?php echo esc_attr($user->address); ?>">
                                 </div>
                                 
-                                <?php if ($user->user_type != 'PARTNER'): ?>
+                                <?php if ($is_admin && $user->user_type != 'PARTNER'): ?>
                                 <div class="form-group">
                                     <label class="fw-bold">Đối tác quản lý</label>
                                     <select class="js-example-basic-single w-100" name="partner_id">
@@ -136,8 +147,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         ?>
                                     </select>
                                 </div>
+                                <?php else: ?>
+                                <input type="hidden" name="partner_id" value="<?php echo esc_attr($user->partner_id); ?>">
                                 <?php endif; ?>
 
+                                <?php if ($is_admin): ?>
                                 <div class="form-group">
                                     <label for="status" class="fw-bold">Trạng thái</label>
                                     <select class="form-control" id="status" name="status">
@@ -145,11 +159,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         <option value="INACTIVE" <?php selected($user->status, 'INACTIVE'); ?>>Không hoạt động</option>
                                     </select>
                                 </div>
+                                <?php else: ?>
+                                <input type="hidden" name="status" value="<?php echo esc_attr($user->status); ?>">
+                                <?php endif; ?>
 
+                                <?php if ($is_admin): ?>
                                 <div class="form-group">
                                     <label for="notes" class="fw-bold">Ghi chú</label>
                                     <textarea class="form-control height-auto" id="notes" rows="4" name="notes"><?php echo esc_textarea($user->notes); ?></textarea>
                                 </div>
+                                <?php else: ?>
+                                <input type="hidden" name="notes" value="<?php echo esc_attr($user->notes); ?>">
+                                <?php endif; ?>
                                 
                                 <?php
                                 wp_nonce_field('post_partner', 'post_partner_field');

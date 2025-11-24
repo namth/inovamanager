@@ -249,25 +249,32 @@ get_header();
                         <table class="table table-hover">
                             <thead>
                                 <tr class="bg-light">
-                                     <?php if (is_inova_admin()): ?>
-                                     <th style="width: 40px;">
-                                         <input type="checkbox" id="select-all-websites" class="form-check form-check-danger">
-                                     </th>
-                                     <?php endif; ?>
-                                     <th style="width: 50px;">STT</th>
-                                     <th>Tên website</th>
-                                     <?php if (is_inova_admin()): ?>
-                                     <th>Chủ sở hữu</th>
-                                     <?php endif; ?>
-                                     <th>Tên miền</th>
-                                     <?php if (is_inova_admin()): ?>
-                                     <th>Địa chỉ IP</th>
-                                     <?php endif; ?>
-                                     <th>Hosting</th>
-                                     <th>Gói bảo trì</th>
-                                     <th>Thông tin đăng nhập</th>
-                                     <th>Thao tác</th>
-                                 </tr>
+                                    <?php if (is_inova_admin()): ?>
+                                        <th style="width: 40px;">
+                                            <input type="checkbox" id="select-all-websites" class="form-check form-check-danger">
+                                        </th>
+                                    <?php endif; ?>
+
+                                    <th style="width: 50px;">STT</th>
+                                    <th>Tên website</th>
+
+                                    <?php 
+                                    $is_admin = is_inova_admin();
+                                    $user_type = get_inova_user_type();
+                                    if ($is_admin || $user_type === 'PARTNER'): ?>
+                                        <th>Chủ sở hữu</th>
+                                    <?php endif; ?>
+                                    
+                                    <th>Tên miền</th>
+                                    <?php if (is_inova_admin()): ?>
+                                        <th>Địa chỉ IP</th>
+                                    <?php endif; ?>
+                                    
+                                    <th>Hosting</th>
+                                    <th>Gói bảo trì</th>
+                                    <th>Thông tin đăng nhập</th>
+                                    <th>Thao tác</th>
+                                </tr>
                             </thead>
                             <tbody>
                                 <?php 
@@ -336,17 +343,17 @@ get_header();
                                              </div>
                                          </div>
                                      </td>
-                                     <?php if (is_inova_admin()): ?>
-                                     <td>
-                                         <?php if (!empty($website->owner_name)): ?>
-                                         <a href="<?php echo home_url('/list-website/?search=' . $website->owner_name); ?>" class="d-flex align-items-center nav-link">
-                                             <?php echo esc_html($website->owner_name); ?>
-                                         </a>
-                                         <?php else: ?>
-                                         <span class="text-muted">--</span>
-                                         <?php endif; ?>
-                                     </td>
-                                     <?php endif; ?>
+                                      <?php if ($is_admin || $user_type === 'PARTNER'): ?>
+                                      <td>
+                                          <?php if (!empty($website->owner_name)): ?>
+                                          <a href="<?php echo home_url('/list-website/?search=' . $website->owner_name); ?>" class="d-flex align-items-center nav-link">
+                                              <?php echo esc_html($website->owner_name); ?>
+                                          </a>
+                                          <?php else: ?>
+                                          <span class="text-muted">--</span>
+                                          <?php endif; ?>
+                                      </td>
+                                      <?php endif; ?>
                                     <td>
                                         <div class="d-flex justify-content-between gap-2 flex-column">
                                             <?php
@@ -484,7 +491,7 @@ get_header();
                                                 <?php echo esc_html($website->admin_username); ?>
                                             </span>
                                             <?php if (!empty($website->admin_password)): ?>
-                                            <button class="btn btn-sm btn-icon p-0 ms-1 show-password-btn" data-password="<?php echo esc_attr($website->admin_password); ?>">
+                                            <button class="btn btn-sm btn-icon p-0 ms-1 show-password-btn" data-password="<?php echo esc_attr(im_decrypt_password($website->admin_password)); ?>">
                                                 <i class="ph ph-eye"></i>
                                             </button>
                                             <?php endif; ?>
