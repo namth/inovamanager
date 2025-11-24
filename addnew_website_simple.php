@@ -136,7 +136,7 @@ get_header();
                         <div class="form-group d-flex justify-content-center mt-3">
                             <button type="submit"
                                 class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
-                                <i class="ph ph-floppy-disk btn-icon-prepend fa-150p"></i>
+                                <i class="ph ph-globe-hemisphere-west btn-icon-prepend fa-150p"></i>
                                 <span class="fw-bold">Lưu website</span>
                             </button>
                             <a href="<?php echo home_url('/list-website/'); ?>" class="btn btn-light btn-icon-text ms-2 d-flex align-items-center border-radius-9">

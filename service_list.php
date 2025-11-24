@@ -318,9 +318,9 @@ get_header();
                                                     </a>
                                                     <?php endif; ?>
                                                     
-                                                    <a class="nav-link text-danger" href="#" onclick="confirmDelete(<?php echo $service->id; ?>)">
+                                                    <button type="button" class="nav-link text-danger border-0 bg-transparent delete-service-btn" data-service-id="<?php echo $service->id; ?>" title="Xóa dịch vụ">
                                                         <i class="ph ph-trash fa-150p"></i>
-                                                    </a>
+                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -424,14 +424,46 @@ jQuery(document).ready(function($) {
             }
         });
     });
+    
+    /**
+     * Delete website service
+     */
+    $(document).on('click', '.delete-service-btn', function(e) {
+        e.preventDefault();
+        
+        var $btn = $(this);
+        var serviceId = $btn.data('service-id');
+        
+        if (confirm('Bạn có chắc chắn muốn xóa dịch vụ này? Thao tác này không thể hoàn tác.')) {
+            // Disable button and show loading
+            $btn.prop('disabled', true);
+            
+            $.ajax({
+                url: AJAX.ajaxurl,
+                type: 'POST',
+                dataType: 'json',
+                data: {
+                    action: 'delete_website_service',
+                    service_id: serviceId
+                },
+                success: function(response) {
+                    if (response.success) {
+                        alert('Dịch vụ đã được xóa');
+                        location.reload();
+                    } else {
+                        alert(response.data.message || 'Lỗi khi xóa dịch vụ');
+                        $btn.prop('disabled', false);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('AJAX Error:', error);
+                    alert('Đã có lỗi xảy ra: ' + error);
+                    $btn.prop('disabled', false);
+                }
+            });
+        }
+    });
 });
-
-function confirmDelete(serviceId) {
-    if (confirm('Bạn có chắc chắn muốn xóa dịch vụ này? Thao tác này không thể hoàn tác.')) {
-        // Implement delete functionality
-        window.location.href = `<?php echo home_url('/xoa-dich-vu/'); ?>?service_id=${serviceId}`;
-    }
-}
 
 // Auto-refresh status every 30 seconds for active services
 setInterval(function() {

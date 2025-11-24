@@ -6,6 +6,7 @@
 global $wpdb;
 $domains_table = $wpdb->prefix . 'im_domains';
 $current_user_id = get_current_user_id();
+$inova_user_id = get_user_inova_id($current_user_id);
 
 // Check if user is logged in
 if (!$current_user_id) {
@@ -26,7 +27,7 @@ if (!$domain_id) {
 $domain = $wpdb->get_row($wpdb->prepare("SELECT * FROM $domains_table WHERE id = %d", $domain_id));
 
 // Redirect if domain not found or user doesn't have permission
-if (!$domain || ($domain->owner_user_id != $current_user_id && $domain->create_by != $current_user_id)) {
+if (!$domain || ($domain->owner_user_id != $inova_user_id && $domain->create_by != $inova_user_id && $domain->provider_id != $inova_user_id)) {
     wp_redirect(home_url('/danh-sach-ten-mien/'));
     exit;
 }

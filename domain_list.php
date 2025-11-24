@@ -74,7 +74,7 @@ $status_filter = isset($_GET['status']) ? sanitize_text_field($_GET['status']) :
 
 // Build WHERE clause
 $where_conditions = array();
-$permission_where = get_user_permission_where_clause('d', 'owner_user_id');
+$permission_where = get_user_permission_where_clause('d', 'owner_user_id', 'provider_id');
 if (!empty($permission_where)) {
     $where_conditions[] = ltrim($permission_where, ' AND');
 }
@@ -353,16 +353,10 @@ get_header();
                                                   <i class="ph ph-pencil-simple btn-icon-prepend fa-150p"></i>
                                               </a>
                                               <?php else: ?>
-                                              <!-- Edit button for user - only if they created the domain -->
-                                              <?php 
-                                              $current_user_id = get_current_user_id();
-                                              $can_edit_domain = ($domain->create_by == $current_user_id);
-                                              if ($can_edit_domain): 
-                                              ?>
+                                              <!-- Edit button for user - already filtered by permissions in query -->
                                               <a href="<?php echo home_url('/sua-domain-simple/?domain_id=' . $domain->id); ?>" class="nav-link text-warning" title="Sửa tên miền">
                                                   <i class="ph ph-pencil-simple btn-icon-prepend fa-150p"></i>
                                               </a>
-                                              <?php endif; ?>
                                               <?php endif; ?>
 
                                               <?php if (is_inova_admin()): ?>
@@ -377,6 +371,7 @@ get_header();
                                               <?php else: ?>
                                               <!-- User can renew if they created it and domain is not managed by INOVA -->
                                               <?php 
+                                              $current_user_id = get_current_user_id();
                                               $can_renew_domain = ($domain->create_by == $current_user_id && $domain->managed_by_inova == 0);
                                               if ($can_renew_domain): 
                                               ?>
@@ -719,23 +714,7 @@ document.getElementById('confirmDeleteUserBtn').addEventListener('click', functi
 <input type="hidden" id="domainIdToDeleteUser" value="">
 
 <!-- Hidden nonce field for AJAX -->
-<input type="hidden" name="delete_domain_nonce" value="<?php echo wp_create_nonce('delete_domain_nonce'); ?>"
-
-<!--
-    ===================================================================
-    DOMAIN RENEWAL FUNCTIONALITY
-    ===================================================================
-    All domain renewal JavaScript code has been moved to:
-    assets/js/custom.js (starting at line ~892)
-
-    Includes:
-    - Single domain renewal (+1 year): Click renew icon in actions column
-    - Bulk domain renewal: Select multiple domains and renew together
-    - Helper functions: formatDate(), addYears()
-
-    Backend AJAX handler:
-    functions.php: renew_domain_one_year (line ~1709)
--->
+<input type="hidden" name="delete_domain_nonce" value="<?php echo wp_create_nonce('delete_domain_nonce'); ?>">
 
 <?php
 get_footer();

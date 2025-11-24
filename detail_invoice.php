@@ -398,9 +398,6 @@ get_header();
                                         <i class="ph ph-arrow-clockwise me-2"></i>Cập nhật trạng thái
                                     </a></li>
                                     <li><hr class="dropdown-divider"></li>
-                                    <li><a class="dropdown-item" href="<?php echo home_url('/print-invoice/?invoice_id=' . $invoice->id); ?>" target="_blank">
-                                        <i class="ph ph-printer me-2"></i>In hóa đơn
-                                    </a></li>
                                     <li><a class="dropdown-item" href="<?php echo home_url('/danh-sach-hoa-don/'); ?>">
                                         <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
                                     </a></li>
@@ -742,16 +739,6 @@ get_header();
                              <a href="<?php echo home_url('/danh-sach-hoa-don/'); ?>" class="btn btn-secondary mb-2">
                                  <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
                              </a>
-
-                             <a href="<?php echo admin_url('admin-ajax.php?action=generate_invoice_pdf&invoice_id=' . $invoice->id); ?>"
-                                class="btn btn-primary mb-2" target="_blank">
-                                 <i class="ph ph-file-pdf me-2"></i>Xuất PDF
-                             </a>
-
-                             <a href="<?php echo home_url('/print-invoice/?invoice_id=' . $invoice->id); ?>"
-                                class="btn btn-info" target="_blank">
-                                 <i class="ph ph-printer me-2"></i>In hóa đơn
-                             </a>
                          </div>
                     </div>
                 </div>
@@ -837,22 +824,37 @@ get_header();
                 </div>
                 
                 <div class="modal-body">
-                    <div class="mb-3">
+                    <div class="mb-4">
                         <label class="form-label">Trạng thái hiện tại</label>
-                        <input type="text" class="form-control" 
-                               value="<?php echo $status_options[$invoice->status] ?? $invoice->status; ?>" 
-                               readonly>
+                        <div>
+                            <?php
+                            $current_status_class = $status_classes[$invoice->status] ?? 'bg-secondary';
+                            ?>
+                            <span class="badge <?php echo $current_status_class; ?> p-2">
+                                <i class="ph ph-circle-fill me-2" style="font-size: 0.6rem;"></i>
+                                <?php echo $status_options[$invoice->status] ?? $invoice->status; ?>
+                            </span>
+                        </div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label class="form-label">Trạng thái mới <span class="text-danger">*</span></label>
-                        <select class="form-select" name="new_status" required>
+                    <div class="mb-4">
+                        <label class="form-label d-block mb-3">Trạng thái mới <span class="text-danger">*</span></label>
+                        <div class="row">
                             <?php foreach ($status_options as $status_key => $status_label): ?>
                                 <?php if ($status_key !== $invoice->status): ?>
-                                    <option value="<?php echo $status_key; ?>"><?php echo $status_label; ?></option>
+                                <div class="col-md-6 mb-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="new_status" 
+                                               id="status_<?php echo $status_key; ?>" 
+                                               value="<?php echo $status_key; ?>" required>
+                                        <label class="form-check-label" for="status_<?php echo $status_key; ?>">
+                                            <?php echo $status_label; ?>
+                                        </label>
+                                    </div>
+                                </div>
                                 <?php endif; ?>
                             <?php endforeach; ?>
-                        </select>
+                        </div>
                     </div>
                     
                     <div class="mb-3">

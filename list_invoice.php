@@ -344,10 +344,6 @@ get_header();
                                                     <?php endif; ?>
                                                 <?php endif; ?>
 
-                                                <a href="<?php echo home_url('/print-invoice/?invoice_id=' . $invoice->id); ?>" class="nav-link text-info me-2" title="In hóa đơn" target="_blank">
-                                                    <i class="ph ph-printer fa-150p"></i>
-                                                </a>
-
                                                 <?php if (is_inova_admin()): ?>
                                                 <a href="#" class="nav-link text-danger delete-invoice" title="Xóa hóa đơn" data-invoice-id="<?php echo $invoice->id; ?>" data-invoice-code="<?php echo $invoice->invoice_code; ?>">
                                                     <i class="ph ph-trash fa-150p"></i>

@@ -86,6 +86,8 @@ $current_user = wp_get_current_user();
               </div>
               <!-- <a class="dropdown-item"><i class="dropdown-item-icon mdi mdi-account-outline text-primary me-2"></i> My
                 Profile <span class="badge badge-pill badge-danger">1</span></a> -->
+              <a class="dropdown-item" href="<?php echo home_url('/sua-thong-tin/'); ?>"><i class="dropdown-item-icon ph ph-user text-primary me-2"></i>Thông Tin Cá Nhân</a>
+              <a class="dropdown-item" href="<?php echo home_url('/doi-mat-khau/'); ?>"><i class="dropdown-item-icon ph ph-lock text-primary me-2"></i>Đổi Mật Khẩu</a>
               <a class="dropdown-item" href="<?php echo wp_logout_url(home_url()); ?>"><i class="dropdown-item-icon mdi mdi-power text-primary me-2"></i>Sign Out</a>
             </div>
           </li>

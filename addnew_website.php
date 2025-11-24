@@ -133,7 +133,7 @@ get_header();
                             <!-- Website Information Section -->
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header btn-primary">
+                                    <div class="card-header bg-gradient-primary text-white">
                                         <h5 class="mb-1 mt-1">
                                             <i class="ph ph-globe me-2"></i>
                                             Thông tin Website

@@ -1,7 +1,4 @@
 <?php
-/* Import vendor autoload for Dompdf */
-require_once get_template_directory() . '/vendor/autoload.php';
-
 /* Include API functions */
 require_once get_template_directory() . '/api.php';
 
@@ -60,6 +57,8 @@ function enqueue_js_css()
     /* 
      * Enqueue style css file
      */
+    // Bootstrap CSS from CDN (required for Bootstrap components)
+    wp_enqueue_style('bootstrap', 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css', array(), '5.3.0', 'all');
     wp_enqueue_style('feather', get_template_directory_uri() . '/assets/vendors/feather/feather.css');
     wp_enqueue_style('mdi', get_template_directory_uri() . '/assets/vendors/mdi/css/materialdesignicons.min.css');
     wp_enqueue_style('themify-icons', get_template_directory_uri() . '/assets/vendors/ti-icons/css/themify-icons.css');
@@ -80,7 +79,7 @@ function enqueue_js_css()
     wp_enqueue_script('jquery');
     // Bootstrap Bundle (includes Popper.js for modals) - must load after jquery
     wp_enqueue_script('bootstrap-bundle', 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js', array('jquery'), '5.3.0', true);
-    wp_enqueue_script('bundle.base', get_template_directory_uri() . '/assets/vendors/js/vendor.bundle.base.js', array('jquery'), '1.0', true);
+    // Note: vendor.bundle.base.js removed - Bootstrap Bundle CDN provides all needed functionality
     wp_enqueue_script('bootstrap-datepicker', get_template_directory_uri() . '/assets/vendors/bootstrap-datepicker/bootstrap-datepicker.min.js', array('jquery'), '1.0', true);
     wp_enqueue_script('off-canvas', get_template_directory_uri() . '/assets/js/off-canvas.js', array('jquery'), '1.0', true);
     wp_enqueue_script('template', get_template_directory_uri() . '/assets/js/template.js', array('jquery'), '1.0', true);
@@ -95,10 +94,10 @@ function enqueue_js_css()
     wp_localize_script('custom', 'AJAX', array(
         'ajaxurl' => admin_url('admin-ajax.php'),
         'vat_rates' => get_option('inova_vat_rates', array(
-            'Hosting' => 10.00,
-            'Domain' => 10.00,
-            'Website' => 0.00,
-            'Maintenance' => 0.00
+            'Hosting' => 10,
+            'Domain' => 10,
+            'Website' => 0,
+            'Maintenance' => 0
         ))
     ));
 }
@@ -1027,6 +1026,49 @@ function add_website_service_to_cart_ajax() {
 }
 
 /**
+ * AJAX handler to delete website service
+ */
+add_action('wp_ajax_delete_website_service', 'delete_website_service_ajax');
+add_action('wp_ajax_nopriv_delete_website_service', 'delete_website_service_ajax');
+function delete_website_service_ajax() {
+    global $wpdb;
+    
+    $service_id = !empty($_POST['service_id']) ? intval($_POST['service_id']) : 0;
+    
+    if (!$service_id) {
+        wp_send_json_error(array('message' => 'Thiếu ID dịch vụ'));
+        exit;
+    }
+    
+    // Get service details
+    $service_table = $wpdb->prefix . 'im_website_services';
+    $service = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$service_table} WHERE id = %d",
+        $service_id
+    ));
+    
+    if (!$service) {
+        wp_send_json_error(array('message' => 'Không tìm thấy dịch vụ'));
+        exit;
+    }
+    
+    // Hard delete the service - completely remove from database
+    $result = $wpdb->delete(
+        $service_table,
+        array('id' => $service_id),
+        array('%d')
+    );
+    
+    if ($result) {
+        wp_send_json_success(array('message' => 'Dịch vụ đã được xóa'));
+        exit;
+    } else {
+        wp_send_json_error(array('message' => 'Không thể xóa dịch vụ: ' . $wpdb->last_error));
+        exit;
+    }
+}
+
+/**
  * AJAX handler to remove item from cart
  */
 add_action('wp_ajax_remove_from_cart', 'remove_from_cart_ajax');
@@ -1450,8 +1492,14 @@ function get_virtual_page_template_mapping() {
         // Cloudflare
         'cloudflare-import' => 'cloudflare_import.php',
         'them-nhanh-tu-cloudflare' => 'cloudflare_import.php',
-    );
-}
+        
+        // User Account
+        'edit-profile' => 'edit_profile.php',
+        'sua-thong-tin' => 'edit_profile.php',
+        'change-password' => 'change_password.php',
+        'doi-mat-khau' => 'change_password.php',
+        );
+        }
 
 /**
  * Get all available templates in theme
@@ -4065,66 +4113,7 @@ function delete_vat_invoice_callback() {
 }
 
 // ====================================================================
-// PDF INVOICE GENERATION - Dompdf
-// ====================================================================
 
-// Import Dompdf classes
-use Dompdf\Dompdf;
-use Dompdf\Options;
-
-/**
- * Include PDF template functions
- */
-require_once get_template_directory() . '/pdf_invoice_template.php';
-
-/**
- * AJAX handler: Generate and download invoice PDF
- */
-add_action('wp_ajax_generate_invoice_pdf', 'generate_invoice_pdf_callback');
-add_action('wp_ajax_nopriv_generate_invoice_pdf', 'generate_invoice_pdf_callback');
-
-function generate_invoice_pdf_callback() {
-    if (!isset($_GET['invoice_id'])) {
-        wp_die('Invoice ID is required');
-    }
-
-    $invoice_id = intval($_GET['invoice_id']);
-
-    // Get invoice HTML
-    $html = get_invoice_pdf_html($invoice_id);
-
-    // Configure Dompdf
-    $options = new \Dompdf\Options();
-    $options->set('isRemoteEnabled', true);
-    $options->set('defaultFont', 'DejaVu Sans');
-    $options->set('isHtml5ParserEnabled', true);
-    $options->set('isPhpEnabled', false);
-
-    // Create Dompdf instance
-    $dompdf = new \Dompdf\Dompdf($options);
-
-    // Load HTML
-    $dompdf->loadHtml($html);
-
-    // Set paper size and orientation
-    $dompdf->setPaper('A4', 'portrait');
-
-    // Render PDF (first pass)
-    $dompdf->render();
-
-    // Get invoice code for filename
-    global $wpdb;
-    $invoice_table = $wpdb->prefix . 'im_invoices';
-    $invoice = $wpdb->get_row($wpdb->prepare("SELECT invoice_code FROM {$invoice_table} WHERE id = %d", $invoice_id));
-    $filename = $invoice ? "invoice-{$invoice->invoice_code}.pdf" : "invoice-{$invoice_id}.pdf";
-
-    // Output PDF (download)
-    $dompdf->stream($filename, [
-        "Attachment" => true  // true = download, false = preview in browser
-    ]);
-
-    exit;
-}
 
 /**
  * AJAX handler: Delete website for user/admin
@@ -4817,4 +4806,131 @@ function bulk_update_commission_status_callback() {
     }
     
     wp_send_json_success(['message' => 'Đã cập nhật ' . count($commission_ids) . ' hoa hồng thành công']);
+}
+
+/**
+ * AJAX: Change user password
+ * Files using this: change_password.php
+ */
+add_action('wp_ajax_change_user_password', 'change_user_password_callback');
+add_action('wp_ajax_nopriv_change_user_password', 'change_user_password_callback');
+
+function change_user_password_callback() {
+    // Check if user is logged in
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Bạn cần đăng nhập để thực hiện hành động này']);
+        return;
+    }
+
+    $current_user_id = get_current_user_id();
+    $current_password = !empty($_POST['current_password']) ? sanitize_text_field($_POST['current_password']) : '';
+    $new_password = !empty($_POST['new_password']) ? sanitize_text_field($_POST['new_password']) : '';
+
+    // Validate inputs
+    if (empty($current_password) || empty($new_password)) {
+        wp_send_json_error(['message' => 'Vui lòng điền đầy đủ thông tin']);
+        return;
+    }
+
+    // Validate new password length
+    if (strlen($new_password) < 8) {
+        wp_send_json_error(['message' => 'Mật khẩu mới phải có ít nhất 8 ký tự']);
+        return;
+    }
+
+    // Get current user
+    $user = get_user_by('id', $current_user_id);
+    
+    if (!$user) {
+        wp_send_json_error(['message' => 'Không tìm thấy người dùng']);
+        return;
+    }
+
+    // Verify current password
+    if (!wp_check_password($current_password, $user->user_pass, $user->ID)) {
+        wp_send_json_error(['message' => 'Mật khẩu hiện tại không chính xác']);
+        return;
+    }
+
+    // Update password
+    wp_set_password($new_password, $current_user_id);
+
+    // Send success response
+    wp_send_json_success([
+        'message' => 'Mật khẩu đã được cập nhật thành công'
+    ]);
+}
+
+/**
+ * AJAX: Update user profile (display_name, user_email, user_nicename)
+ * Files using this: edit_profile.php
+ */
+add_action('wp_ajax_update_user_profile', 'update_user_profile_callback');
+add_action('wp_ajax_nopriv_update_user_profile', 'update_user_profile_callback');
+
+function update_user_profile_callback() {
+    // Check if user is logged in
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Bạn cần đăng nhập để thực hiện hành động này']);
+        return;
+    }
+
+    $current_user_id = get_current_user_id();
+    $display_name = !empty($_POST['display_name']) ? sanitize_text_field($_POST['display_name']) : '';
+    $user_email = !empty($_POST['user_email']) ? sanitize_email($_POST['user_email']) : '';
+    $user_nicename = !empty($_POST['user_nicename']) ? sanitize_text_field($_POST['user_nicename']) : '';
+
+    // Validate inputs
+    if (empty($display_name) || empty($user_email)) {
+        wp_send_json_error(['message' => 'Tên hiển thị và Email không được để trống']);
+        return;
+    }
+
+    // Validate email format
+    if (!is_email($user_email)) {
+        wp_send_json_error(['message' => 'Email không hợp lệ']);
+        return;
+    }
+
+    // Get current user
+    $user = get_user_by('id', $current_user_id);
+    
+    if (!$user) {
+        wp_send_json_error(['message' => 'Không tìm thấy người dùng']);
+        return;
+    }
+
+    // Check if new email is already used by another user
+    if ($user_email !== $user->user_email) {
+        $existing_user = get_user_by('email', $user_email);
+        if ($existing_user && $existing_user->ID !== $current_user_id) {
+            wp_send_json_error(['message' => 'Email này đã được sử dụng bởi một tài khoản khác']);
+            return;
+        }
+    }
+
+    // Prepare update data
+    $user_data = array(
+        'ID' => $current_user_id,
+        'display_name' => $display_name,
+        'user_email' => $user_email,
+    );
+
+    // Add user_nicename if provided
+    if (!empty($user_nicename)) {
+        $user_data['user_nicename'] = $user_nicename;
+    }
+
+    // Update user
+    $result = wp_update_user($user_data);
+
+    if (is_wp_error($result)) {
+        wp_send_json_error(['message' => 'Lỗi khi cập nhật thông tin: ' . $result->get_error_message()]);
+        return;
+    }
+
+    // Send success response
+    wp_send_json_success([
+        'message' => 'Thông tin cá nhân đã được cập nhật thành công'
+    ]);
 }

@@ -155,7 +155,7 @@ get_header();
                                     <label for="domain_name" class="fw-bold">Tên miền <span class="text-danger">*</span></label>
                                     <div class="input-group">
                                         <input type="text" class="form-control" id="domain_name" name="domain_name" placeholder="example.com" required>
-                                        <button type="button" class="btn btn-secondary" id="lookup-whois-btn">
+                                        <button type="button" class="d-flex align-items-center btn btn-secondary" id="lookup-whois-btn">
                                             <i class="ph ph-magnifying-glass me-1"></i> Looking up
                                         </button>
                                     </div>
@@ -168,7 +168,7 @@ get_header();
                                     <label for="registration_date" class="fw-bold">Ngày đăng ký</label>
                                     <div class="input-group date datepicker">
                                         <input type="text" class="form-control" id="registration_date" name="registration_date" placeholder="dd/mm/yyyy">
-                                        <span class="input-group-text bg-secondary text-white">
+                                        <span class="input-group-text btn-secondary">
                                             <i class="ph ph-calendar"></i>
                                         </span>
                                     </div>
@@ -190,7 +190,7 @@ get_header();
                                     <label for="expiry_date" class="fw-bold">Ngày hết hạn</label>
                                     <div class="input-group date datepicker">
                                         <input type="text" class="form-control" id="expiry_date" name="expiry_date" placeholder="dd/mm/yyyy">
-                                        <span class="input-group-text bg-secondary text-white">
+                                        <span class="input-group-text btn-secondary">
                                             <i class="ph ph-calendar"></i>
                                         </span>
                                     </div>
@@ -283,7 +283,7 @@ get_header();
                         ?>
                         <div class="form-group d-flex justify-content-center mt-3">
                             <button type="submit" class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
-                                <i class="ph ph-floppy-disk btn-icon-prepend fa-150p"></i>
+                                <i class="ph ph-globe btn-icon-prepend fa-150p"></i>
                                 <span class="fw-bold">Lưu tên miền</span>
                             </button>
                             <a href="<?php echo home_url('/danh-sach-ten-mien/'); ?>" class="btn btn-light btn-icon-text ms-2 d-flex align-items-center border-radius-9">
