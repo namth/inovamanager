@@ -2579,6 +2579,120 @@ function get_website_permission_where_clause($table_alias = 'w') {
 }
 
 // ============================================================================
+// UNIFIED INVOICE CREATION FUNCTION
+// ============================================================================
+
+/**
+ * Create invoice with items - unified function for all invoice creation scenarios
+ * Used by both manual invoice creation and auto renewal
+ * 
+ * @param int $user_id User ID
+ * @param array $items Invoice items array with keys: service_type, service_id, description, unit_price, quantity, item_total, vat_rate, vat_amount, (optional: start_date, end_date)
+ * @param string $notes Invoice notes (optional)
+ * @param string $status Invoice status: 'draft' or 'pending' (default: 'pending')
+ * @param int $created_by_id WordPress user ID who created it (default: 0 for system)
+ * @param string $created_by_type Type: 'admin', 'user', 'system' (default: 'system')
+ * @param string $invoice_date Invoice date in YYYY-MM-DD format (default: today)
+ * @param string $due_date Due date in YYYY-MM-DD format (default: +15 days)
+ * @return int|false Invoice ID on success, false on failure
+ */
+function create_invoice_with_items($user_id, $items, $notes = '', $status = 'pending', $created_by_id = 0, $created_by_type = 'system', $invoice_date = '', $due_date = '') {
+    global $wpdb;
+    
+    if (empty($items) || !is_array($items)) {
+        return false;
+    }
+    
+    $invoices_table = $wpdb->prefix . 'im_invoices';
+    $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+    
+    // Calculate totals from items
+    $sub_total = 0;
+    $discount_total = 0;
+    $tax_amount = 0;
+    
+    foreach ($items as $item) {
+        $item_total = floatval($item['item_total'] ?? 0);
+        $vat_amount = floatval($item['vat_amount'] ?? 0);
+        
+        $sub_total += $item_total;
+        $tax_amount += $vat_amount;
+    }
+    
+    $total_amount = $sub_total + $tax_amount - $discount_total;
+    
+    // Get partner_id from items
+    $partner_id = get_partner_id_from_items($items);
+    
+    // Generate invoice code
+    $invoice_code = generate_invoice_code($user_id);
+    
+    // Set default dates if not provided
+    if (empty($invoice_date)) {
+        $invoice_date = date('Y-m-d');
+    }
+    if (empty($due_date)) {
+        $due_date = date('Y-m-d', strtotime('+15 days'));
+    }
+    
+    // Create invoice record
+    $invoice_data = array(
+        'invoice_code' => $invoice_code,
+        'user_id' => $user_id,
+        'invoice_date' => $invoice_date,
+        'due_date' => $due_date,
+        'sub_total' => $sub_total,
+        'discount_total' => $discount_total,
+        'tax_amount' => $tax_amount,
+        'total_amount' => $total_amount,
+        'notes' => $notes,
+        'status' => $status,
+        'created_by_type' => $created_by_type,
+        'created_by_id' => $created_by_id,
+        'partner_id' => $partner_id,
+    );
+    
+    // Insert invoice
+    $wpdb->insert($invoices_table, $invoice_data);
+    $invoice_id = $wpdb->insert_id;
+    
+    if (!$invoice_id) {
+        return false;
+    }
+    
+    // Insert all invoice items
+    foreach ($items as $item) {
+        $insert_data = array(
+            'invoice_id' => $invoice_id,
+            'service_type' => sanitize_text_field($item['service_type']),
+            'service_id' => intval($item['service_id']),
+            'description' => sanitize_text_field($item['description']),
+            'unit_price' => floatval($item['unit_price']),
+            'quantity' => intval($item['quantity']),
+            'item_total' => floatval($item['item_total']),
+            'vat_rate' => floatval($item['vat_rate'] ?? 0),
+            'vat_amount' => floatval($item['vat_amount'] ?? 0),
+        );
+        
+        // Add optional start_date and end_date
+        if (isset($item['start_date']) && !empty($item['start_date'])) {
+            $insert_data['start_date'] = $item['start_date'];
+        }
+        
+        if (isset($item['end_date']) && !empty($item['end_date'])) {
+            $insert_data['end_date'] = $item['end_date'];
+        }
+        
+        $wpdb->insert($invoice_items_table, $insert_data);
+    }
+    
+    // Create commissions for invoice
+    create_commissions_for_invoice($invoice_id);
+    
+    return $invoice_id;
+}
+
+// ============================================================================
 // AUTO RENEWAL INVOICE CRON JOB
 // ============================================================================
 
@@ -2617,6 +2731,9 @@ function auto_create_renewal_invoices_callback() {
     $date_51_days = date('Y-m-d', strtotime('+51 days'));
 
     // Find all services expiring between 30-51 days from now
+    // Get websites table for joining
+    $websites_table = $wpdb->prefix . 'im_websites';
+
     // 1. Get INOVA-managed domains
     $expiring_domains = $wpdb->get_results($wpdb->prepare("
         SELECT d.*, u.user_code, u.name as owner_name, pc.renew_price
@@ -2628,23 +2745,29 @@ function auto_create_renewal_invoices_callback() {
         AND d.expiry_date BETWEEN %s AND %s
     ", $date_30_days, $date_51_days));
 
-    // 2. Get all hostings
+    // 2. Get all hostings with website names
     $expiring_hostings = $wpdb->get_results($wpdb->prepare("
-        SELECT h.*, u.user_code, u.name as owner_name, pc.renew_price
+        SELECT h.*, u.user_code, u.name as owner_name, pc.renew_price,
+               GROUP_CONCAT(w.name SEPARATOR ', ') as website_names
         FROM {$hostings_table} h
         LEFT JOIN {$users_table} u ON h.owner_user_id = u.id
         LEFT JOIN {$product_catalog_table} pc ON h.product_catalog_id = pc.id
+        LEFT JOIN {$websites_table} w ON w.hosting_id = h.id
         WHERE h.status = 'ACTIVE'
         AND h.expiry_date BETWEEN %s AND %s
+        GROUP BY h.id
     ", $date_30_days, $date_51_days));
 
-    // 3. Get all maintenance packages
+    // 3. Get all maintenance packages with website names
     $expiring_maintenance = $wpdb->get_results($wpdb->prepare("
-        SELECT m.*, u.user_code, u.name as owner_name
+        SELECT m.*, u.user_code, u.name as owner_name,
+               GROUP_CONCAT(w.name SEPARATOR ', ') as website_names
         FROM {$maintenance_table} m
         LEFT JOIN {$users_table} u ON m.owner_user_id = u.id
+        LEFT JOIN {$websites_table} w ON w.maintenance_package_id = m.id
         WHERE m.status = 'ACTIVE'
         AND m.expiry_date BETWEEN %s AND %s
+        GROUP BY m.id
     ", $date_30_days, $date_51_days));
 
     // Group services by owner_user_id
@@ -2709,84 +2832,98 @@ function auto_create_renewal_invoices_callback() {
             continue; // Already has invoice
         }
 
-        // Generate invoice code
-        $invoice_code = generate_invoice_code($user_id);
-
-        // Create invoice
-        $invoice_data = array(
-            'invoice_code' => $invoice_code,
-            'user_id' => $user_id,
-            'invoice_date' => $today,
-            'due_date' => date('Y-m-d', strtotime('+15 days')),
-            'status' => 'pending',
-            'total_amount' => 0,
-            'paid_amount' => 0,
-            'notes' => 'Hóa đơn gia hạn dịch vụ tự động'
-        );
-
-        $wpdb->insert($invoices_table, $invoice_data);
-        $invoice_id = $wpdb->insert_id;
-
-        $total_amount = 0;
+        // Prepare invoice items array
+        $items = array();
 
         // Add domain items
         foreach ($user_services['domains'] as $domain) {
-            $item_data = array(
-                'invoice_id' => $invoice_id,
+            $unit_price = floatval($domain->renew_price);
+            $quantity = 1;
+            $item_total = $unit_price * $quantity;
+            
+            // Get VAT rate for Domain service
+            $vat_rate = get_vat_rate_for_service('Domain');
+            $vat_amount = calculate_vat_amount($item_total, $vat_rate);
+            
+            $items[] = array(
                 'service_type' => 'Domain',
                 'service_id' => $domain->id,
                 'description' => 'Gia hạn tên miền: ' . $domain->domain_name,
-                'unit_price' => $domain->renew_price,
-                'quantity' => 1,
+                'unit_price' => $unit_price,
+                'quantity' => $quantity,
+                'item_total' => $item_total,
+                'vat_rate' => $vat_rate,
+                'vat_amount' => $vat_amount,
                 'start_date' => $domain->expiry_date,
                 'end_date' => date('Y-m-d', strtotime($domain->expiry_date . ' +1 year'))
             );
-            $wpdb->insert($invoice_items_table, $item_data);
-            $total_amount += $domain->renew_price;
         }
 
         // Add hosting items
         foreach ($user_services['hostings'] as $hosting) {
             $hosting_code = !empty($hosting->hosting_code) ? $hosting->hosting_code : 'HOST-' . $hosting->id;
-            $item_data = array(
-                'invoice_id' => $invoice_id,
+            $unit_price = floatval($hosting->renew_price);
+            $quantity = 1;
+            $item_total = $unit_price * $quantity;
+            
+            // Get VAT rate for Hosting service
+            $vat_rate = get_vat_rate_for_service('Hosting');
+            $vat_amount = calculate_vat_amount($item_total, $vat_rate);
+            
+            // Get website names for description
+            $website_names = !empty($hosting->website_names) ? ' (Website: ' . $hosting->website_names . ')' : '';
+            
+            $items[] = array(
                 'service_type' => 'Hosting',
                 'service_id' => $hosting->id,
-                'description' => 'Gia hạn hosting: ' . $hosting_code,
-                'unit_price' => $hosting->renew_price,
-                'quantity' => 1,
+                'description' => 'Gia hạn hosting: ' . $hosting_code . $website_names,
+                'unit_price' => $unit_price,
+                'quantity' => $quantity,
+                'item_total' => $item_total,
+                'vat_rate' => $vat_rate,
+                'vat_amount' => $vat_amount,
                 'start_date' => $hosting->expiry_date,
                 'end_date' => date('Y-m-d', strtotime($hosting->expiry_date . ' +1 year'))
             );
-            $wpdb->insert($invoice_items_table, $item_data);
-            $total_amount += $hosting->renew_price;
         }
 
         // Add maintenance items
         foreach ($user_services['maintenances'] as $maintenance) {
             $maintenance_code = !empty($maintenance->order_code) ? $maintenance->order_code : 'MAINT-' . $maintenance->id;
             $months = $maintenance->billing_cycle_months;
-            $item_data = array(
-                'invoice_id' => $invoice_id,
+            $unit_price = floatval($maintenance->actual_revenue);
+            $quantity = 1;
+            $item_total = $unit_price * $quantity;
+            
+            // Get VAT rate for Maintenance service
+            $vat_rate = get_vat_rate_for_service('Maintenance');
+            $vat_amount = calculate_vat_amount($item_total, $vat_rate);
+            
+            // Get website names for description
+            $website_names = !empty($maintenance->website_names) ? ' (Website: ' . $maintenance->website_names . ')' : '';
+            
+            $items[] = array(
                 'service_type' => 'Maintenance',
                 'service_id' => $maintenance->id,
-                'description' => 'Gia hạn bảo trì: ' . $maintenance_code,
-                'unit_price' => $maintenance->actual_revenue,
-                'quantity' => 1,
+                'description' => 'Gia hạn bảo trì: ' . $maintenance_code . $website_names,
+                'unit_price' => $unit_price,
+                'quantity' => $quantity,
+                'item_total' => $item_total,
+                'vat_rate' => $vat_rate,
+                'vat_amount' => $vat_amount,
                 'start_date' => $maintenance->expiry_date,
                 'end_date' => date('Y-m-d', strtotime($maintenance->expiry_date . ' +' . $months . ' months'))
             );
-            $wpdb->insert($invoice_items_table, $item_data);
-            $total_amount += $maintenance->actual_revenue;
         }
 
-        // Update invoice total
-        $wpdb->update(
-            $invoices_table,
-            array('total_amount' => $total_amount),
-            array('id' => $invoice_id),
-            array('%f'),
-            array('%d')
+        // Create invoice using unified function
+        create_invoice_with_items(
+            $user_id,
+            $items,
+            'Hóa đơn gia hạn dịch vụ tự động',
+            'pending',
+            0,
+            'system'
         );
     }
 }

@@ -94,8 +94,8 @@ $query = "
         p.name AS provider_name,
         pc.name AS product_name,
         pc.service_type,
-        IFNULL(w.name, '') AS website_name,
-        IFNULL(w.id, 0) AS website_id
+        (SELECT GROUP_CONCAT(w.name SEPARATOR ', ') FROM $websites_table w WHERE w.domain_id = d.id) AS website_name,
+        (SELECT GROUP_CONCAT(w.id SEPARATOR ', ') FROM $websites_table w WHERE w.domain_id = d.id) AS website_id
     FROM
         $domains_table d
     LEFT JOIN
@@ -104,8 +104,6 @@ $query = "
         $users_table p ON d.provider_id = p.id AND p.user_type = 'SUPPLIER'
     LEFT JOIN
         $product_catalog_table pc ON d.product_catalog_id = pc.id
-    LEFT JOIN
-        $websites_table w ON w.domain_id = d.id
     {$where_clause}
     ORDER BY
         d.expiry_date ASC

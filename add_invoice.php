@@ -77,69 +77,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
 
     if ($action === 'add_invoice') {
-         // Generate invoice code using the new helper function
-         $invoice_code = generate_invoice_code($user_id);
+         // Create invoice using unified function
+         $invoice_status = isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft';
+         $new_invoice_id = create_invoice_with_items(
+             $user_id,
+             $items,
+             $notes,
+             $invoice_status,
+             get_current_user_id(),
+             'admin',
+             $formatted_invoice_date,
+             $formatted_due_date
+         );
 
-         // Get user's VAT invoice preference
-         $user_vat_settings = get_user_meta($user_id, 'inova_vat_invoice_settings', true);
-         $requires_vat_invoice = 0;
-         if (!empty($user_vat_settings) && isset($user_vat_settings['requires_vat_invoice'])) {
-             $requires_vat_invoice = intval($user_vat_settings['requires_vat_invoice']);
+         if (!$new_invoice_id) {
+             echo '<div class="alert alert-danger">Lỗi: Không thể tạo hóa đơn!</div>';
+         } else {
+             echo '<div class="alert alert-success">Hóa đơn đã được tạo thành công!</div>';
          }
-
-         // Get partner_id from invoice items (hosting/maintenance)
-         $partner_id = get_partner_id_from_items($items);
-
-         // Insert new invoice
-         $wpdb->insert($invoices_table, [
-             'invoice_code' => $invoice_code,
-             'user_id' => $user_id,
-             'invoice_date' => $formatted_invoice_date,
-             'due_date' => $formatted_due_date,
-             'sub_total' => $sub_total,
-             'discount_total' => $discount_total,
-             'tax_amount' => $tax_amount,
-             'total_amount' => $total_amount,
-             'notes' => $notes,
-             'status' => isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft',
-             'requires_vat_invoice' => $requires_vat_invoice,
-             'created_by_type' => 'admin',
-             'created_by_id' => get_current_user_id(),
-             'partner_id' => $partner_id,
-        ]);
-
-        $new_invoice_id = $wpdb->insert_id;
-
-        // Insert invoice items
-        foreach ($items as $item) {
-            $insert_data = [
-                'invoice_id' => $new_invoice_id,
-                'service_type' => $item['service_type'],
-                'service_id' => $item['service_id'],
-                'description' => $item['description'],
-                'unit_price' => $item['unit_price'],
-                'quantity' => $item['quantity'],
-                'item_total' => $item['item_total'],
-                'vat_rate' => $item['vat_rate'],
-                'vat_amount' => $item['vat_amount'],
-            ];
-
-            // Add start and end dates if available
-            if (isset($item['start_date'])) {
-                $insert_data['start_date'] = $item['start_date'];
-            }
-
-            if (isset($item['end_date'])) {
-                $insert_data['end_date'] = $item['end_date'];
-            }
-
-            $wpdb->insert($invoice_items_table, $insert_data);
-        }
-
-        // Create commissions for invoice (Phase 2 integration)
-        create_commissions_for_invoice($new_invoice_id);
-
-        echo '<div class="alert alert-success">Hóa đơn đã được tạo thành công!</div>';
 
         // Clear cart items if invoice was created from cart
         if (isset($_POST['from_cart']) && $_POST['from_cart'] == 1) {
@@ -158,47 +113,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     } elseif ($action === 'edit_invoice' && $invoice_id > 0) {
-        // Update existing invoice
-        $wpdb->update($invoices_table, [
-            'user_id' => $user_id,
-            'invoice_date' => $formatted_invoice_date,
-            'due_date' => $formatted_due_date,
-            'sub_total' => $sub_total,
-            'discount_total' => $discount_total,
-            'tax_amount' => $tax_amount,
-            'total_amount' => $total_amount,
-            'notes' => $notes,
-            'status' => isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft',
-        ], ['id' => $invoice_id]);
+         // Calculate totals for update
+         $sub_total = 0;
+         $discount_total = 0;
+         $tax_amount = 0;
+         
+         foreach ($items as $item) {
+             $item_total = floatval($item['item_total']);
+             $vat_amount = floatval($item['vat_amount'] ?? 0);
+             
+             $sub_total += $item_total;
+             $tax_amount += $vat_amount;
+         }
+         
+         $total_amount = $sub_total + $tax_amount - $discount_total;
+         
+         // Update existing invoice
+         $wpdb->update($invoices_table, [
+             'user_id' => $user_id,
+             'invoice_date' => $formatted_invoice_date,
+             'due_date' => $formatted_due_date,
+             'sub_total' => $sub_total,
+             'discount_total' => $discount_total,
+             'tax_amount' => $tax_amount,
+             'total_amount' => $total_amount,
+             'notes' => $notes,
+             'status' => isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft',
+         ], ['id' => $invoice_id]);
 
-        // Update invoice items
-        $wpdb->delete($invoice_items_table, ['invoice_id' => $invoice_id]);
-        foreach ($items as $item) {
-            $insert_data = [
-                'invoice_id' => $invoice_id,
-                'service_type' => $item['service_type'],
-                'service_id' => $item['service_id'],
-                'description' => $item['description'],
-                'unit_price' => $item['unit_price'],
-                'quantity' => $item['quantity'],
-                'item_total' => $item['item_total'],
-                'vat_rate' => $item['vat_rate'],
-                'vat_amount' => $item['vat_amount'],
-            ];
+         // Update invoice items
+         $wpdb->delete($invoice_items_table, ['invoice_id' => $invoice_id]);
+         foreach ($items as $item) {
+             $insert_data = [
+                 'invoice_id' => $invoice_id,
+                 'service_type' => $item['service_type'],
+                 'service_id' => $item['service_id'],
+                 'description' => $item['description'],
+                 'unit_price' => $item['unit_price'],
+                 'quantity' => $item['quantity'],
+                 'item_total' => $item['item_total'],
+                 'vat_rate' => $item['vat_rate'],
+                 'vat_amount' => $item['vat_amount'],
+             ];
 
-            // Add start and end dates if available
-            if (isset($item['start_date'])) {
-                $insert_data['start_date'] = $item['start_date'];
-            }
+             // Add start and end dates if available
+             if (isset($item['start_date'])) {
+                 $insert_data['start_date'] = $item['start_date'];
+             }
 
-            if (isset($item['end_date'])) {
-                $insert_data['end_date'] = $item['end_date'];
-            }
+             if (isset($item['end_date'])) {
+                 $insert_data['end_date'] = $item['end_date'];
+             }
 
-            $wpdb->insert($invoice_items_table, $insert_data);
-        }
+             $wpdb->insert($invoice_items_table, $insert_data);
+         }
 
-        echo '<div class="alert alert-success">Hóa đơn đã được cập nhật thành công!</div>';
+         echo '<div class="alert alert-success">Hóa đơn đã được cập nhật thành công!</div>';
         
         // Redirect to invoice detail page if finalized
         if (isset($_POST['finalize']) && $_POST['finalize'] == 1) {
