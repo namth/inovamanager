@@ -389,8 +389,8 @@ function calculateExpiryDate() {
     }
 }
 
-// Attach event listeners
-document.addEventListener('DOMContentLoaded', function() {
+// Attach event listeners - Use jQuery after it's loaded
+jQuery(document).ready(function($) {
     const registrationDateField = document.getElementById('registration_date');
     const registrationPeriodField = document.getElementById('registration_period_years');
     
@@ -406,7 +406,8 @@ document.addEventListener('DOMContentLoaded', function() {
     /**
      * WHOIS lookup when clicking the button
      */
-    $('#lookup-whois-btn').on('click', function() {
+    $(document).on('click', '#lookup-whois-btn', function(e) {
+        e.preventDefault();
         const domainName = $('#domain_name').val().trim();
         const $button = $(this);
         const $statusDiv = $('#whois-lookup-status');
@@ -434,6 +435,7 @@ document.addEventListener('DOMContentLoaded', function() {
         $.ajax({
             url: AJAX.ajaxurl,
             type: 'POST',
+            dataType: 'json',
             data: {
                 action: 'fetch_domain_info',
                 domain: domainName

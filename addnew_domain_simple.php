@@ -325,8 +325,8 @@ function calculateExpiryDate() {
     }
 }
 
-// Attach event listeners
-document.addEventListener('DOMContentLoaded', function() {
+// Attach event listeners - Use jQuery after it's loaded
+jQuery(document).ready(function($) {
     const registrationDateField = document.getElementById('registration_date');
     const registrationPeriodField = document.getElementById('registration_period_years');
 
@@ -345,7 +345,7 @@ document.addEventListener('DOMContentLoaded', function() {
      * Management Option Toggle
      * Toggle between entering management info and copying from another domain
      */
-    $('.management-option-radio').on('change', function() {
+    $(document).on('change', '.management-option-radio', function() {
         const selectedOption = $('input[name="management_option"]:checked').val();
         
         if (selectedOption === 'same_as_other') {
@@ -363,7 +363,8 @@ document.addEventListener('DOMContentLoaded', function() {
      * WHOIS lookup when clicking the button
      * Fetch domain registration and expiry dates from WHOIS API
      */
-    $('#lookup-whois-btn').on('click', function() {
+    $(document).on('click', '#lookup-whois-btn', function(e) {
+        e.preventDefault();
         const domainName = $('#domain_name').val().trim();
         const $button = $(this);
         const $statusDiv = $('#whois-lookup-status');
