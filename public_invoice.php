@@ -86,35 +86,9 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
     ORDER BY ii.id
 ", $invoice_id));
 
-// Get website names for each invoice item
+// Get website names for each invoice item using common function
 foreach ($invoice_items as $item) {
-    $website_names = array();
-    if (in_array($item->service_type, ['hosting', 'maintenance'])) {
-        $website_infos = $wpdb->get_results($wpdb->prepare("
-            SELECT name FROM $websites_table 
-            WHERE (hosting_id = %d OR maintenance_package_id = %d)
-            ORDER BY name ASC
-        ", $item->service_id, $item->service_id));
-        
-        if (!empty($website_infos)) {
-            foreach ($website_infos as $website_info) {
-                $website_names[] = $website_info->name;
-            }
-        }
-    } elseif ($item->service_type === 'website_service') {
-        // Get website name from website_services table
-        $service_table = $wpdb->prefix . 'im_website_services';
-        $ws_info = $wpdb->get_row($wpdb->prepare("
-            SELECT w.name FROM {$service_table} ws
-            LEFT JOIN $websites_table w ON ws.website_id = w.id
-            WHERE ws.id = %d
-        ", $item->service_id));
-        
-        if ($ws_info && !empty($ws_info->name)) {
-            $website_names[] = $ws_info->name;
-        }
-    }
-    $item->website_names = $website_names;
+    $item->website_names = get_invoice_item_website_names($item);
 }
 
 // Calculate totals and check if has commissions

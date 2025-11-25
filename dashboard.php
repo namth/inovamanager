@@ -109,23 +109,8 @@ if (!empty($pending_invoices)) {
     
     // Map items to invoices and get website information
     foreach ($all_items as $item) {
-        // Get website names for hosting and maintenance services
-        $website_names = array();
-        if (in_array($item->service_type, ['hosting', 'maintenance'])) {
-            $website_infos = $wpdb->get_results($wpdb->prepare("
-                SELECT name FROM $websites_table 
-                WHERE (hosting_id = %d OR maintenance_package_id = %d)
-                ORDER BY name ASC
-            ", $item->service_id, $item->service_id));
-            
-            if (!empty($website_infos)) {
-                foreach ($website_infos as $website_info) {
-                    $website_names[] = $website_info->name;
-                }
-            }
-        }
-        
-        $item->website_names = $website_names;
+        // Get website names using common function
+        $item->website_names = get_invoice_item_website_names($item);
         
         if (!isset($invoice_items_map[$item->invoice_id])) {
             $invoice_items_map[$item->invoice_id] = array();
