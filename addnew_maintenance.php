@@ -453,46 +453,10 @@ jQuery(document).ready(function($) {
         return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
     }
 
-    // Format số trong input field (thêm dấu phẩy)
-    function formatNumberDisplay(value) {
-        return parseInt(value).toLocaleString('vi-VN');
-    }
-
-    // Parse số từ input field (xóa dấu phẩy)
-    function parseFormattedNumber(value) {
-        return parseInt(value.replace(/\./g, '')) || 0;
-    }
-
-    // Add blur event for formatting display
-    monthlyFeeInput.addEventListener('blur', function() {
-        if (this.value) {
-            const numValue = parseFormattedNumber(this.value);
-            if (numValue > 0) {
-                this.value = formatNumberDisplay(numValue);
-            }
-        }
-    });
-
-    discountInput.addEventListener('blur', function() {
-        if (this.value) {
-            const numValue = parseFormattedNumber(this.value);
-            this.value = formatNumberDisplay(numValue);
-        }
-    });
-
-    // Add focus event to remove formatting for easy editing
-    monthlyFeeInput.addEventListener('focus', function() {
-        this.value = parseFormattedNumber(this.value);
-    });
-
-    discountInput.addEventListener('focus', function() {
-        this.value = parseFormattedNumber(this.value);
-    });
-
     function calculateValues() {
-        const monthlyFee = parseFormattedNumber(monthlyFeeInput.value) || 0;
+        const monthlyFee = parseInt(monthlyFeeInput.value) || 0;
         const billingCycle = parseInt(billingCycleSelect.value) || 1;
-        const discount = parseFormattedNumber(discountInput.value) || 0;
+        const discount = parseInt(discountInput.value) || 0;
         const renewDate = renewDateInput.value;
 
         // Set total months equal to billing cycle
@@ -593,21 +557,6 @@ jQuery(document).ready(function($) {
                 preview.className = 'maintenance-code-preview text-info mt-1';
                 preview.innerHTML = '<small>Mã sẽ được tạo: ' + previewCode + ' (N sẽ được tự động thay thế)</small>';
                 orderCodeInput.parentNode.appendChild(preview);
-            }
-        });
-    }
-
-    // Form submit handler to clean up formatted numbers before sending to database
-    const form = document.querySelector('form');
-    if (form) {
-        form.addEventListener('submit', function() {
-            // Remove formatting from monthly_fee before submit
-            if (monthlyFeeInput.value) {
-                monthlyFeeInput.value = parseFormattedNumber(monthlyFeeInput.value);
-            }
-            // Remove formatting from discount_amount before submit
-            if (discountInput.value) {
-                discountInput.value = parseFormattedNumber(discountInput.value);
             }
         });
     }
