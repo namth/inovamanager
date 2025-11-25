@@ -389,7 +389,7 @@ if ($wpdb->last_error) {
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
+jQuery(document).ready(function($) {
     const pricingTypeRadios = document.querySelectorAll('input[name="pricing_type"]');
     const dailyPricing = document.getElementById('daily_pricing');
     const fixedPricing = document.getElementById('fixed_pricing');

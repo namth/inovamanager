@@ -368,10 +368,10 @@ print_r($wpdb->last_error); // For debugging, remove in production
                                                 <div class="form-group mb-3">
                                                     <label for="billing_cycle_months" class="fw-bold">Chu kỳ thanh toán <span class="text-danger">*</span></label>
                                                     <select class="form-control" id="billing_cycle_months" name="billing_cycle_months" required>
-                                                        <option value="1" selected>1 tháng</option>
+                                                        <option value="1">1 tháng</option>
                                                         <option value="3">3 tháng</option>
                                                         <option value="6">6 tháng</option>
-                                                        <option value="12">12 tháng</option>
+                                                        <option value="12" selected>12 tháng</option>
                                                         <option value="24">24 tháng</option>
                                                         <option value="36">36 tháng</option>
                                                     </select>
@@ -436,8 +436,8 @@ print_r($wpdb->last_error); // For debugging, remove in production
 </div>
 
 <script>
-// Maintenance package calculations
-document.addEventListener('DOMContentLoaded', function() {
+jQuery(document).ready(function($) {
+    // Maintenance package calculations
     const monthlyFeeInput = document.getElementById('monthly_fee');
     const billingCycleSelect = document.getElementById('billing_cycle_months');
     const discountInput = document.getElementById('discount_amount');
@@ -453,10 +453,46 @@ document.addEventListener('DOMContentLoaded', function() {
         return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
     }
 
+    // Format số trong input field (thêm dấu phẩy)
+    function formatNumberDisplay(value) {
+        return parseInt(value).toLocaleString('vi-VN');
+    }
+
+    // Parse số từ input field (xóa dấu phẩy)
+    function parseFormattedNumber(value) {
+        return parseInt(value.replace(/\./g, '')) || 0;
+    }
+
+    // Add blur event for formatting display
+    monthlyFeeInput.addEventListener('blur', function() {
+        if (this.value) {
+            const numValue = parseFormattedNumber(this.value);
+            if (numValue > 0) {
+                this.value = formatNumberDisplay(numValue);
+            }
+        }
+    });
+
+    discountInput.addEventListener('blur', function() {
+        if (this.value) {
+            const numValue = parseFormattedNumber(this.value);
+            this.value = formatNumberDisplay(numValue);
+        }
+    });
+
+    // Add focus event to remove formatting for easy editing
+    monthlyFeeInput.addEventListener('focus', function() {
+        this.value = parseFormattedNumber(this.value);
+    });
+
+    discountInput.addEventListener('focus', function() {
+        this.value = parseFormattedNumber(this.value);
+    });
+
     function calculateValues() {
-        const monthlyFee = parseInt(monthlyFeeInput.value) || 0;
+        const monthlyFee = parseFormattedNumber(monthlyFeeInput.value) || 0;
         const billingCycle = parseInt(billingCycleSelect.value) || 1;
-        const discount = parseInt(discountInput.value) || 0;
+        const discount = parseFormattedNumber(discountInput.value) || 0;
         const renewDate = renewDateInput.value;
 
         // Set total months equal to billing cycle
@@ -531,6 +567,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Maintenance Code Preview Functionality
     const orderCodeInput = document.getElementById('order_code');
+    const ownerSelect = document.getElementById('owner_user_id');
 
     if (ownerSelect && orderCodeInput) {
         ownerSelect.addEventListener('change', function() {
@@ -556,6 +593,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 preview.className = 'maintenance-code-preview text-info mt-1';
                 preview.innerHTML = '<small>Mã sẽ được tạo: ' + previewCode + ' (N sẽ được tự động thay thế)</small>';
                 orderCodeInput.parentNode.appendChild(preview);
+            }
+        });
+    }
+
+    // Form submit handler to clean up formatted numbers before sending to database
+    const form = document.querySelector('form');
+    if (form) {
+        form.addEventListener('submit', function() {
+            // Remove formatting from monthly_fee before submit
+            if (monthlyFeeInput.value) {
+                monthlyFeeInput.value = parseFormattedNumber(monthlyFeeInput.value);
+            }
+            // Remove formatting from discount_amount before submit
+            if (discountInput.value) {
+                discountInput.value = parseFormattedNumber(discountInput.value);
             }
         });
     }

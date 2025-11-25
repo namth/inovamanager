@@ -477,7 +477,7 @@ function calculateExpiryDate() {
 }
 
 // Attach event listeners
-document.addEventListener('DOMContentLoaded', function() {
+jQuery(document).ready(function($) {
     const registrationDateField = document.getElementById('registration_date');
     const billingCycleField = document.getElementById('billing_cycle_months');
     
