@@ -866,6 +866,29 @@ function cancel_commissions_for_invoice($invoice_id) {
  * @param string $service_type Service type (Hosting, Domain, Website, Maintenance)
  * @return float VAT rate in percentage (e.g., 10.00 for 10%)
  */
+/**
+ * Format service type for display
+ * 
+ * @param string $service_type Service type (domain, hosting, maintenance, website_service)
+ * @return string Formatted service type label
+ */
+function format_service_type($service_type) {
+    $service_type = strtolower(trim($service_type));
+    
+    switch ($service_type) {
+        case 'domain':
+            return 'Domain';
+        case 'hosting':
+            return 'Hosting';
+        case 'maintenance':
+            return 'Maintenance';
+        case 'website_service':
+            return 'Website Service';
+        default:
+            return ucfirst($service_type);
+    }
+}
+
 function get_vat_rate_for_service($service_type) {
     $vat_rates = get_option('inova_vat_rates', array());
 
@@ -5545,6 +5568,7 @@ function load_existing_invoice_items($invoice_id) {
                 WHEN ii.service_type = 'domain' THEN (SELECT domain_name FROM {$wpdb->prefix}im_domains WHERE id = ii.service_id)
                 WHEN ii.service_type = 'hosting' THEN (SELECT hosting_code FROM {$wpdb->prefix}im_hostings WHERE id = ii.service_id)
                 WHEN ii.service_type = 'maintenance' THEN (SELECT order_code FROM {$wpdb->prefix}im_maintenance_packages WHERE id = ii.service_id)
+                WHEN ii.service_type = 'website_service' THEN (SELECT title FROM {$wpdb->prefix}im_website_services WHERE id = ii.service_id)
                 ELSE ''
             END AS service_name
         FROM {$invoice_items_table} ii
@@ -5628,6 +5652,31 @@ function load_bulk_items(&$bulk_domains, &$bulk_hostings, &$bulk_maintenances, &
             build_renewal_products($maintenances_data, 'maintenance');
         }
     }
+    
+    // Process bulk website services
+    if (!empty($bulk_websites)) {
+        $website_services_table = $wpdb->prefix . 'im_website_services';
+        $website_services_data = get_bulk_items_data('website_service', $bulk_websites, $website_services_table);
+        if (!empty($website_services_data)) {
+            $service_type = count(explode(',', $bulk_websites)) > 1 ? 'bulk_websites' : 'website_service';
+            // Get user_id from website owner if not set
+            if (empty($user_id) && !empty($website_services_data)) {
+                // Get website owner from first service
+                $first_service = $website_services_data[0];
+                if (isset($first_service->website_id)) {
+                    $website_owner = $wpdb->get_row($wpdb->prepare(
+                        "SELECT owner_user_id FROM $websites_table WHERE id = %d",
+                        $first_service->website_id
+                    ));
+                    if ($website_owner) {
+                        $user_id = $website_owner->owner_user_id;
+                    }
+                }
+            }
+            build_renewal_products($website_services_data, 'website_service');
+        }
+    }
+    
 }
 
 /**
@@ -5648,12 +5697,32 @@ function get_bulk_items_data($type, $ids_string, $table_name) {
     }
     
     $placeholders = implode(',', array_fill(0, count($item_ids), '%d'));
-    $query = "
-        SELECT s.*, u.id AS owner_id, u.name AS owner_name, u.email AS owner_email
-        FROM $table_name s
-        LEFT JOIN {$wpdb->prefix}im_users u ON s.owner_user_id = u.id
-        WHERE s.id IN ($placeholders)
-    ";
+    
+    // Special handling for website_service
+    if ($type === 'website_service') {
+        $website_services_table = $wpdb->prefix . 'im_website_services';
+        $websites_table = $wpdb->prefix . 'im_websites';
+        $query = "
+            SELECT 
+                ws.*,
+                w.name AS website_name,
+                w.owner_user_id,
+                u.id AS owner_id,
+                u.name AS owner_name,
+                u.email AS owner_email
+            FROM {$website_services_table} ws
+            LEFT JOIN {$websites_table} w ON ws.website_id = w.id
+            LEFT JOIN {$wpdb->prefix}im_users u ON w.owner_user_id = u.id
+            WHERE ws.id IN ($placeholders)
+        ";
+    } else {
+        $query = "
+            SELECT s.*, u.id AS owner_id, u.name AS owner_name, u.email AS owner_email
+            FROM $table_name s
+            LEFT JOIN {$wpdb->prefix}im_users u ON s.owner_user_id = u.id
+            WHERE s.id IN ($placeholders)
+        ";
+    }
     
     return $wpdb->get_results($wpdb->prepare($query, ...$item_ids));
 }
@@ -5693,6 +5762,14 @@ function build_renewal_products($items_data, $type) {
                 $price = floatval($item->price);
             } elseif ($type === 'maintenance' && isset($item->price_per_cycle)) {
                 $price = floatval($item->price_per_cycle);
+            } elseif ($type === 'website_service') {
+                // For website services, use fixed_price if available
+                if (isset($item->fixed_price) && $item->fixed_price > 0) {
+                    $price = floatval($item->fixed_price);
+                } elseif (isset($item->estimated_manday) && isset($item->daily_rate) && $item->daily_rate > 0) {
+                    // Calculate price from mandays * daily rate
+                    $price = floatval($item->estimated_manday) * floatval($item->daily_rate);
+                }
             }
         }
         
@@ -5702,13 +5779,24 @@ function build_renewal_products($items_data, $type) {
                 "SELECT name FROM $websites_table WHERE " . ($type === 'hosting' ? 'hosting_id' : 'maintenance_package_id') . " = %d LIMIT 1",
                 $item->id
             ));
+        } elseif ($type === 'website_service' && isset($item->website_name)) {
+            // Website name is already loaded from the query join
+            $website_name = $item->website_name;
         }
         
-        $period = $type === 'domain' ? $item->registration_period_years : $item->billing_cycle_months;
-        $expiry_date = $item->expiry_date;
+        $period = $type === 'domain' ? $item->registration_period_years : ($type === 'hosting' || $type === 'maintenance' ? $item->billing_cycle_months : 0);
+        $expiry_date = $item->expiry_date ?? date('Y-m-d');
         
         // Get service name based on type
-        $service_name = $type === 'domain' ? $item->domain_name : ($type === 'hosting' ? $item->hosting_code : $item->order_code);
+        if ($type === 'domain') {
+            $service_name = $item->domain_name;
+        } elseif ($type === 'hosting') {
+            $service_name = $item->hosting_code;
+        } elseif ($type === 'maintenance') {
+            $service_name = $item->order_code;
+        } else { // website_service
+            $service_name = $item->title ?? $item->service_code;
+        }
         
         $renewal_products[] = [
             'type' => $type,
@@ -5733,7 +5821,7 @@ function build_renewal_products($items_data, $type) {
 /**
  * Build service description for invoice items
  * 
- * @param string $type Service type (domain, hosting, maintenance)
+ * @param string $type Service type (domain, hosting, maintenance, website_service)
  * @param mixed $nameOrItem Service name (string) or item object with domain_name property
  * @param string $product_name Product name (for hosting/maintenance)
  * @param int|float $period Period value (years for domain, months for hosting/maintenance)
@@ -5749,6 +5837,8 @@ function build_service_description($type, $nameOrItem, $product_name = '', $peri
             return 'Gói hosting ' . $product_name . ' - ' . round($period / 12, 2) . ' năm';
         case 'maintenance':
             return 'Bảo trì, bảo dưỡng, chăm sóc website ' . $product_name . ' - ' . round($period / 12, 2) . ' năm';
+        case 'website_service':
+            return 'Dịch vụ website: ' . $service_name;
         default:
             return '';
     }
@@ -5909,6 +5999,7 @@ function render_invoice_items_rows($invoice_items, $renewal_products) {
 function render_invoice_item_row($item) {
     $vat_rate = isset($item->vat_rate) ? $item->vat_rate : get_vat_rate_for_service($item->service_type);
     $vat_amount = isset($item->vat_amount) ? $item->vat_amount : calculate_vat_amount($item->item_total, $vat_rate);
+    $service_type_label = format_service_type($item->service_type);
     ?>
     <tr class="invoice-item">
         <td>
@@ -5916,7 +6007,7 @@ function render_invoice_item_row($item) {
             <input type="hidden" name="service_type[]" value="<?php echo $item->service_type; ?>">
             <input type="hidden" name="service_id[]" value="<?php echo $item->service_id; ?>">
             <input type="hidden" name="vat_rate[]" value="<?php echo $vat_rate; ?>">
-            <strong><?php echo ucfirst($item->service_type); ?>:</strong> <?php echo esc_html($item->service_name); ?>
+            <strong><?php echo $service_type_label; ?>:</strong> <?php echo esc_html($item->service_name); ?>
         </td>
         <td><input type="text" class="form-control" name="description[]" value="<?php echo esc_attr($item->description); ?>" required></td>
         <td><input type="text" class="form-control unit-price" name="unit_price[]" value="<?php echo number_format($item->unit_price, 0, '', ''); ?>" required></td>
@@ -5948,6 +6039,7 @@ function render_renewal_product_row($product) {
     $product_vat_amount = calculate_vat_amount($item_total, $product_vat_rate);
     $start_date = $product['start_date'] ?? $product['expiry_date'];
     $end_date = $product['end_date'] ?? calculate_end_date($product['expiry_date'], $product['period'], $product['period_type'] === 'years' ? 'years' : 'months');
+    $service_type_label = format_service_type($product['type']);
     ?>
     <tr class="invoice-item">
         <td>
@@ -5957,7 +6049,7 @@ function render_renewal_product_row($product) {
             <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
             <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
             <input type="hidden" name="vat_rate[]" value="<?php echo $product_vat_rate; ?>">
-            <strong><?php echo ucfirst($product['type']); ?>:</strong> <?php echo esc_html($product['name']); ?>
+            <strong><?php echo $service_type_label; ?>:</strong> <?php echo esc_html($product['name']); ?>
             <?php if (isset($product['website_name']) && !empty($product['website_name'])): ?>
             <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($product['website_name']); ?></small>
             <?php endif; ?>

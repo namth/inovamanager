@@ -287,7 +287,7 @@ get_header();
                                         $status_text = 'Không xác định';
                                         switch ($hosting->status) {
                                             case 'NEW':
-                                                $status_class = 'bg-warning text-dark';
+                                                $status_class = 'bg-light-warning text-warning';
                                                 $status_text = 'Chờ thanh toán';
                                                 break;
                                             case 'ACTIVE':

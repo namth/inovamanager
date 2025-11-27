@@ -487,6 +487,94 @@ get_header('nologin');
             </div>
 
             <!-- Invoice Items -->
+            <?php
+            // Group items by product_type if count >= 5
+            $show_grouped = count($invoice_items) >= 5;
+            if ($show_grouped) {
+                // Group items by product_type
+                $grouped_items = array();
+                $product_type_labels = array(
+                    'domain' => 'Tên miền',
+                    'hosting' => 'Hosting',
+                    'maintenance' => 'Gói bảo trì',
+                    'website_service' => 'Dịch vụ website'
+                );
+                
+                foreach ($invoice_items as $item) {
+                    $type = $item->service_type;
+                    if (!isset($grouped_items[$type])) {
+                        $grouped_items[$type] = array();
+                    }
+                    $grouped_items[$type][] = $item;
+                }
+                
+                // Display each group
+                $is_first_table = true;
+                foreach ($grouped_items as $product_type => $items):
+            ?>
+             <div class="items-section">
+                 <h3 class="text-muted"><i class="ph ph-list me-2"></i>Danh sách dịch vụ <?php echo $product_type_labels[$product_type] ?? $product_type; ?></h3>
+                <table class="items-table">
+                    <?php if ($is_first_table): ?>
+                    <thead>
+                        <tr>
+                            <th>Dịch vụ</th>
+                            <th class="text-center">Số lượng</th>
+                            <th class="text-end">Đơn giá</th>
+                            <th class="text-end">Thành tiền</th>
+                            <th class="text-end">VAT</th>
+                            <th class="text-end">Tổng</th>
+                        </tr>
+                    </thead>
+                    <?php $is_first_table = false; endif; ?>
+                    <tbody>
+                        <?php foreach ($items as $item): ?>
+                         <tr>
+                             <td>
+                                 <div class="service-name text-dark"><?php echo esc_html($item->service_title ?: $item->description); ?></div>
+                                 <?php if ($item->service_reference): ?>
+                                     <div class="service-desc text-muted"><?php echo esc_html($item->service_reference); ?></div>
+                                 <?php endif; ?>
+                                 <?php if (!empty($item->website_names)): ?>
+                                     <div class="service-desc text-muted">
+                                         <i class="ph ph-globe-hemisphere-west"></i>
+                                         (<?php echo implode(', ', array_map('esc_html', $item->website_names)); ?>)
+                                     </div>
+                                 <?php endif; ?>
+                            </td>
+                            <td class="text-center"><?php echo number_format($item->quantity); ?></td>
+                            <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
+                            <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                            <td class="text-end">
+                                <?php
+                                $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
+                                $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
+                                
+                                if ($item_vat_calculated > 0):
+                                    echo number_format($item_vat_calculated) . ' VNĐ<br><span class="text-muted" style="font-size: 11px;">(' . number_format($item_vat_rate, 1) . '%)</span>';
+                                else:
+                                    echo '<span class="text-muted">-</span>';
+                                endif;
+                                ?>
+                            </td>
+                            <td class="text-end">
+                                <?php 
+                                $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
+                                $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
+                                $item_total_final = $item->item_total + $item_vat - $item_commission;
+                                echo '<strong>' . number_format($item_total_final) . ' VNĐ</strong>';
+                                ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php 
+                endforeach;
+            } else {
+                // Original layout for < 5 items
+            ?>
              <div class="items-section">
                  <h3 class="text-muted">Chi tiết dịch vụ</h3>
                 <table class="items-table">
@@ -543,6 +631,7 @@ get_header('nologin');
                     </tbody>
                 </table>
             </div>
+            <?php } ?>
 
             <!-- Totals and QR Code -->
             <div class="totals-section">

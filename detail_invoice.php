@@ -487,6 +487,109 @@ get_header();
 
                         <!-- Invoice Items -->
                          <h6 class="text-muted mb-3">Chi tiết dịch vụ</h6>
+                         <?php
+                         // Group items by product_type if count >= 5
+                         $show_grouped = count($invoice_items) >= 5;
+                         if ($show_grouped) {
+                             // Group items by product_type
+                             $grouped_items = array();
+                             $product_type_labels = array(
+                                 'domain' => 'Tên miền',
+                                 'hosting' => 'Hosting',
+                                 'maintenance' => 'Gói bảo trì',
+                                 'website_service' => 'Dịch vụ website'
+                             );
+                             
+                             foreach ($invoice_items as $item) {
+                                 $type = $item->service_type;
+                                 if (!isset($grouped_items[$type])) {
+                                     $grouped_items[$type] = array();
+                                 }
+                                 $grouped_items[$type][] = $item;
+                             }
+                             
+                             // Display each group
+                             $is_first_table = true;
+                             foreach ($grouped_items as $product_type => $items):
+                         ?>
+                         <div class="mb-4">
+                             <h6 class="text-dark mb-3">
+                                 <i class="ph ph-list me-2"></i>Danh sách dịch vụ <?php echo $product_type_labels[$product_type] ?? $product_type; ?>
+                             </h6>
+                             <div class="table-responsive">
+                                 <table class="table table-striped">
+                                     <?php if ($is_first_table): ?>
+                                     <thead class="table-light">
+                                         <tr>
+                                             <th>Dịch vụ</th>
+                                             <th class="text-center">Số lượng</th>
+                                             <th class="text-end">Đơn giá</th>
+                                             <th class="text-end">Thành tiền</th>
+                                             <th class="text-end">VAT</th>
+                                             <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
+                                             <th class="text-end">Chiết khấu</th>
+                                             <?php endif; ?>
+                                             <th class="text-end">Tổng</th>
+                                         </tr>
+                                     </thead>
+                                     <?php $is_first_table = false; endif; ?>
+                                     <tbody>
+                                         <?php foreach ($items as $item): ?>
+                                         <tr>
+                                             <td>
+                                                 <div class="fw-bold"><?php echo esc_html($item->service_title ?: $item->description); ?></div>
+                                                 <?php if ($item->service_reference): ?>
+                                                     <small class="text-muted"><?php echo esc_html($item->service_reference); ?></small>
+                                                 <?php endif; ?>
+                                                 <?php if (!empty($item->website_names)): ?>
+                                                     <div><small class="text-muted">
+                                                         <i class="ph ph-globe-hemisphere-west"></i>
+                                                         (<?php echo implode(', ', array_map('esc_html', $item->website_names)); ?>)
+                                                     </small></div>
+                                                 <?php endif; ?>
+                                             </td>
+                                             <td class="text-center"><?php echo number_format($item->quantity); ?></td>
+                                             <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
+                                             <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                                             <td class="text-end">
+                                                 <?php
+                                                 $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
+                                                 $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
+                                                 
+                                                 if ($item_vat_calculated > 0):
+                                                     echo number_format($item_vat_calculated) . ' VNĐ'
+                                                     . '<br><small class="text-muted">(' . number_format($item_vat_rate, 1) . '%)</small>';
+                                                 else:
+                                                     echo '<span class="text-muted">-</span>';
+                                                 endif;
+                                                 ?>
+                                             </td>
+                                             <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
+                                             <td class="text-end">
+                                                 <?php if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0): ?>
+                                                     <span class="text-danger">-<?php echo number_format($item->withdrawn_commission); ?> VNĐ</span>
+                                                 <?php else: ?>
+                                                     <span class="text-muted">-</span>
+                                                 <?php endif; ?>
+                                             </td>
+                                             <?php endif; ?>
+                                             <td class="text-end"><strong><?php 
+                                                 $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
+                                                 $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
+                                                 $item_total_final = $item->item_total + $item_vat - $item_commission;
+                                                 echo number_format($item_total_final); 
+                                             ?> VNĐ</strong></td>
+                                         </tr>
+                                         <?php endforeach; ?>
+                                     </tbody>
+                                 </table>
+                             </div>
+                         </div>
+                         <?php 
+                             endforeach;
+                         } else {
+                             // Original layout for < 5 items
+                         ?>
                          <div class="table-responsive">
                              <table class="table table-striped">
                                  <thead class="table-light">
@@ -550,11 +653,12 @@ get_header();
                                          ?> VNĐ</strong></td>
                                      </tr>
                                      <?php endforeach; ?>
-                                 </tbody>
-                             </table>
-                         </div>
+                                     </tbody>
+                                     </table>
+                                     </div>
+                                     <?php } ?>
 
-                        <!-- Invoice Totals -->
+                                     <!-- Invoice Totals -->
                          <div class="row justify-content-end">
                              <div class="col-md-6">
                                  <table class="table table-sm">
