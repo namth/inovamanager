@@ -371,11 +371,11 @@ get_header();
                                         <div class="form-group mb-3">
                                              <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
                                              <select class="form-control" id="status" name="status" required>
+                                                 <option value="NEW" <?php selected($hosting->status, 'NEW'); ?>>Chờ thanh toán</option>
                                                  <option value="ACTIVE" <?php selected($hosting->status, 'ACTIVE'); ?>>Đang hoạt động</option>
                                                  <option value="EXPIRED" <?php selected($hosting->status, 'EXPIRED'); ?>>Hết hạn</option>
-                                                 <option value="PENDING_RENEWAL" <?php selected($hosting->status, 'PENDING_RENEWAL'); ?>>Chờ gia hạn</option>
-                                                 <option value="CANCELLED" <?php selected($hosting->status, 'CANCELLED'); ?>>Đã hủy</option>
                                                  <option value="SUSPENDED" <?php selected($hosting->status, 'SUSPENDED'); ?>>Bị tạm ngưng</option>
+                                                 <option value="DELETED" <?php selected($hosting->status, 'DELETED'); ?>>Đã xóa</option>
                                              </select>
                                          </div>
 

@@ -276,15 +276,15 @@ get_header();
                                     </div>
                                     <div class="card-body">
                                         <div class="form-group mb-3">
-                                            <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
-                                            <select class="form-control" id="status" name="status" required>
-                                                <option value="ACTIVE" <?php selected($domain->status, 'ACTIVE'); ?>>Đang hoạt động</option>
-                                                <option value="EXPIRED" <?php selected($domain->status, 'EXPIRED'); ?>>Hết hạn</option>
-                                                <option value="PENDING_RENEWAL" <?php selected($domain->status, 'PENDING_RENEWAL'); ?>>Chờ gia hạn</option>
-                                                <option value="CANCELLED" <?php selected($domain->status, 'CANCELLED'); ?>>Đã hủy</option>
-                                                <option value="TRANSFERRING" <?php selected($domain->status, 'TRANSFERRING'); ?>>Đang chuyển</option>
-                                            </select>
-                                        </div>
+                                             <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
+                                             <select class="form-control" id="status" name="status" required>
+                                                 <option value="NEW" <?php selected($domain->status, 'NEW'); ?>>Chờ thanh toán</option>
+                                                 <option value="ACTIVE" <?php selected($domain->status, 'ACTIVE'); ?>>Đang hoạt động</option>
+                                                 <option value="EXPIRED" <?php selected($domain->status, 'EXPIRED'); ?>>Hết hạn</option>
+                                                 <option value="SUSPENDED" <?php selected($domain->status, 'SUSPENDED'); ?>>Bị tạm ngưng</option>
+                                                 <option value="DELETED" <?php selected($domain->status, 'DELETED'); ?>>Đã xóa</option>
+                                             </select>
+                                         </div>
 
                                         <div class="form-group mb-3">
                                             <div class="form-switch d-flex gap-2">

@@ -204,7 +204,7 @@ get_header();
                                 <div class="card mb-4">
                                     <div class="card-header btn-primary">
                                         <h5 class="mb-1 mt-1">
-                                            <i class="ph ph-server me-2"></i>
+                                            <i class="ph ph-cloud me-2"></i>
                                             Thông tin hosting
                                         </h5>
                                     </div>
@@ -376,15 +376,15 @@ get_header();
                                     </div>
                                     <div class="card-body">
                                         <div class="form-group mb-3">
-                                            <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
-                                            <select class="form-control" id="status" name="status" required>
-                                                <option value="ACTIVE">Đang hoạt động</option>
-                                                <option value="EXPIRED">Hết hạn</option>
-                                                <option value="PENDING_RENEWAL">Chờ gia hạn</option>
-                                                <option value="CANCELLED">Đã hủy</option>
-                                                <option value="SUSPENDED">Bị tạm ngưng</option>
-                                            </select>
-                                        </div>
+                                             <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
+                                             <select class="form-control" id="status" name="status" required>
+                                                 <option value="ACTIVE">Đang hoạt động</option>
+                                                 <option value="NEW">Chờ thanh toán</option>
+                                                 <option value="EXPIRED">Hết hạn</option>
+                                                 <option value="SUSPENDED">Bị tạm ngưng</option>
+                                                 <option value="DELETED">Đã xóa</option>
+                                             </select>
+                                         </div>
 
                                         <div class="form-group mb-3">
                                             <label for="ip_address" class="fw-bold">Địa chỉ IP</label>
@@ -433,7 +433,7 @@ get_header();
                         <div class="form-group d-flex justify-content-center mt-3">
                             <button type="submit"
                                 class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
-                                <i class="ph ph-floppy-disk btn-icon-prepend fa-150p"></i>
+                                <i class="ph ph-cloud btn-icon-prepend fa-150p"></i>
                                 <span class="fw-bold">Lưu hosting</span>
                             </button>
                             <a href="<?php echo $user_id ? home_url('/user-detail/?user_id=') . $user_id : home_url('/danh-sach-hosting/'); ?>" class="btn btn-light btn-icon-text ms-2 d-flex align-items-center border-radius-9">

@@ -296,15 +296,15 @@ get_header();
                                     </div>
                                     <div class="card-body">
                                         <div class="form-group mb-3">
-                                            <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
-                                            <select class="form-control" id="status" name="status" required>
-                                                <option value="ACTIVE">Đang hoạt động</option>
-                                                <option value="EXPIRED">Hết hạn</option>
-                                                <option value="PENDING_RENEWAL">Chờ gia hạn</option>
-                                                <option value="CANCELLED">Đã hủy</option>
-                                                <option value="TRANSFERRING">Đang chuyển</option>
-                                            </select>
-                                        </div>
+                                             <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
+                                             <select class="form-control" id="status" name="status" required>
+                                                 <option value="ACTIVE">Đang hoạt động</option>
+                                                 <option value="NEW">Chờ thanh toán</option>
+                                                 <option value="EXPIRED">Hết hạn</option>
+                                                 <option value="SUSPENDED">Bị tạm ngưng</option>
+                                                 <option value="DELETED">Đã xóa</option>
+                                             </select>
+                                         </div>
 
                                         <div class="form-group mb-3">
                                             <div class="form-switch d-flex gap-2">

@@ -182,7 +182,7 @@ function CreateDatabaseBookOrder()
         `registration_date` date NULL,
         `registration_period_years` int NULL DEFAULT 1,
         `expiry_date` date NULL,
-        `status` enum('ACTIVE','DELETED','EXPIRED','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+        `status` enum('NEW','ACTIVE','DELETED','EXPIRED','SUSPENDED') NOT NULL DEFAULT 'NEW',
         `managed_by_inova` BOOLEAN DEFAULT TRUE,
         `dns_management` varchar(255) NULL,
         `management_url` varchar(255) NULL,
@@ -212,7 +212,7 @@ function CreateDatabaseBookOrder()
         `billing_cycle_months` int NOT NULL DEFAULT 12,
         `expiry_date` date NOT NULL,
         `partner_id` bigint(20) UNSIGNED NULL,
-        `status` enum('ACTIVE','DELETED','EXPIRED','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+        `status` enum('NEW','ACTIVE','DELETED','EXPIRED','SUSPENDED') NOT NULL DEFAULT 'NEW',
         `ip_address` varchar(50) NULL,
         `management_url` varchar(255) NULL,
         `management_username` varchar(255) NULL,
@@ -244,7 +244,7 @@ function CreateDatabaseBookOrder()
         `partner_id` bigint(20) UNSIGNED NULL,
         `discount_amount` bigint(20) DEFAULT 0,
         `actual_revenue` bigint(20) NOT NULL,
-        `status` enum('ACTIVE','DELETED','EXPIRED','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+        `status` enum('NEW','ACTIVE','DELETED','EXPIRED','SUSPENDED') NOT NULL DEFAULT 'NEW',
         `notes` text NULL,
         `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
         `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2947,7 +2947,7 @@ function auto_create_renewal_invoices_callback() {
             $vat_amount = calculate_vat_amount($item_total, $vat_rate);
             
             $items[] = array(
-                'service_type' => 'Domain',
+                'service_type' => 'domain',
                 'service_id' => $domain->id,
                 'description' => 'Gia hạn tên miền: ' . $domain->domain_name,
                 'unit_price' => $unit_price,
@@ -2971,13 +2971,10 @@ function auto_create_renewal_invoices_callback() {
             $vat_rate = get_vat_rate_for_service('Hosting');
             $vat_amount = calculate_vat_amount($item_total, $vat_rate);
             
-            // Get website names for description
-            $website_names = !empty($hosting->website_names) ? ' (Website: ' . $hosting->website_names . ')' : '';
-            
             $items[] = array(
-                'service_type' => 'Hosting',
+                'service_type' => 'hosting',
                 'service_id' => $hosting->id,
-                'description' => 'Gia hạn hosting: ' . $hosting_code . $website_names,
+                'description' => 'Gia hạn hosting: ' . $hosting_code,
                 'unit_price' => $unit_price,
                 'quantity' => $quantity,
                 'item_total' => $item_total,
@@ -3000,13 +2997,10 @@ function auto_create_renewal_invoices_callback() {
             $vat_rate = get_vat_rate_for_service('Maintenance');
             $vat_amount = calculate_vat_amount($item_total, $vat_rate);
             
-            // Get website names for description
-            $website_names = !empty($maintenance->website_names) ? ' (Website: ' . $maintenance->website_names . ')' : '';
-            
             $items[] = array(
-                'service_type' => 'Maintenance',
+                'service_type' => 'maintenance',
                 'service_id' => $maintenance->id,
-                'description' => 'Gia hạn bảo trì: ' . $maintenance_code . $website_names,
+                'description' => 'Gia hạn bảo trì: ' . $maintenance_code,
                 'unit_price' => $unit_price,
                 'quantity' => $quantity,
                 'item_total' => $item_total,
@@ -5713,10 +5707,13 @@ function build_renewal_products($items_data, $type) {
         $period = $type === 'domain' ? $item->registration_period_years : $item->billing_cycle_months;
         $expiry_date = $item->expiry_date;
         
+        // Get service name based on type
+        $service_name = $type === 'domain' ? $item->domain_name : ($type === 'hosting' ? $item->hosting_code : $item->order_code);
+        
         $renewal_products[] = [
             'type' => $type,
             'id' => $item->id,
-            'name' => $type === 'domain' ? $item->domain_name : ($type === 'hosting' ? $item->hosting_code : $item->order_code),
+            'name' => $service_name,
             'product_name' => $product_name,
             'price' => $price,
             'quantity' => 1,
@@ -5724,7 +5721,7 @@ function build_renewal_products($items_data, $type) {
             'period_type' => $type === 'domain' ? 'years' : 'months',
             'expiry_date' => $expiry_date,
             'website_name' => $website_name,
-            'description' => build_service_description($type, $item, $product_name, $period),
+            'description' => build_service_description($type, $service_name, $product_name, $period),
             'start_date' => $expiry_date,
             'end_date' => calculate_end_date($expiry_date, $period, $type === 'domain' ? 'years' : 'months'),
             'discount_amount' => floatval($item->discount_amount ?? 0),
@@ -5734,16 +5731,24 @@ function build_renewal_products($items_data, $type) {
 }
 
 /**
- * Build service description
+ * Build service description for invoice items
+ * 
+ * @param string $type Service type (domain, hosting, maintenance)
+ * @param mixed $nameOrItem Service name (string) or item object with domain_name property
+ * @param string $product_name Product name (for hosting/maintenance)
+ * @param int|float $period Period value (years for domain, months for hosting/maintenance)
+ * @return string Formatted service description
  */
-function build_service_description($type, $item, $product_name, $period) {
+function build_service_description($type, $nameOrItem, $product_name = '', $period = 1) {
+    $service_name = is_string($nameOrItem) ? $nameOrItem : (isset($nameOrItem->domain_name) ? $nameOrItem->domain_name : '');
+    
     switch ($type) {
         case 'domain':
-            return 'Gia hạn tên miền ' . $item->domain_name . ' - ' . $period . ' năm';
+            return 'Gia hạn tên miền ' . $service_name . ' - ' . intval($period) . ' năm';
         case 'hosting':
-            return 'Gia hạn hosting ' . $product_name . ' - ' . ($period / 12) . ' năm';
+            return 'Gói hosting ' . $product_name . ' - ' . round($period / 12, 2) . ' năm';
         case 'maintenance':
-            return 'Gia hạn gói bảo trì ' . $product_name . ' - ' . ($period / 12) . ' năm';
+            return 'Bảo trì, bảo dưỡng, chăm sóc website ' . $product_name . ' - ' . round($period / 12, 2) . ' năm';
         default:
             return '';
     }
@@ -5783,45 +5788,6 @@ function calculate_invoice_totals(&$invoice_items, &$renewal_products) {
             $sub_total += $item_total;
         }
     }
-}
-
-/**
- * Display invoice header section
- */
-function display_invoice_header() {
-    global $invoice_id, $service_type, $product_data, $website_data, $website_id, $bulk_domains, $bulk_hostings, $bulk_maintenances, $bulk_websites, $renewal_products;
-    
-    if (($product_data || $website_id > 0 || !empty($renewal_products)) && !($invoice_id > 0)): ?>
-        <div class="alert alert-info">
-            <i class="ph ph-info me-2"></i>
-            Đang tạo hóa đơn cho <?php 
-            if ($service_type == 'domain'):
-                echo 'tên miền <strong>' . esc_html($product_data->domain_name) . '</strong>';
-            elseif ($service_type == 'hosting'):
-                echo 'hosting <strong>' . esc_html($product_data->hosting_code) . '</strong>';
-            elseif ($service_type == 'maintenance'):
-                echo 'gói bảo trì <strong>' . esc_html($product_data->order_code) . '</strong>';
-            elseif ($service_type == 'website'):
-                echo 'website <strong>' . esc_html($website_data->name) . '</strong>';
-            elseif ($service_type == 'bulk_domains'):
-                $domain_count = count(array_filter($renewal_products, function($p) { return $p['type'] == 'domain'; }));
-                echo 'gia hạn <strong>' . $domain_count . ' tên miền</strong>';
-            elseif ($service_type == 'bulk_hostings'):
-                $hosting_count = count(array_filter($renewal_products, function($p) { return $p['type'] == 'hosting'; }));
-                echo 'gia hạn <strong>' . $hosting_count . ' hosting</strong>';
-            elseif ($service_type == 'bulk_maintenances'):
-                $maintenance_count = count(array_filter($renewal_products, function($p) { return $p['type'] == 'maintenance'; }));
-                echo 'gia hạn <strong>' . $maintenance_count . ' gói bảo trì</strong>';
-            elseif ($service_type == 'bulk_websites'):
-                $website_count = count(explode(',', $bulk_websites));
-                echo 'gia hạn <strong>' . $website_count . ' website</strong>';
-            endif;
-            ?> 
-            <?php if (!in_array($service_type, ['bulk_domains', 'bulk_hostings', 'bulk_maintenances', 'bulk_websites'])): ?>
-            của khách hàng <strong><?php echo $service_type == 'website' ? esc_html($website_data->owner_name) : esc_html($product_data->owner_name); ?></strong>
-            <?php endif; ?>
-        </div>
-    <?php endif;
 }
 
 /**
@@ -5891,11 +5857,8 @@ function display_invoice_items_card() {
     global $invoice_items, $renewal_products;
     ?>
     <div class="card">
-        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+        <div class="card-header bg-primary text-white">
             <h5 class="mb-0">Chi tiết hóa đơn</h5>
-            <button type="button" class="btn btn-sm btn-light" data-bs-toggle="modal" data-bs-target="#addServiceModal">
-                <i class="ph ph-plus me-1"></i> Thêm dịch vụ
-            </button>
         </div>
         <div class="card-body">
             <div class="table-responsive">

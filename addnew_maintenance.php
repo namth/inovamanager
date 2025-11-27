@@ -322,14 +322,15 @@ print_r($wpdb->last_error); // For debugging, remove in production
                                         </div>
 
                                         <div class="form-group mb-3">
-                                            <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
-                                            <select class="form-control" id="status" name="status" required>
-                                                <option value="ACTIVE">Đang hoạt động</option>
-                                                <option value="PENDING">Chờ xử lý</option>
-                                                <option value="EXPIRED">Hết hạn</option>
-                                                <option value="CANCELLED">Đã hủy</option>
-                                            </select>
-                                        </div>
+                                             <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
+                                             <select class="form-control" id="status" name="status" required>
+                                                 <option value="ACTIVE">Đang hoạt động</option>
+                                                 <option value="NEW">Chờ thanh toán</option>
+                                                 <option value="EXPIRED">Hết hạn</option>
+                                                 <option value="SUSPENDED">Bị tạm ngưng</option>
+                                                 <option value="DELETED">Đã xóa</option>
+                                             </select>
+                                         </div>
 
                                         <div class="form-group mb-3">
                                             <label for="notes" class="fw-bold">Ghi chú</label>
@@ -419,7 +420,7 @@ print_r($wpdb->last_error); // For debugging, remove in production
                         <div class="form-group d-flex justify-content-center mt-3">
                             <button type="submit"
                                 class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
-                                <i class="ph ph-floppy-disk btn-icon-prepend fa-150p"></i>
+                                <i class="ph ph-wrench btn-icon-prepend fa-150p"></i>
                                 <span class="fw-bold">Lưu gói bảo trì</span>
                             </button>
                             <a href="<?php echo $user_id ? home_url('/user-detail/?user_id=') . $user_id : home_url('/danh-sach-bao-tri/'); ?>" class="btn btn-light btn-icon-text ms-2 d-flex align-items-center border-radius-9">

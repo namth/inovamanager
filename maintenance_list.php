@@ -136,17 +136,14 @@ get_header();
                                     <option value="<?php echo home_url('/danh-sach-bao-tri/'); ?>" <?php echo empty($status_filter) ? 'selected' : ''; ?>>
                                         Tất cả trạng thái
                                     </option>
+                                    <option value="<?php echo home_url('/danh-sach-bao-tri/?status=NEW'); ?>" <?php echo $status_filter === 'NEW' ? 'selected' : ''; ?>>
+                                        Chờ thanh toán
+                                    </option>
                                     <option value="<?php echo home_url('/danh-sach-bao-tri/?status=ACTIVE'); ?>" <?php echo $status_filter === 'ACTIVE' ? 'selected' : ''; ?>>
                                         Đang hoạt động
                                     </option>
-                                    <option value="<?php echo home_url('/danh-sach-bao-tri/?status=PENDING'); ?>" <?php echo $status_filter === 'PENDING' ? 'selected' : ''; ?>>
-                                        Chờ xử lý
-                                    </option>
                                     <option value="<?php echo home_url('/danh-sach-bao-tri/?status=EXPIRED'); ?>" <?php echo $status_filter === 'EXPIRED' ? 'selected' : ''; ?>>
                                         Hết hạn
-                                    </option>
-                                    <option value="<?php echo home_url('/danh-sach-bao-tri/?status=CANCELLED'); ?>" <?php echo $status_filter === 'CANCELLED' ? 'selected' : ''; ?>>
-                                        Đã hủy
                                     </option>
                                 </select>
                             </div>
@@ -296,22 +293,27 @@ get_header();
                                     <td>
                                         <?php 
                                         $status_class = 'bg-secondary';
+                                        $status_text = 'Không xác định';
                                         switch ($package->status) {
+                                            case 'NEW':
+                                                $status_class = 'bg-warning text-dark';
+                                                $status_text = 'Chờ thanh toán';
+                                                break;
                                             case 'ACTIVE':
                                                 $status_class = 'bg-success';
-                                                $status_text = 'Hoạt động';
-                                                break;
-                                            case 'PENDING':
-                                                $status_class = 'bg-warning';
-                                                $status_text = 'Chờ xử lý';
+                                                $status_text = 'Đang hoạt động';
                                                 break;
                                             case 'EXPIRED':
                                                 $status_class = 'bg-danger';
                                                 $status_text = 'Hết hạn';
                                                 break;
-                                            case 'CANCELLED':
+                                            case 'SUSPENDED':
+                                                $status_class = 'bg-danger';
+                                                $status_text = 'Bị tạm ngưng';
+                                                break;
+                                            case 'DELETED':
                                                 $status_class = 'bg-secondary';
-                                                $status_text = 'Đã hủy';
+                                                $status_text = 'Đã xóa';
                                                 break;
                                             default:
                                                 $status_text = $package->status;
@@ -407,7 +409,7 @@ get_header();
                         <br>Nếu bạn tiếp tục, website sẽ không còn liên kết với gói bảo trì nào.
                     </div>
 
-                    <div class="form-check">
+                    <div class="form-check d-flex align-items-center">
                         <input class="form-check-input" type="checkbox" id="confirmForceDelete">
                         <label class="form-check-label text-danger fw-bold" for="confirmForceDelete">
                             Tôi hiểu và muốn xóa gói bảo trì kể cả khi đang được sử dụng

@@ -56,68 +56,128 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                     $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
 
                     // Get all invoice items with renewal information
-                    $invoice_items = $wpdb->get_results($wpdb->prepare("
-                        SELECT
-                            ii.service_type,
-                            ii.service_id,
-                            ii.end_date
-                        FROM $invoice_items_table ii
-                        WHERE ii.invoice_id = %d
-                        AND ii.service_id IS NOT NULL
-                        AND ii.end_date IS NOT NULL
-                    ", $invoice_id));
+                     $invoice_items = $wpdb->get_results($wpdb->prepare("
+                         SELECT
+                             ii.service_type,
+                             ii.service_id,
+                             ii.end_date
+                         FROM $invoice_items_table ii
+                         WHERE ii.invoice_id = %d
+                         AND ii.service_id IS NOT NULL
+                         AND ii.end_date IS NOT NULL
+                     ", $invoice_id));
 
-                    // Update expiry_date for each service/product based on service_type
-                    foreach ($invoice_items as $item) {
-                        $update_result = false;
+                     // Update expiry_date for each service/product based on service_type
+                     foreach ($invoice_items as $item) {
+                         $update_result = false;
 
-                        switch ($item->service_type) {
-                            case 'domain':
-                                $update_result = $wpdb->update(
-                                    $domains_table,
-                                    array(
-                                        'expiry_date' => $item->end_date,
-                                        'updated_at' => current_time('mysql')
-                                    ),
-                                    array('id' => $item->service_id)
-                                );
-                                error_log("Updated domain ID {$item->service_id} expiry_date to {$item->end_date}");
-                                break;
+                         switch ($item->service_type) {
+                             case 'domain':
+                                 // Check current status - if NEW, only change to ACTIVE, don't add time
+                                 $current_domain = $wpdb->get_row($wpdb->prepare(
+                                     "SELECT status FROM $domains_table WHERE id = %d",
+                                     $item->service_id
+                                 ));
+                                 
+                                 if ($current_domain && $current_domain->status === 'NEW') {
+                                     // For NEW status: just activate without changing expiry date
+                                     $update_result = $wpdb->update(
+                                         $domains_table,
+                                         array(
+                                             'status' => 'ACTIVE',
+                                             'updated_at' => current_time('mysql')
+                                         ),
+                                         array('id' => $item->service_id)
+                                     );
+                                     error_log("Domain ID {$item->service_id} status changed from NEW to ACTIVE (no time added)");
+                                 } else {
+                                     // For other statuses: update expiry_date (add time)
+                                     $update_result = $wpdb->update(
+                                         $domains_table,
+                                         array(
+                                             'expiry_date' => $item->end_date,
+                                             'updated_at' => current_time('mysql')
+                                         ),
+                                         array('id' => $item->service_id)
+                                     );
+                                     error_log("Updated domain ID {$item->service_id} expiry_date to {$item->end_date}");
+                                 }
+                                 break;
 
-                            case 'hosting':
-                                $update_result = $wpdb->update(
-                                    $hostings_table,
-                                    array(
-                                        'expiry_date' => $item->end_date,
-                                        'updated_at' => current_time('mysql')
-                                    ),
-                                    array('id' => $item->service_id)
-                                );
-                                error_log("Updated hosting ID {$item->service_id} expiry_date to {$item->end_date}");
-                                break;
+                             case 'hosting':
+                                 // Check current status - if NEW, only change to ACTIVE, don't add time
+                                 $current_hosting = $wpdb->get_row($wpdb->prepare(
+                                     "SELECT status FROM $hostings_table WHERE id = %d",
+                                     $item->service_id
+                                 ));
+                                 
+                                 if ($current_hosting && $current_hosting->status === 'NEW') {
+                                     // For NEW status: just activate without changing expiry date
+                                     $update_result = $wpdb->update(
+                                         $hostings_table,
+                                         array(
+                                             'status' => 'ACTIVE',
+                                             'updated_at' => current_time('mysql')
+                                         ),
+                                         array('id' => $item->service_id)
+                                     );
+                                     error_log("Hosting ID {$item->service_id} status changed from NEW to ACTIVE (no time added)");
+                                 } else {
+                                     // For other statuses: update expiry_date (add time)
+                                     $update_result = $wpdb->update(
+                                         $hostings_table,
+                                         array(
+                                             'expiry_date' => $item->end_date,
+                                             'updated_at' => current_time('mysql')
+                                         ),
+                                         array('id' => $item->service_id)
+                                     );
+                                     error_log("Updated hosting ID {$item->service_id} expiry_date to {$item->end_date}");
+                                 }
+                                 break;
 
-                            case 'maintenance':
-                                $update_result = $wpdb->update(
-                                    $maintenance_table,
-                                    array(
-                                        'expiry_date' => $item->end_date,
-                                        'updated_at' => current_time('mysql')
-                                    ),
-                                    array('id' => $item->service_id)
-                                );
-                                error_log("Updated maintenance package ID {$item->service_id} expiry_date to {$item->end_date}");
-                                break;
+                             case 'maintenance':
+                                 // Check current status - if NEW, only change to ACTIVE, don't add time
+                                 $current_maintenance = $wpdb->get_row($wpdb->prepare(
+                                     "SELECT status FROM $maintenance_table WHERE id = %d",
+                                     $item->service_id
+                                 ));
+                                 
+                                 if ($current_maintenance && $current_maintenance->status === 'NEW') {
+                                     // For NEW status: just activate without changing expiry date
+                                     $update_result = $wpdb->update(
+                                         $maintenance_table,
+                                         array(
+                                             'status' => 'ACTIVE',
+                                             'updated_at' => current_time('mysql')
+                                         ),
+                                         array('id' => $item->service_id)
+                                     );
+                                     error_log("Maintenance package ID {$item->service_id} status changed from NEW to ACTIVE (no time added)");
+                                 } else {
+                                     // For other statuses: update expiry_date (add time)
+                                     $update_result = $wpdb->update(
+                                         $maintenance_table,
+                                         array(
+                                             'expiry_date' => $item->end_date,
+                                             'updated_at' => current_time('mysql')
+                                         ),
+                                         array('id' => $item->service_id)
+                                     );
+                                     error_log("Updated maintenance package ID {$item->service_id} expiry_date to {$item->end_date}");
+                                 }
+                                 break;
 
-                            case 'website_service':
-                                // Website services don't have expiry_date, skip
-                                $update_result = true;
-                                break;
-                        }
+                             case 'website_service':
+                                 // Website services don't have expiry_date, skip
+                                 $update_result = true;
+                                 break;
+                         }
 
-                        if ($update_result === false) {
-                            throw new Exception("Failed to update expiry_date for {$item->service_type} ID: {$item->service_id}");
-                        }
-                    }
+                         if ($update_result === false) {
+                             throw new Exception("Failed to update expiry_date for {$item->service_type} ID: {$item->service_id}");
+                         }
+                     }
 
                     // Get related website services from invoice items
                     $related_services = $wpdb->get_results($wpdb->prepare("

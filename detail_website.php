@@ -414,21 +414,25 @@ get_header();
                                                         $status_text = 'Không xác định';
                                                         
                                                         switch ($maintenance->status) {
+                                                            case 'NEW':
+                                                                $status_class = 'btn-inverse-warning';
+                                                                $status_text = 'Chờ thanh toán';
+                                                                break;
                                                             case 'ACTIVE':
                                                                 $status_class = 'btn-inverse-success';
                                                                 $status_text = 'Đang hoạt động';
-                                                                break;
-                                                            case 'PENDING':
-                                                                $status_class = 'btn-inverse-warning';
-                                                                $status_text = 'Chờ xử lý';
                                                                 break;
                                                             case 'EXPIRED':
                                                                 $status_class = 'btn-danger';
                                                                 $status_text = 'Hết hạn';
                                                                 break;
-                                                            case 'CANCELLED':
+                                                            case 'SUSPENDED':
+                                                                $status_class = 'btn-danger';
+                                                                $status_text = 'Bị tạm ngưng';
+                                                                break;
+                                                            case 'DELETED':
                                                                 $status_class = 'btn-inverse-secondary';
-                                                                $status_text = 'Đã hủy';
+                                                                $status_text = 'Đã xóa';
                                                                 break;
                                                         }
                                                         ?>

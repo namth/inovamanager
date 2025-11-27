@@ -122,25 +122,29 @@ get_header();
                     $status_text = 'Không xác định';
                     
                     switch ($domain->status) {
+                        case 'NEW':
+                            $status_class = 'bg-warning text-dark';
+                            $status_text = 'Chờ thanh toán';
+                            break;
                         case 'ACTIVE':
                             $status_class = 'bg-success';
                             $status_text = 'Đang hoạt động';
-                            break;
-                        case 'PENDING_RENEWAL':
-                            $status_class = 'bg-warning text-dark';
-                            $status_text = 'Chờ gia hạn';
                             break;
                         case 'EXPIRED':
                             $status_class = 'bg-danger';
                             $status_text = 'Hết hạn';
                             break;
-                        case 'CANCELLED':
-                            $status_class = 'bg-secondary';
-                            $status_text = 'Đã hủy';
+                        case 'SUSPENDED':
+                            $status_class = 'bg-danger';
+                            $status_text = 'Bị tạm ngưng';
                             break;
-                        case 'TRANSFERRING':
-                            $status_class = 'bg-info';
-                            $status_text = 'Đang chuyển';
+                        case 'DELETED':
+                            $status_class = 'bg-secondary';
+                            $status_text = 'Đã xóa';
+                            break;
+                        default:
+                            $status_class = 'bg-secondary';
+                            $status_text = 'Không xác định';
                             break;
                     }
                     ?>

@@ -150,6 +150,9 @@ get_header();
                                     <option value="<?php echo home_url('/danh-sach-hosting/'); ?>" <?php echo empty($status_filter) ? 'selected' : ''; ?>>
                                         Tất cả trạng thái
                                     </option>
+                                    <option value="<?php echo home_url('/danh-sach-hosting/?status=NEW'); ?>" <?php echo $status_filter === 'NEW' ? 'selected' : ''; ?>>
+                                        Chờ thanh toán
+                                    </option>
                                     <option value="<?php echo home_url('/danh-sach-hosting/?status=ACTIVE'); ?>" <?php echo $status_filter === 'ACTIVE' ? 'selected' : ''; ?>>
                                         Đang hoạt động
                                     </option>
@@ -281,22 +284,27 @@ get_header();
                                     <td>
                                         <?php 
                                         $status_class = 'bg-secondary';
+                                        $status_text = 'Không xác định';
                                         switch ($hosting->status) {
+                                            case 'NEW':
+                                                $status_class = 'bg-warning text-dark';
+                                                $status_text = 'Chờ thanh toán';
+                                                break;
                                             case 'ACTIVE':
                                                 $status_class = 'bg-success';
-                                                $status_text = 'Hoạt động';
-                                                break;
-                                            case 'PENDING':
-                                                $status_class = 'bg-warning';
-                                                $status_text = 'Chờ xử lý';
+                                                $status_text = 'Đang hoạt động';
                                                 break;
                                             case 'EXPIRED':
                                                 $status_class = 'bg-danger';
                                                 $status_text = 'Hết hạn';
                                                 break;
-                                            case 'CANCELLED':
+                                            case 'SUSPENDED':
+                                                $status_class = 'bg-danger';
+                                                $status_text = 'Bị tạm ngưng';
+                                                break;
+                                            case 'DELETED':
                                                 $status_class = 'bg-secondary';
-                                                $status_text = 'Đã hủy';
+                                                $status_text = 'Đã xóa';
                                                 break;
                                             default:
                                                 $status_text = $hosting->status;

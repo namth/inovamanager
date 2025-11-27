@@ -271,10 +271,11 @@ get_header();
                                         <div class="form-group mb-3">
                                             <label for="status" class="fw-bold">Trạng thái <span class="text-danger">*</span></label>
                                             <select class="form-control" id="status" name="status" required>
+                                                <option value="NEW" <?php selected($maintenance->status, 'NEW'); ?>>Chờ thanh toán</option>
                                                 <option value="ACTIVE" <?php selected($maintenance->status, 'ACTIVE'); ?>>Đang hoạt động</option>
-                                                <option value="PENDING" <?php selected($maintenance->status, 'PENDING'); ?>>Chờ xử lý</option>
                                                 <option value="EXPIRED" <?php selected($maintenance->status, 'EXPIRED'); ?>>Hết hạn</option>
-                                                <option value="CANCELLED" <?php selected($maintenance->status, 'CANCELLED'); ?>>Đã hủy</option>
+                                                <option value="SUSPENDED" <?php selected($maintenance->status, 'SUSPENDED'); ?>>Bị tạm ngưng</option>
+                                                <option value="DELETED" <?php selected($maintenance->status, 'DELETED'); ?>>Đã xóa</option>
                                             </select>
                                         </div>
 
