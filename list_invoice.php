@@ -286,7 +286,7 @@ get_header();
                                                     echo '<span class="badge bg-secondary border-radius-9">Nháp</span>';
                                                     break;
                                                 case 'pending':
-                                                    echo '<span class="badge btn-warning border-radius-9">Chờ thanh toán</span>';
+                                                    echo '<span class="badge bg-light-warning text-warning border-warning border-radius-9">Chờ thanh toán</span>';
                                                     break;
                                                 case 'pending_completion':
                                                     echo '<span class="badge bg-info border-radius-9">Chờ hoàn thành</span>';

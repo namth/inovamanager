@@ -135,6 +135,9 @@
 .bg-light-warning {
     background-color: rgba(255, 193, 7, 0.1);
 }
+.border-warning {
+    border: 1px solid #E29E09;
+}
 .card .card-body.box {
     padding: 1rem 1.5rem;
 }

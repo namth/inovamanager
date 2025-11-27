@@ -2730,6 +2730,14 @@ function create_invoice_with_items($user_id, $items, $notes = '', $status = 'pen
     
     $invoices_table = $wpdb->prefix . 'im_invoices';
     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+    $users_table = $wpdb->prefix . 'im_users';
+    
+    // Get user's requires_vat_invoice setting
+    $user = $wpdb->get_row($wpdb->prepare(
+        "SELECT requires_vat_invoice FROM $users_table WHERE id = %d",
+        $user_id
+    ));
+    $requires_vat_invoice = ($user && isset($user->requires_vat_invoice)) ? intval($user->requires_vat_invoice) : 0;
     
     // Calculate totals from items
     $sub_total = 0;
@@ -2740,7 +2748,10 @@ function create_invoice_with_items($user_id, $items, $notes = '', $status = 'pen
         $vat_amount = floatval($item['vat_amount'] ?? 0);
         
         $sub_total += $item_total;
-        $tax_amount += $vat_amount;
+        // Only add VAT if requires_vat_invoice = 1
+        if ($requires_vat_invoice) {
+            $tax_amount += $vat_amount;
+        }
     }
     
     $total_amount = $sub_total + $tax_amount - $discount_total;
@@ -2774,6 +2785,7 @@ function create_invoice_with_items($user_id, $items, $notes = '', $status = 'pen
         'created_by_type' => $created_by_type,
         'created_by_id' => $created_by_id,
         'partner_id' => $partner_id,
+        'requires_vat_invoice' => $requires_vat_invoice,
     );
     
     // Insert invoice
@@ -5272,6 +5284,14 @@ function handle_invoice_form_submission() {
             }
         }
     } elseif ($action === 'edit_invoice' && $invoice_id > 0) {
+        // Get user's requires_vat_invoice setting
+        $users_table = $wpdb->prefix . 'im_users';
+        $user = $wpdb->get_row($wpdb->prepare(
+            "SELECT requires_vat_invoice FROM $users_table WHERE id = %d",
+            $user_id
+        ));
+        $requires_vat_invoice = ($user && isset($user->requires_vat_invoice)) ? intval($user->requires_vat_invoice) : 0;
+        
         // Calculate totals for update
         $sub_total = 0;
         $tax_amount = 0;
@@ -5281,7 +5301,10 @@ function handle_invoice_form_submission() {
             $vat_amount = floatval($item['vat_amount'] ?? 0);
             
             $sub_total += $item_total;
-            $tax_amount += $vat_amount;
+            // Only add VAT if requires_vat_invoice = 1
+            if ($requires_vat_invoice) {
+                $tax_amount += $vat_amount;
+            }
         }
         
         // Use final_discount_total (with auto discount) for edit as well
@@ -5298,6 +5321,7 @@ function handle_invoice_form_submission() {
             'total_amount' => $total_amount,
             'notes' => $notes,
             'status' => isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft',
+            'requires_vat_invoice' => $requires_vat_invoice,
         ], ['id' => $invoice_id]);
         
         // Update invoice items

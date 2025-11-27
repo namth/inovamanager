@@ -525,11 +525,15 @@ get_header();
                                              <th class="text-center">Số lượng</th>
                                              <th class="text-end">Đơn giá</th>
                                              <th class="text-end">Thành tiền</th>
+                                             <?php if ($invoice->requires_vat_invoice): ?>
                                              <th class="text-end">VAT</th>
+                                             <?php endif; ?>
                                              <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
                                              <th class="text-end">Chiết khấu</th>
                                              <?php endif; ?>
+                                             <?php if ($invoice->requires_vat_invoice): ?>
                                              <th class="text-end">Tổng</th>
+                                             <?php endif; ?>
                                          </tr>
                                      </thead>
                                      <?php $is_first_table = false; endif; ?>
@@ -551,6 +555,7 @@ get_header();
                                              <td class="text-center"><?php echo number_format($item->quantity); ?></td>
                                              <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
                                              <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                                             <?php if ($invoice->requires_vat_invoice): ?>
                                              <td class="text-end">
                                                  <?php
                                                  $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
@@ -564,6 +569,7 @@ get_header();
                                                  endif;
                                                  ?>
                                              </td>
+                                             <?php endif; ?>
                                              <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
                                              <td class="text-end">
                                                  <?php if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0): ?>
@@ -573,12 +579,14 @@ get_header();
                                                  <?php endif; ?>
                                              </td>
                                              <?php endif; ?>
+                                             <?php if ($invoice->requires_vat_invoice): ?>
                                              <td class="text-end"><strong><?php 
                                                  $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
                                                  $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
                                                  $item_total_final = $item->item_total + $item_vat - $item_commission;
                                                  echo number_format($item_total_final); 
                                              ?> VNĐ</strong></td>
+                                             <?php endif; ?>
                                          </tr>
                                          <?php endforeach; ?>
                                      </tbody>
@@ -598,11 +606,15 @@ get_header();
                                          <th class="text-center">Số lượng</th>
                                          <th class="text-end">Đơn giá</th>
                                          <th class="text-end">Thành tiền</th>
+                                         <?php if ($invoice->requires_vat_invoice): ?>
                                          <th class="text-end">VAT</th>
+                                         <?php endif; ?>
                                          <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
                                          <th class="text-end">Chiết khấu</th>
                                          <?php endif; ?>
+                                         <?php if ($invoice->requires_vat_invoice): ?>
                                          <th class="text-end">Tổng</th>
+                                         <?php endif; ?>
                                      </tr>
                                  </thead>
                                  <tbody>
@@ -622,6 +634,7 @@ get_header();
                                          <td class="text-center"><?php echo number_format($item->quantity); ?></td>
                                          <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
                                          <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                                         <?php if ($invoice->requires_vat_invoice): ?>
                                          <td class="text-end">
                                              <?php
                                              // Calculate VAT for this item
@@ -635,6 +648,7 @@ get_header();
                                                  <span class="text-muted">-</span>
                                              <?php endif; ?>
                                          </td>
+                                         <?php endif; ?>
                                          <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
                                          <td class="text-end">
                                              <?php if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0): ?>
@@ -644,6 +658,7 @@ get_header();
                                              <?php endif; ?>
                                          </td>
                                          <?php endif; ?>
+                                         <?php if ($invoice->requires_vat_invoice): ?>
                                          <td class="text-end"><strong><?php 
                                              // Use calculated VAT rate
                                              $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
@@ -651,6 +666,7 @@ get_header();
                                              $item_total_final = $item->item_total + $item_vat - $item_commission;
                                              echo number_format($item_total_final); 
                                          ?> VNĐ</strong></td>
+                                         <?php endif; ?>
                                      </tr>
                                      <?php endforeach; ?>
                                      </tbody>
@@ -662,17 +678,19 @@ get_header();
                          <div class="row justify-content-end">
                              <div class="col-md-6">
                                  <table class="table table-sm">
+                                     <?php if ($invoice->requires_vat_invoice): ?>
                                      <tr>
                                          <td class="text-muted">Tạm tính:</td>
                                          <td class="text-end"><?php echo number_format($invoice->sub_total); ?> VNĐ</td>
                                      </tr>
+                                     <?php endif; ?>
                                      <?php if ($invoice->discount_total > 0): ?>
                                      <tr>
                                          <td class="text-muted">Giảm giá:</td>
                                          <td class="text-end text-danger">-<?php echo number_format($invoice->discount_total); ?> VNĐ</td>
                                      </tr>
                                      <?php endif; ?>
-                                     <?php if ($invoice->tax_amount > 0): ?>
+                                     <?php if ($invoice->requires_vat_invoice && $invoice->tax_amount > 0): ?>
                                      <tr>
                                          <td class="text-muted">Thuế:</td>
                                          <td class="text-end"><?php echo number_format($invoice->tax_amount); ?> VNĐ</td>
@@ -688,14 +706,22 @@ get_header();
                                      <?php endif; ?>
                                      
                                      <tr class="table-primary">
-                                         <td><strong>Tổng cộng:</strong></td>
-                                         <td class="text-end"><strong><?php 
-                                             $final_total = $invoice->total_amount;
-                                             if ($invoice->status === 'pending') {
-                                                 $final_total -= $total_commission_deduction;
-                                             }
-                                             echo number_format($final_total); 
-                                         ?> VNĐ</strong></td>
+                                     <td><strong>Tổng cộng:</strong></td>
+                                     <td class="text-end"><strong><?php 
+                                     // Calculate final total based on requires_vat_invoice
+                                     if ($invoice->requires_vat_invoice) {
+                                     // With VAT: total_amount already includes tax
+                                     $final_total = $invoice->total_amount;
+                                     } else {
+                                     // Without VAT: total should be sub_total - discount
+                                     $final_total = $invoice->sub_total - $invoice->discount_total;
+                                     }
+                                     
+                                     if ($invoice->status === 'pending') {
+                                     $final_total -= $total_commission_deduction;
+                                     }
+                                     echo number_format($final_total); 
+                                     ?> VNĐ</strong></td>
                                      </tr>
                                      <?php if ($invoice->paid_amount > 0): ?>
                                      <tr class="table-success">
@@ -739,14 +765,19 @@ get_header();
                 );
 
                 if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
-                    // Calculate remaining amount
-                    $remaining_amount = $invoice->total_amount - $invoice->paid_amount;
+                     // Calculate remaining amount based on requires_vat_invoice
+                     if ($invoice->requires_vat_invoice) {
+                         $invoice_total = $invoice->total_amount;
+                     } else {
+                         $invoice_total = $invoice->sub_total - $invoice->discount_total;
+                     }
+                     $remaining_amount = $invoice_total - $invoice->paid_amount;
 
-                    // Generate QR code with invoice code as reference
-                    // Pass requires_vat_invoice to select appropriate bank account
-                    $qr_add_info = 'HD ' . $invoice->invoice_code;
-                    $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
-                    $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
+                     // Generate QR code with invoice code as reference
+                     // Pass requires_vat_invoice to select appropriate bank account
+                     $qr_add_info = 'HD ' . $invoice->invoice_code;
+                     $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
+                     $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
 
                     if ($qr_code_url):
                 ?>
@@ -775,6 +806,7 @@ get_header();
                                 <tr>
                                     <td class="text-muted"><small>Số tiền:</small></td>
                                     <td><strong><small><?php 
+                                        // QR amount should be the final total without VAT if requires_vat_invoice=0
                                         $qr_amount = $remaining_amount - $total_commission_deduction;
                                         echo number_format(max(0, $qr_amount)); 
                                     ?> VNĐ</small></strong></td>

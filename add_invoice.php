@@ -39,8 +39,19 @@ $website_data = null;
 $partner_info = null;
 $users = [];
 $service_type = '';
+$requires_vat_invoice = 0;
 
 load_invoice_data($invoice_id, $user_id, $from_cart, $bulk_domains, $bulk_hostings, $bulk_maintenances, $bulk_websites, $domain_id, $hosting_id, $maintenance_id, $website_id);
+
+# 4. Get requires_vat_invoice setting from user
+if ($user_id) {
+    $users_table = $wpdb->prefix . 'im_users';
+    $user = $wpdb->get_row($wpdb->prepare(
+        "SELECT requires_vat_invoice FROM $users_table WHERE id = %d",
+        $user_id
+    ));
+    $requires_vat_invoice = ($user && isset($user->requires_vat_invoice)) ? intval($user->requires_vat_invoice) : 0;
+}
 
 get_header();
 ?>
@@ -89,6 +100,14 @@ get_header();
 
 <script>
     jQuery(document).ready(function ($) {
+        // Store requires_vat_invoice setting
+        var requiresVatInvoice = <?php echo $requires_vat_invoice; ?>;
+        
+        // Control tax field visibility based on requires_vat_invoice
+        if (!requiresVatInvoice) {
+            $('#tax-amount').closest('.d-flex').hide();
+        }
+        
         // Recalculate totals when item values change
         $(document).on('input', '.unit-price, .quantity, #discount-amount, #tax-amount', function () {
             calculateInvoiceTotals();
@@ -108,6 +127,7 @@ get_header();
     });
 
     function calculateInvoiceTotals() {
+        var requiresVatInvoice = <?php echo $requires_vat_invoice; ?>;
         var subTotal = 0;
         var taxAmount = 0;
 
@@ -122,12 +142,18 @@ get_header();
             var vat = itemTotal * (vatRate / 100);
 
             subTotal += itemTotal;
-            taxAmount += vat;
+            // Only add VAT if requires_vat_invoice = 1
+            if (requiresVatInvoice) {
+                taxAmount += vat;
+            }
         });
 
         var discount = parseFloat($('#discount-amount').val()) || 0;
         var customTax = parseFloat($('#tax-amount').val()) || 0;
-        var total = subTotal + customTax - discount;
+        
+        // Only include tax in total if requires_vat_invoice = 1
+        var taxToAdd = requiresVatInvoice ? customTax : 0;
+        var total = subTotal + taxToAdd - discount;
 
         $('#summary-subtotal').text(formatCurrency(subTotal));
         $('#tax-amount').val(customTax);

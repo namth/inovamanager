@@ -516,17 +516,19 @@ get_header('nologin');
                  <h3 class="text-muted"><i class="ph ph-list me-2"></i>Danh sách dịch vụ <?php echo $product_type_labels[$product_type] ?? $product_type; ?></h3>
                 <table class="items-table">
                     <?php if ($is_first_table): ?>
-                    <thead>
-                        <tr>
-                            <th>Dịch vụ</th>
-                            <th class="text-center">Số lượng</th>
-                            <th class="text-end">Đơn giá</th>
-                            <th class="text-end">Thành tiền</th>
-                            <th class="text-end">VAT</th>
-                            <th class="text-end">Tổng</th>
-                        </tr>
-                    </thead>
-                    <?php $is_first_table = false; endif; ?>
+                     <thead>
+                         <tr>
+                             <th>Dịch vụ</th>
+                             <th class="text-center">Số lượng</th>
+                             <th class="text-end">Đơn giá</th>
+                             <th class="text-end">Thành tiền</th>
+                             <?php if ($invoice->requires_vat_invoice): ?>
+                             <th class="text-end">VAT</th>
+                             <th class="text-end">Tổng</th>
+                             <?php endif; ?>
+                         </tr>
+                     </thead>
+                     <?php $is_first_table = false; endif; ?>
                     <tbody>
                         <?php foreach ($items as $item): ?>
                          <tr>
@@ -545,6 +547,7 @@ get_header('nologin');
                             <td class="text-center"><?php echo number_format($item->quantity); ?></td>
                             <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
                             <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                            <?php if ($invoice->requires_vat_invoice): ?>
                             <td class="text-end">
                                 <?php
                                 $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
@@ -565,6 +568,7 @@ get_header('nologin');
                                 echo '<strong>' . number_format($item_total_final) . ' VNĐ</strong>';
                                 ?>
                             </td>
+                            <?php endif; ?>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -584,8 +588,10 @@ get_header('nologin');
                             <th class="text-center">Số lượng</th>
                             <th class="text-end">Đơn giá</th>
                             <th class="text-end">Thành tiền</th>
+                            <?php if ($invoice->requires_vat_invoice): ?>
                             <th class="text-end">VAT</th>
                             <th class="text-end">Tổng</th>
+                            <?php endif; ?>
                         </tr>
                     </thead>
                     <tbody>
@@ -606,6 +612,7 @@ get_header('nologin');
                             <td class="text-center"><?php echo number_format($item->quantity); ?></td>
                             <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
                             <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                            <?php if ($invoice->requires_vat_invoice): ?>
                             <td class="text-end">
                                 <?php
                                 $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
@@ -626,6 +633,7 @@ get_header('nologin');
                                 echo '<strong>' . number_format($item_total_final) . ' VNĐ</strong>';
                                 ?>
                             </td>
+                            <?php endif; ?>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -638,17 +646,19 @@ get_header('nologin');
                 <div></div>
                 <div>
                     <table class="totals-table">
+                        <?php if ($invoice->requires_vat_invoice): ?>
                         <tr>
                             <td>Tạm tính:</td>
                             <td><?php echo number_format($invoice->sub_total); ?> VNĐ</td>
                         </tr>
+                        <?php endif; ?>
                         <?php if ($invoice->discount_total > 0): ?>
                          <tr>
                              <td>Giảm giá:</td>
                              <td><span class="text-danger">-<?php echo number_format($invoice->discount_total); ?> VNĐ</span></td>
                          </tr>
                          <?php endif; ?>
-                        <?php if ($invoice->tax_amount > 0): ?>
+                        <?php if ($invoice->requires_vat_invoice && $invoice->tax_amount > 0): ?>
                         <tr>
                             <td>Thuế:</td>
                             <td><?php echo number_format($invoice->tax_amount); ?> VNĐ</td>
@@ -656,7 +666,15 @@ get_header('nologin');
                         <?php endif; ?>
                         <tr class="total-row bg-light-success">
                             <td>Tổng cộng:</td>
-                            <td><?php echo number_format($invoice->total_amount); ?> VNĐ</td>
+                            <td><?php 
+                                // Calculate final total based on requires_vat_invoice
+                                if ($invoice->requires_vat_invoice) {
+                                    $final_total = $invoice->total_amount;
+                                } else {
+                                    $final_total = $invoice->sub_total - $invoice->discount_total;
+                                }
+                                echo number_format($final_total); 
+                            ?> VNĐ</td>
                         </tr>
                         <?php if ($invoice->paid_amount > 0): ?>
                         <tr class="paid-row bg-success">
@@ -665,7 +683,11 @@ get_header('nologin');
                         </tr>
                         <tr>
                             <td>Còn lại:</td>
-                            <td><?php echo number_format(max(0, $invoice->total_amount - $invoice->paid_amount)); ?> VNĐ</td>
+                            <td><?php 
+                                // Calculate remaining based on final total
+                                $remaining = $final_total - $invoice->paid_amount;
+                                echo number_format(max(0, $remaining)); 
+                            ?> VNĐ</td>
                         </tr>
                         <?php endif; ?>
                     </table>
@@ -681,7 +703,13 @@ get_header('nologin');
             );
 
             if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
-                $remaining_amount = $invoice->total_amount - $invoice->paid_amount;
+                // Calculate remaining amount based on requires_vat_invoice
+                if ($invoice->requires_vat_invoice) {
+                    $invoice_total = $invoice->total_amount;
+                } else {
+                    $invoice_total = $invoice->sub_total - $invoice->discount_total;
+                }
+                $remaining_amount = $invoice_total - $invoice->paid_amount;
                 $qr_add_info = 'HD ' . $invoice->invoice_code;
                 $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
                 $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
