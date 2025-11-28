@@ -108,6 +108,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             );
             
             if ($result !== false) {
+                // Check if owner changed
+                $owner_changed = ($website->owner_user_id != $owner_user_id);
+                
                 // Update existing domain if applicable
                 if (!empty($website->domain_id) && $domain_id != $website->domain_id) {
                     // Clear website_id from old domain
@@ -129,6 +132,42 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         array('%d'),
                         array('%d')
                     );
+                }
+
+                // Update owner of linked service packages if owner changed
+                if ($owner_changed) {
+                    // Update domain owner
+                    if (!empty($domain_id)) {
+                        $wpdb->update(
+                            $domains_table,
+                            array('owner_user_id' => $owner_user_id),
+                            array('id' => $domain_id),
+                            array('%d'),
+                            array('%d')
+                        );
+                    }
+
+                    // Update hosting owner
+                    if (!empty($hosting_id)) {
+                        $wpdb->update(
+                            $hostings_table,
+                            array('owner_user_id' => $owner_user_id),
+                            array('id' => $hosting_id),
+                            array('%d'),
+                            array('%d')
+                        );
+                    }
+
+                    // Update maintenance package owner
+                    if (!empty($maintenance_package_id)) {
+                        $wpdb->update(
+                            $maintenance_table,
+                            array('owner_user_id' => $owner_user_id),
+                            array('id' => $maintenance_package_id),
+                            array('%d'),
+                            array('%d')
+                        );
+                    }
                 }
 
                 // Redirect back to the referrer page after successful update

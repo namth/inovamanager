@@ -39,6 +39,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $notes = sanitize_text_field($_POST['notes']);
         $status = sanitize_text_field($_POST['status']);
         $partner_id = isset($_POST['partner_id']) ? sanitize_text_field($_POST['partner_id']) : null;
+        $requires_vat_invoice = isset($_POST['requires_vat_invoice']) ? 1 : 0;
 
         // Update user data
         $wpdb->update(
@@ -53,7 +54,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'address' => $address,
                 'notes' => $notes,
                 'partner_id' => $partner_id,
-                'status' => $status
+                'status' => $status,
+                'requires_vat_invoice' => $requires_vat_invoice
             ),
             array('id' => $user_id)
         );
@@ -170,6 +172,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 </div>
                                 <?php else: ?>
                                 <input type="hidden" name="notes" value="<?php echo esc_attr($user->notes); ?>">
+                                <?php endif; ?>
+
+                                <?php if ($is_admin): ?>
+                                <div class="form-group">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" 
+                                               type="checkbox" 
+                                               id="requires_vat_invoice" 
+                                               name="requires_vat_invoice" 
+                                               value="1"
+                                               <?php echo ($user->requires_vat_invoice) ? 'checked' : ''; ?>>
+                                        <label class="form-check-label fw-bold" for="requires_vat_invoice">
+                                            Nhận hóa đơn đỏ
+                                        </label>
+                                    </div>
+                                </div>
+                                <?php else: ?>
+                                <input type="hidden" name="requires_vat_invoice" value="<?php echo esc_attr($user->requires_vat_invoice); ?>">
                                 <?php endif; ?>
                                 
                                 <?php

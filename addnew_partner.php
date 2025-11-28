@@ -19,24 +19,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $tax_code = isset($_POST['tax_code']) ? sanitize_text_field($_POST['tax_code']) : '';
         $address = sanitize_text_field($_POST['address']);
         $notes = sanitize_text_field($_POST['notes']);
-        
-        // Get current date in server timezone
-        $date = date('Y-m-d H:i:s');
+        $requires_vat_invoice = isset($_POST['requires_vat_invoice']) ? 1 : 0;
+         
+         // Get current date in server timezone
+         $date = date('Y-m-d H:i:s');
 
-        $wpdb->insert(
-            $users_table,
-            array(
-                'user_code' => $user_code,
-                'user_type' => $user_type,
-                'name' => $name,
-                'email' => $email,
-                'phone_number' => $phone_number,
-                'tax_code' => $tax_code,
-                'address' => $address,
-                'notes' => $notes,
-                'status' => 'ACTIVE'
-            )
-        );
+         $wpdb->insert(
+             $users_table,
+             array(
+                 'user_code' => $user_code,
+                 'user_type' => $user_type,
+                 'name' => $name,
+                 'email' => $email,
+                 'phone_number' => $phone_number,
+                 'tax_code' => $tax_code,
+                 'address' => $address,
+                 'notes' => $notes,
+                 'status' => 'ACTIVE',
+                 'requires_vat_invoice' => $requires_vat_invoice
+             )
+         );
 
         $notification = 'Thêm người dùng mới thành công.';
     }
@@ -109,6 +111,18 @@ get_header();
                                 <div class="form-group">
                                     <label for="notes" class="fw-bold">Ghi chú</label>
                                     <textarea class="form-control height-auto" id="notes" rows="4" placeholder="Ghi chú" name="notes"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" 
+                                               type="checkbox" 
+                                               id="requires_vat_invoice" 
+                                               name="requires_vat_invoice" 
+                                               value="1">
+                                        <label class="form-check-label fw-bold" for="requires_vat_invoice">
+                                            Nhận hóa đơn đỏ
+                                        </label>
+                                    </div>
                                 </div>
                                 <?php
                                 wp_nonce_field('post_partner', 'post_partner_field');
