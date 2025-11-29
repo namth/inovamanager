@@ -63,6 +63,7 @@ if (!$is_authorized) {
 $websites_table = $wpdb->prefix . 'im_websites';
 $hostings_table = $wpdb->prefix . 'im_hostings';
 $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+$domains_table = $wpdb->prefix . 'im_domains';
 $commissions_table = $wpdb->prefix . 'im_partner_commissions';
 
 $invoice_items = $wpdb->get_results($wpdb->prepare("
@@ -76,7 +77,18 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
             WHEN ii.service_type = 'website_service' THEN ws.description
             ELSE ''
         END AS service_reference,
-        COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status IN ('WITHDRAWN', 'PAID')), 0) AS withdrawn_commission
+        COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status IN ('WITHDRAWN', 'PAID')), 0) AS withdrawn_commission,
+        CASE
+            WHEN ii.service_type = 'domain' THEN (SELECT expiry_date FROM $domains_table WHERE id = ii.service_id)
+            WHEN ii.service_type = 'hosting' THEN (SELECT expiry_date FROM $hostings_table WHERE id = ii.service_id)
+            WHEN ii.service_type = 'maintenance' THEN (SELECT expiry_date FROM $maintenance_table WHERE id = ii.service_id)
+            ELSE NULL
+        END AS expiry_date,
+        CASE
+            WHEN ii.service_type = 'hosting' THEN (SELECT billing_cycle_months FROM $hostings_table WHERE id = ii.service_id)
+            WHEN ii.service_type = 'maintenance' THEN (SELECT billing_cycle_months FROM $maintenance_table WHERE id = ii.service_id)
+            ELSE NULL
+        END AS billing_cycle_months
     FROM
         $invoice_items_table ii
     LEFT JOIN
@@ -468,10 +480,12 @@ get_header('nologin');
                             <td>Tên khách hàng:</td>
                             <td><?php echo esc_html($invoice->customer_name); ?></td>
                         </tr>
+                        <?php if ($invoice->tax_code): ?>
                         <tr>
-                            <td>Mã khách hàng:</td>
-                            <td><?php echo esc_html($invoice->customer_code); ?></td>
+                            <td>Mã số thuế:</td>
+                            <td><?php echo esc_html($invoice->tax_code); ?></td>
                         </tr>
+                        <?php endif; ?>
                         <tr>
                             <td>Email:</td>
                             <td><?php echo esc_html($invoice->customer_email); ?></td>
@@ -488,47 +502,48 @@ get_header('nologin');
 
             <!-- Invoice Items -->
             <?php
-            // Group items by product_type if count >= 5
-            $show_grouped = count($invoice_items) >= 5;
-            if ($show_grouped) {
-                // Group items by product_type
-                $grouped_items = array();
-                $product_type_labels = array(
-                    'domain' => 'Tên miền',
-                    'hosting' => 'Hosting',
-                    'maintenance' => 'Gói bảo trì',
-                    'website_service' => 'Dịch vụ website'
-                );
-                
-                foreach ($invoice_items as $item) {
-                    $type = $item->service_type;
-                    if (!isset($grouped_items[$type])) {
-                        $grouped_items[$type] = array();
-                    }
-                    $grouped_items[$type][] = $item;
+            // Always group items by product_type
+            $grouped_items = array();
+            $product_type_labels = array(
+                'domain' => 'Tên miền',
+                'hosting' => 'Hosting',
+                'maintenance' => 'Gói bảo trì',
+                'website_service' => 'Dịch vụ website'
+            );
+            
+            foreach ($invoice_items as $item) {
+                $type = $item->service_type;
+                if (!isset($grouped_items[$type])) {
+                    $grouped_items[$type] = array();
                 }
-                
-                // Display each group
-                $is_first_table = true;
-                foreach ($grouped_items as $product_type => $items):
+                $grouped_items[$type][] = $item;
+            }
+            
+            // Display each group with header
+            foreach ($grouped_items as $product_type => $items):
+                // Get VAT rate from first item (all items in group should have same rate)
+                $group_vat_rate = 0;
+                if ($invoice->requires_vat_invoice && !empty($items)) {
+                    $group_vat_rate = isset($items[0]->vat_rate) ? floatval($items[0]->vat_rate) : 0;
+                }
             ?>
              <div class="items-section">
                  <h3 class="text-muted"><i class="ph ph-list me-2"></i>Danh sách dịch vụ <?php echo $product_type_labels[$product_type] ?? $product_type; ?></h3>
                 <table class="items-table">
-                    <?php if ($is_first_table): ?>
                      <thead>
                          <tr>
                              <th>Dịch vụ</th>
-                             <th class="text-center">Số lượng</th>
-                             <th class="text-end">Đơn giá</th>
+                             <?php if ($product_type !== 'website_service'): ?>
+                             <th class="text-center">Ngày hết hạn</th>
+                             <th class="text-center">Gia hạn đến</th>
+                             <?php endif; ?>
                              <th class="text-end">Thành tiền</th>
                              <?php if ($invoice->requires_vat_invoice): ?>
-                             <th class="text-end">VAT</th>
+                             <th class="text-end">VAT <?php echo $group_vat_rate > 0 ? '(' . intval($group_vat_rate) . '%)' : ''; ?></th>
                              <th class="text-end">Tổng</th>
                              <?php endif; ?>
                          </tr>
                      </thead>
-                     <?php $is_first_table = false; endif; ?>
                     <tbody>
                         <?php foreach ($items as $item): ?>
                          <tr>
@@ -544,9 +559,33 @@ get_header('nologin');
                                      </div>
                                  <?php endif; ?>
                             </td>
-                            <td class="text-center"><?php echo number_format($item->quantity); ?></td>
-                            <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
-                            <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
+                            <?php if ($product_type !== 'website_service'): ?>
+                            <td class="text-center">
+                                <?php 
+                                if ($item->expiry_date):
+                                    echo date('d/m/Y', strtotime($item->expiry_date));
+                                else:
+                                    echo '<span class="text-muted">-</span>';
+                                endif;
+                                ?>
+                            </td>
+                            <td class="text-center">
+                                <?php 
+                                if ($item->expiry_date && $item->billing_cycle_months):
+                                    // Calculate renewal date
+                                    $renewal_date = date('d/m/Y', strtotime($item->expiry_date . ' + ' . $item->billing_cycle_months . ' months'));
+                                    echo $renewal_date;
+                                elseif ($item->expiry_date && $product_type === 'domain'):
+                                    // For domain, add 1 year
+                                    $renewal_date = date('d/m/Y', strtotime($item->expiry_date . ' + 1 year'));
+                                    echo $renewal_date;
+                                else:
+                                    echo '<span class="text-muted">-</span>';
+                                endif;
+                                ?>
+                            </td>
+                            <?php endif; ?>
+                            <td class="text-end"><?php echo number_format($item->item_total); ?>đ</td>
                             <?php if ($invoice->requires_vat_invoice): ?>
                             <td class="text-end">
                                 <?php
@@ -554,7 +593,7 @@ get_header('nologin');
                                 $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
                                 
                                 if ($item_vat_calculated > 0):
-                                    echo number_format($item_vat_calculated) . ' VNĐ<br><span class="text-muted" style="font-size: 11px;">(' . number_format($item_vat_rate, 1) . '%)</span>';
+                                    echo number_format($item_vat_calculated) . 'đ';
                                 else:
                                     echo '<span class="text-muted">-</span>';
                                 endif;
@@ -565,7 +604,7 @@ get_header('nologin');
                                 $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
                                 $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
                                 $item_total_final = $item->item_total + $item_vat - $item_commission;
-                                echo '<strong>' . number_format($item_total_final) . ' VNĐ</strong>';
+                                echo '<strong>' . number_format($item_total_final) . 'đ</strong>';
                                 ?>
                             </td>
                             <?php endif; ?>
@@ -574,72 +613,7 @@ get_header('nologin');
                     </tbody>
                 </table>
             </div>
-            <?php 
-                endforeach;
-            } else {
-                // Original layout for < 5 items
-            ?>
-             <div class="items-section">
-                 <h3 class="text-muted">Chi tiết dịch vụ</h3>
-                <table class="items-table">
-                    <thead>
-                        <tr>
-                            <th>Dịch vụ</th>
-                            <th class="text-center">Số lượng</th>
-                            <th class="text-end">Đơn giá</th>
-                            <th class="text-end">Thành tiền</th>
-                            <?php if ($invoice->requires_vat_invoice): ?>
-                            <th class="text-end">VAT</th>
-                            <th class="text-end">Tổng</th>
-                            <?php endif; ?>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($invoice_items as $item): ?>
-                         <tr>
-                             <td>
-                                 <div class="service-name text-dark"><?php echo esc_html($item->service_title ?: $item->description); ?></div>
-                                 <?php if ($item->service_reference): ?>
-                                     <div class="service-desc text-muted"><?php echo esc_html($item->service_reference); ?></div>
-                                 <?php endif; ?>
-                                 <?php if (!empty($item->website_names)): ?>
-                                     <div class="service-desc text-muted">
-                                         <i class="ph ph-globe-hemisphere-west"></i>
-                                         (<?php echo implode(', ', array_map('esc_html', $item->website_names)); ?>)
-                                     </div>
-                                 <?php endif; ?>
-                            </td>
-                            <td class="text-center"><?php echo number_format($item->quantity); ?></td>
-                            <td class="text-end"><?php echo number_format($item->unit_price); ?> VNĐ</td>
-                            <td class="text-end"><?php echo number_format($item->item_total); ?> VNĐ</td>
-                            <?php if ($invoice->requires_vat_invoice): ?>
-                            <td class="text-end">
-                                <?php
-                                $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
-                                $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
-                                
-                                if ($item_vat_calculated > 0):
-                                    echo number_format($item_vat_calculated) . ' VNĐ<br><span class="text-muted" style="font-size: 11px;">(' . number_format($item_vat_rate, 1) . '%)</span>';
-                                else:
-                                    echo '<span class="text-muted">-</span>';
-                                endif;
-                                ?>
-                            </td>
-                            <td class="text-end">
-                                <?php 
-                                $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
-                                $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
-                                $item_total_final = $item->item_total + $item_vat - $item_commission;
-                                echo '<strong>' . number_format($item_total_final) . ' VNĐ</strong>';
-                                ?>
-                            </td>
-                            <?php endif; ?>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-            <?php } ?>
+            <?php endforeach; ?>
 
             <!-- Totals and QR Code -->
             <div class="totals-section">
@@ -722,7 +696,16 @@ get_header('nologin');
                 <div class="qr-info">
                     <div class="qr-info-row">
                         <span class="qr-info-label">Số tài khoản:</span>
-                        <span class="qr-info-value"><?php echo get_option('payment_account_number'); ?></span>
+                        <span class="qr-info-value">
+                            <?php 
+                            // Nếu là doanh nghiệp có lấy hóa đơn đỏ (VAT) thì hiển thị số tài khoản với VAT
+                            if ($invoice->requires_vat_invoice && get_option('payment_account_number_with_vat')) {
+                                echo get_option('payment_account_number_with_vat');
+                            } else {
+                                echo get_option('payment_account_number');
+                            }
+                            ?>
+                        </span>
                     </div>
                     <div class="qr-info-row">
                         <span class="qr-info-label">Nội dung CK:</span>

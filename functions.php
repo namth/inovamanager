@@ -1526,6 +1526,8 @@ function get_virtual_page_template_mapping() {
         'add-maintenance' => 'addnew_maintenance.php',
         'edit-maintenance' => 'edit_maintenance.php',
         'detail-maintenance' => 'detail_maintenance.php',
+        'register-maintenance' => 'register_maintenance.php',
+        'dang-ky-bao-tri' => 'register_maintenance.php',
         
         // Service Management
         'service-list' => 'service_list.php',
@@ -6285,4 +6287,115 @@ function get_invoice_item_website_names($item) {
     }
     
     return $website_names;
+}
+
+/**
+ * ========== Maintenance Registration AJAX Handler ==========
+ * AJAX: Register maintenance package request
+ */
+add_action('wp_ajax_register_maintenance_package', 'register_maintenance_package_callback');
+add_action('wp_ajax_nopriv_register_maintenance_package', 'register_maintenance_package_callback');
+
+function register_maintenance_package_callback() {
+    // Verify nonce
+    $nonce = !empty($_POST['nonce']) ? sanitize_text_field($_POST['nonce']) : '';
+    if (!wp_verify_nonce($nonce, 'maintenance_registration')) {
+        wp_send_json_error(['message' => 'Xác thực bảo mật thất bại']);
+        return;
+    }
+
+    // Check if user is logged in (for non-admin)
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Vui lòng đăng nhập trước']);
+        return;
+    }
+
+    // Get and sanitize input
+    $website_id = !empty($_POST['website_id']) ? intval($_POST['website_id']) : 0;
+    $phone_number = !empty($_POST['phone_number']) ? sanitize_text_field($_POST['phone_number']) : '';
+    $zalo_number = !empty($_POST['zalo_number']) ? sanitize_text_field($_POST['zalo_number']) : '';
+    $maintenance_notes = !empty($_POST['maintenance_notes']) ? sanitize_textarea_field($_POST['maintenance_notes']) : '';
+
+    // Validate required fields
+    if (empty($website_id) || empty($phone_number)) {
+        wp_send_json_error(['message' => 'Vui lòng điền đầy đủ thông tin bắt buộc']);
+        return;
+    }
+
+    global $wpdb;
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $users_table = $wpdb->prefix . 'im_users';
+
+    // Get current user info
+    $current_wp_user_id = get_current_user_id();
+    $current_user = wp_get_current_user();
+    $current_inova_user = get_inova_user($current_wp_user_id);
+
+    // Verify website exists and belongs to current user
+    $website = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, name FROM $websites_table WHERE id = %d AND owner_user_id = %d",
+        $website_id,
+        $current_inova_user->id
+    ));
+
+    if (empty($website)) {
+        wp_send_json_error(['message' => 'Website không tồn tại hoặc bạn không có quyền truy cập']);
+        return;
+    }
+
+    // Prepare email content
+    $user_email = $current_user->user_email;
+    $user_name = $current_user->display_name;
+    $website_name = $website->name;
+
+    // Build email body
+    $email_subject = '[Yêu cầu Bảo trì] ' . $website_name . ' - từ ' . $user_name;
+    
+    $email_body = "YÊU CẦU ĐĂNG KÝ GÓI BẢO TRÌ WEBSITE\n";
+    $email_body .= str_repeat("=", 55) . "\n\n";
+    
+    $email_body .= "📋 THÔNG TIN NGƯỜI ĐĂNG KÝ:\n";
+    $email_body .= "─────────────────────────────────────────────\n";
+    $email_body .= "Họ tên: " . $user_name . "\n";
+    $email_body .= "Email: " . $user_email . "\n";
+    $email_body .= "Số điện thoại: " . $phone_number . "\n";
+    if (!empty($zalo_number)) {
+        $email_body .= "Zalo: " . $zalo_number . "\n";
+    }
+    
+    $email_body .= "\n🌐 WEBSITE CẦN BẢO TRÌ:\n";
+    $email_body .= "─────────────────────────────────────────────\n";
+    $email_body .= "Tên website: " . $website_name . "\n";
+    
+    if (!empty($maintenance_notes)) {
+        $email_body .= "\n📝 YÊU CẦU BỔ SUNG:\n";
+        $email_body .= "─────────────────────────────────────────────\n";
+        $email_body .= $maintenance_notes . "\n";
+    }
+    
+    $email_body .= "\n💰 GIÁ CỬA:\n";
+    $email_body .= "─────────────────────────────────────────────\n";
+    $email_body .= "100.000 VNĐ / tháng / 1GB dữ liệu\n";
+    $email_body .= "Ví dụ: Website 5GB = 500.000 VNĐ/tháng\n";
+    $email_body .= "\n📞 QUY TRÌNH TIẾP THEO:\n";
+    $email_body .= "─────────────────────────────────────────────\n";
+    $email_body .= "1. Chúng tôi sẽ kiểm tra chi tiết website của bạn\n";
+    $email_body .= "2. Báo giá cụ thể dựa vào dung lượng và yêu cầu\n";
+    $email_body .= "3. Liên hệ để xác nhận và ký kết hợp đồng\n";
+    $email_body .= "\n" . str_repeat("=", 55) . "\n";
+
+    // Send email
+    $recipient_email = 'namth.pass@gmail.com';
+    $headers = array('Content-Type: text/plain; charset=UTF-8');
+
+    $email_sent = wp_mail($recipient_email, $email_subject, $email_body, $headers);
+
+    if ($email_sent) {
+        wp_send_json_success([
+            'message' => 'Yêu cầu đăng ký của bạn đã được gửi thành công!',
+            'website_id' => $website_id
+        ]);
+    } else {
+        wp_send_json_error(['message' => 'Có lỗi xảy ra khi gửi email. Vui lòng thử lại.']);
+    }
 }

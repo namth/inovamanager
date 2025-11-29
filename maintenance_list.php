@@ -65,9 +65,22 @@ if (isset($_POST['delete_maintenance_id']) && !empty($_POST['delete_maintenance_
     }
 }
 
-// Get all maintenance packages with related data
-// Build permission WHERE clause (maintenance has partner_id field)
+// Get search parameter
+$search_query = isset($_GET['search']) ? sanitize_text_field($_GET['search']) : '';
+
+// Build WHERE clause
+$where_conditions = array();
 $permission_where = get_user_permission_where_clause('m', 'owner_user_id', 'partner_id');
+if (!empty($permission_where)) {
+    $where_conditions[] = ltrim($permission_where, ' AND');
+}
+
+if (!empty($search_query)) {
+    $search_like = '%' . $wpdb->esc_like($search_query) . '%';
+    $where_conditions[] = $wpdb->prepare("(w.name LIKE %s OR u.name LIKE %s OR u.user_code LIKE %s OR m.order_code LIKE %s)", $search_like, $search_like, $search_like, $search_like);
+}
+
+$where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
 
 $query = "
     SELECT
@@ -82,23 +95,33 @@ $query = "
         $users_table u ON m.owner_user_id = u.id
     LEFT JOIN
         $websites_table w ON w.maintenance_package_id = m.id
-    " . (!empty($permission_where) ? "WHERE 1=1 {$permission_where}" : "") . "
+    {$where_clause}
     GROUP BY
         m.id
     ORDER BY
         m.expiry_date ASC
 ";
 
-$maintenance_packages = $wpdb->get_results($query);
+// Pagination settings
+$items_per_page = 10;
+$current_page = max(1, intval(get_query_var('paged')));
 
-// Filter maintenance packages by status if provided
-$status_filter = isset($_GET['status']) ? sanitize_text_field($_GET['status']) : '';
-if (!empty($status_filter)) {
-    $filtered_packages = array_filter($maintenance_packages, function($package) use ($status_filter) {
-        return $package->status === $status_filter;
-    });
-    $maintenance_packages = $filtered_packages;
-}
+// Get total count with same WHERE clause
+$count_query = "
+    SELECT COUNT(DISTINCT m.id)
+    FROM $maintenance_table m
+    LEFT JOIN $users_table u ON m.owner_user_id = u.id
+    LEFT JOIN $websites_table w ON w.maintenance_package_id = m.id
+    {$where_clause}
+";
+$total_items = $wpdb->get_var($count_query);
+$total_pages = ceil($total_items / $items_per_page);
+$offset = ($current_page - 1) * $items_per_page;
+
+// Add LIMIT to query
+$query .= " LIMIT $items_per_page OFFSET $offset";
+
+$maintenance_packages = $wpdb->get_results($query);
 
 get_header();
 ?>
@@ -122,51 +145,61 @@ get_header();
                     <?php endif; ?>
 
                     <div class="d-flex justify-content-between align-items-center mb-4">
-                        <h4 class="card-title">Danh sách Gói Bảo Trì</h4>
-                        <div class="d-flex gap-2 align-items-center">
-                            <?php if (is_inova_admin()): ?>
-                            <button id="bulk-renew-btn" class="btn btn-secondary btn-icon-text" style="display: none;" onclick="handleBulkRenewal('maintenances', 'gói bảo trì', '<?php echo home_url('/them-moi-hoa-don/'); ?>')">
-                                <i class="ph ph-arrow-clockwise btn-icon-prepend"></i>
-                                <span>Gia hạn nhiều gói bảo trì</span>
-                            </button>
-                            <?php endif; ?>
-                            <div class="d-flex align-items-center">
-                                <i class="ph ph-funnel text-muted me-2 fa-150p"></i>
-                                <select class="form-select form-select-sm w180" onchange="window.location.href=this.value">
-                                    <option value="<?php echo home_url('/danh-sach-bao-tri/'); ?>" <?php echo empty($status_filter) ? 'selected' : ''; ?>>
-                                        Tất cả trạng thái
-                                    </option>
-                                    <option value="<?php echo home_url('/danh-sach-bao-tri/?status=NEW'); ?>" <?php echo $status_filter === 'NEW' ? 'selected' : ''; ?>>
-                                        Chờ thanh toán
-                                    </option>
-                                    <option value="<?php echo home_url('/danh-sach-bao-tri/?status=ACTIVE'); ?>" <?php echo $status_filter === 'ACTIVE' ? 'selected' : ''; ?>>
-                                        Đang hoạt động
-                                    </option>
-                                    <option value="<?php echo home_url('/danh-sach-bao-tri/?status=EXPIRED'); ?>" <?php echo $status_filter === 'EXPIRED' ? 'selected' : ''; ?>>
-                                        Hết hạn
-                                    </option>
-                                </select>
-                            </div>
-                            <?php if (is_inova_admin()): ?>
-                            <a href="<?php echo home_url('/them-goi-bao-tri/'); ?>" class="fixed-bottom-right nav-link" title="Thêm mới gói bảo trì">
-                                <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
-                            </a>
-                            <?php endif; ?>
-                        </div>
-                    </div>
+                         <h4 class="card-title">Danh sách Gói Bảo Trì</h4>
+                         <div class="d-flex gap-2 align-items-center">
+                             <!-- Search functionality -->
+                             <div class="d-flex align-items-center me-3">
+                                 <i class="ph ph-magnifying-glass text-muted me-2 fa-150p"></i>
+                                 <form method="GET" class="d-flex">
+                                     <input type="text" name="search" class="form-control form-control-sm"
+                                            placeholder="Tìm kiếm gói bảo trì, website, chủ sở hữu..."
+                                            value="<?php echo esc_attr($search_query); ?>" style="width: 300px;">
+                                     <?php if (!empty($search_query)): ?>
+                                     <a href="<?php echo home_url('/danh-sach-bao-tri/'); ?>" class="btn btn-sm btn-danger ms-1 d-flex align-items-center" title="Xóa bộ lọc">
+                                         <i class="ph ph-x"></i>
+                                     </a>
+                                     <?php endif; ?>
+                                 </form>
+                             </div>
+                             
+                             <?php if (is_inova_admin()): ?>
+                             <button id="bulk-renew-btn" class="btn btn-secondary btn-icon-text" style="display: none;" onclick="handleBulkRenewal('maintenances', 'gói bảo trì', '<?php echo home_url('/them-moi-hoa-don/'); ?>')">
+                                 <i class="ph ph-arrow-clockwise btn-icon-prepend"></i>
+                                 <span>Gia hạn nhiều gói bảo trì</span>
+                             </button>
+                             <?php endif; ?>
+                             
+                             <?php if (is_inova_admin()): ?>
+                             <a href="<?php echo home_url('/them-goi-bao-tri/'); ?>" class="fixed-bottom-right nav-link" title="Thêm mới gói bảo trì">
+                                 <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
+                             </a>
+                             <?php endif; ?>
+                         </div>
+                     </div>
                     
                     <?php if (empty($maintenance_packages)): ?>
-                    <div class="text-center py-5">
-                        <i class="ph ph-wrench icon-lg text-muted mb-3" style="font-size: 48px;"></i>
-                        <h4>Chưa có gói bảo trì nào</h4>
-                        <p class="text-muted">Bắt đầu bằng cách thêm gói bảo trì đầu tiên của bạn</p>
-                        <?php if (is_inova_admin()): ?>
-                        <a href="<?php echo home_url('/them-goi-bao-tri/'); ?>" class="btn btn-primary">
-                            <i class="ph ph-plus-circle me-2"></i> Thêm mới Gói Bảo Trì
-                        </a>
-                        <?php endif; ?>
-                    </div>
-                    <?php else: ?>
+                     <div class="text-center py-5">
+                         <?php if (!empty($search_query)): ?>
+                             <i class="ph ph-magnifying-glass icon-lg text-muted mb-3" style="font-size: 48px;"></i>
+                             <h4>Không tìm thấy gói bảo trì nào</h4>
+                             <p class="text-muted">
+                                 Không có kết quả cho từ khóa "<strong><?php echo esc_html($search_query); ?></strong>"
+                             </p>
+                             <a href="<?php echo home_url('/danh-sach-bao-tri/'); ?>" class="btn btn-secondary me-2 d-flex align-items-center">
+                                 <i class="ph ph-arrow-clockwise me-2"></i>Xóa bộ lọc
+                             </a>
+                         <?php else: ?>
+                             <i class="ph ph-wrench icon-lg text-muted mb-3" style="font-size: 48px;"></i>
+                             <h4>Chưa có gói bảo trì nào</h4>
+                             <p class="text-muted">Bắt đầu bằng cách thêm gói bảo trì đầu tiên của bạn</p>
+                             <?php if (is_inova_admin()): ?>
+                             <a href="<?php echo home_url('/them-goi-bao-tri/'); ?>" class="btn btn-primary">
+                                 <i class="ph ph-plus-circle me-2"></i> Thêm mới Gói Bảo Trì
+                             </a>
+                             <?php endif; ?>
+                         <?php endif; ?>
+                     </div>
+                     <?php else: ?>
                     <div class="table-responsive">
                         <table class="table table-hover">
                             <thead>
@@ -229,7 +262,7 @@ get_header();
                                     <td>
                                         <div class="fw-bold">
                                             <?php if (!empty($package->owner_name)): ?>
-                                                <a href="<?php echo home_url('/user-detail/?user_id=' . $package->owner_user_id); ?>" class="text-decoration-none">
+                                                <a href="<?php echo home_url('/danh-sach-bao-tri/?search=' . $package->owner_name); ?>" class="text-decoration-none">
                                                     <?php echo esc_html($package->owner_code . ' - ' . $package->owner_name); ?>
                                                 </a>
                                             <?php else: ?>
@@ -371,13 +404,69 @@ get_header();
                         </table>
                     </div>
                     <?php endif; ?>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<!-- Hidden form for deleting maintenance -->
+                    <!-- Pagination -->
+                    <?php if ($total_pages > 1): ?>
+                    <div class="d-flex justify-content-between align-items-center mt-4">
+                       <div class="text-muted">
+                           Hiển thị <?php echo (($current_page - 1) * $items_per_page) + 1; ?>
+                           đến <?php echo min($current_page * $items_per_page, $total_items); ?>
+                           trong tổng số <?php echo $total_items; ?> gói bảo trì
+                       </div>
+                       <nav>
+                           <ul class="pagination">
+                               <?php if ($current_page > 1): ?>
+                               <li class="page-item">
+                                   <a class="page-link" href="?paged=<?php echo $current_page - 1; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                       <i class="ph ph-caret-left"></i>
+                                   </a>
+                               </li>
+                               <?php endif; ?>
+
+                               <?php
+                               $start_page = max(1, $current_page - 2);
+                               $end_page = min($total_pages, $current_page + 2);
+
+                               if ($start_page > 1): ?>
+                                   <li class="page-item"><a class="page-link" href="?paged=1<?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">1</a></li>
+                                   <?php if ($start_page > 2): ?>
+                                       <li class="page-item disabled"><span class="page-link">...</span></li>
+                                   <?php endif; ?>
+                               <?php endif; ?>
+
+                               <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
+                               <li class="page-item <?php echo $i == $current_page ? 'active' : ''; ?>">
+                                   <a class="page-link" href="?paged=<?php echo $i; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                       <?php echo $i; ?>
+                                   </a>
+                               </li>
+                               <?php endfor; ?>
+
+                               <?php if ($end_page < $total_pages): ?>
+                                   <?php if ($end_page < $total_pages - 1): ?>
+                                       <li class="page-item disabled"><span class="page-link">...</span></li>
+                                   <?php endif; ?>
+                                   <li class="page-item"><a class="page-link" href="?paged=<?php echo $total_pages; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>"><?php echo $total_pages; ?></a></li>
+                               <?php endif; ?>
+
+                               <?php if ($current_page < $total_pages): ?>
+                               <li class="page-item">
+                                   <a class="page-link" href="?paged=<?php echo $current_page + 1; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                       <i class="ph ph-caret-right"></i>
+                                   </a>
+                               </li>
+                               <?php endif; ?>
+                           </ul>
+                       </nav>
+                    </div>
+                    <?php endif; ?>
+                    </div>
+                    </div>
+                    </div>
+                    </div>
+                    </div>
+                    
+                    <!-- Hidden form for deleting maintenance -->
 <form id="deleteMaintenanceForm" method="POST" style="display: none;">
     <input type="hidden" name="delete_maintenance_id" id="delete_maintenance_id" value="">
     <input type="hidden" name="force_delete" id="force_delete" value="0">

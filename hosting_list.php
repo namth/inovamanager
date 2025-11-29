@@ -69,9 +69,22 @@ if (isset($_POST['delete_hosting_id']) && !empty($_POST['delete_hosting_id'])) {
     }
 }
 
-// Get all hostings with related data, grouped by hosting with concatenated website names
-// Build permission WHERE clause (hostings has partner_id field)
+// Get search parameter
+$search_query = isset($_GET['search']) ? sanitize_text_field($_GET['search']) : '';
+
+// Build WHERE clause
+$where_conditions = array();
 $permission_where = get_user_permission_where_clause('h', 'owner_user_id', 'partner_id');
+if (!empty($permission_where)) {
+    $where_conditions[] = ltrim($permission_where, ' AND');
+}
+
+if (!empty($search_query)) {
+    $search_like = '%' . $wpdb->esc_like($search_query) . '%';
+    $where_conditions[] = $wpdb->prepare("(w.name LIKE %s OR u.name LIKE %s OR u.user_code LIKE %s OR h.hosting_code LIKE %s)", $search_like, $search_like, $search_like, $search_like);
+}
+
+$where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
 
 $query = "
     SELECT
@@ -94,23 +107,34 @@ $query = "
         $product_catalog_table pc ON h.product_catalog_id = pc.id
     LEFT JOIN
         $websites_table w ON w.hosting_id = h.id
-    " . (!empty($permission_where) ? "WHERE 1=1 {$permission_where}" : "") . "
+    {$where_clause}
     GROUP BY
         h.id
     ORDER BY
         h.expiry_date ASC
 ";
 
-$hostings = $wpdb->get_results($query);
+// Pagination settings
+$items_per_page = 10;
+$current_page = max(1, intval(get_query_var('paged')));
 
-// Filter hostings by status if provided
-$status_filter = isset($_GET['status']) ? sanitize_text_field($_GET['status']) : '';
-if (!empty($status_filter)) {
-    $filtered_hostings = array_filter($hostings, function($hosting) use ($status_filter) {
-        return $hosting->status === $status_filter;
-    });
-    $hostings = $filtered_hostings;
-}
+// Get total count with same WHERE clause
+$count_query = "
+    SELECT COUNT(DISTINCT h.id)
+    FROM $hostings_table h
+    LEFT JOIN $users_table u ON h.owner_user_id = u.id
+    LEFT JOIN $users_table p ON h.provider_id = p.id AND p.user_type = 'SUPPLIER'
+    LEFT JOIN $websites_table w ON w.hosting_id = h.id
+    {$where_clause}
+";
+$total_items = $wpdb->get_var($count_query);
+$total_pages = ceil($total_items / $items_per_page);
+$offset = ($current_page - 1) * $items_per_page;
+
+// Add LIMIT to query
+$query .= " LIMIT $items_per_page OFFSET $offset";
+
+$hostings = $wpdb->get_results($query);
 
 get_header();
 ?>
@@ -136,70 +160,80 @@ get_header();
                     <?php endif; ?>
 
                     <div class="d-flex justify-content-between align-items-center mb-4">
-                        <h4 class="card-title">Danh sách Hosting</h4>
-                        <div class="d-flex gap-2 align-items-center">
-                            <?php if (is_inova_admin()): ?>
-                            <button id="bulk-renew-btn" class="btn btn-secondary btn-icon-text" style="display: none;" onclick="handleBulkRenewal('hostings', 'hosting', '<?php echo home_url('/them-moi-hoa-don/'); ?>')">
-                                <i class="ph ph-arrow-clockwise btn-icon-prepend"></i>
-                                <span>Gia hạn nhiều hosting</span>
-                            </button>
-                            <?php endif; ?>
-                            <div class="d-flex align-items-center">
-                                <i class="ph ph-funnel text-muted me-2 fa-150p"></i>
-                                <select class="form-select form-select-sm w180" onchange="window.location.href=this.value">
-                                    <option value="<?php echo home_url('/danh-sach-hosting/'); ?>" <?php echo empty($status_filter) ? 'selected' : ''; ?>>
-                                        Tất cả trạng thái
-                                    </option>
-                                    <option value="<?php echo home_url('/danh-sach-hosting/?status=NEW'); ?>" <?php echo $status_filter === 'NEW' ? 'selected' : ''; ?>>
-                                        Chờ thanh toán
-                                    </option>
-                                    <option value="<?php echo home_url('/danh-sach-hosting/?status=ACTIVE'); ?>" <?php echo $status_filter === 'ACTIVE' ? 'selected' : ''; ?>>
-                                        Đang hoạt động
-                                    </option>
-                                    <option value="<?php echo home_url('/danh-sach-hosting/?status=EXPIRED'); ?>" <?php echo $status_filter === 'EXPIRED' ? 'selected' : ''; ?>>
-                                        Hết hạn
-                                    </option>
-                                </select>
-                            </div>
-                            <?php if (is_inova_admin()): ?>
-                            <a href="<?php echo home_url('/them-moi-hosting/'); ?>" class="fixed-bottom-right nav-link" title="Thêm mới hosting" data-bs-toggle="tooltip" data-bs-placement="left">
-                                <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
-                            </a>
-                            <?php endif; ?>
-                        </div>
-                    </div>
+                         <h4 class="card-title">Danh sách Hosting</h4>
+                         <div class="d-flex gap-2 align-items-center">
+                             <!-- Search functionality -->
+                             <div class="d-flex align-items-center me-3">
+                                 <i class="ph ph-magnifying-glass text-muted me-2 fa-150p"></i>
+                                 <form method="GET" class="d-flex">
+                                     <input type="text" name="search" class="form-control form-control-sm"
+                                            placeholder="Tìm kiếm hosting, website, chủ sở hữu..."
+                                            value="<?php echo esc_attr($search_query); ?>" style="width: 300px;">
+                                     <?php if (!empty($search_query)): ?>
+                                     <a href="<?php echo home_url('/danh-sach-hosting/'); ?>" class="btn btn-sm btn-danger ms-1 d-flex align-items-center" title="Xóa bộ lọc">
+                                         <i class="ph ph-x"></i>
+                                     </a>
+                                     <?php endif; ?>
+                                 </form>
+                             </div>
+                             
+                             <?php if (is_inova_admin()): ?>
+                             <button id="bulk-renew-btn" class="btn btn-secondary btn-icon-text" style="display: none;" onclick="handleBulkRenewal('hostings', 'hosting', '<?php echo home_url('/them-moi-hoa-don/'); ?>')">
+                                 <i class="ph ph-arrow-clockwise btn-icon-prepend"></i>
+                                 <span>Gia hạn nhiều hosting</span>
+                             </button>
+                             <?php endif; ?>
+                             <?php if (is_inova_admin()): ?>
+                             <a href="<?php echo home_url('/them-moi-hosting/'); ?>" class="fixed-bottom-right nav-link" title="Thêm mới hosting" data-bs-toggle="tooltip" data-bs-placement="left">
+                                 <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
+                             </a>
+                             <?php endif; ?>
+                         </div>
+                     </div>
                     
                     <?php if (empty($hostings)): ?>
-                    <div class="text-center py-5">
-                        <i class="ph ph-cloud-slash icon-lg text-muted mb-3" style="font-size: 48px;"></i>
-                        <h4>Chưa có hosting nào</h4>
-                        <p class="text-muted">Bắt đầu bằng cách thêm hosting đầu tiên của bạn</p>
-                        <?php if (is_inova_admin()): ?>
-                        <a href="<?php echo home_url('/them-moi-hosting/'); ?>" class="btn btn-primary">
-                            <i class="ph ph-plus-circle me-2"></i> Thêm mới Hosting
-                        </a>
-                        <?php endif; ?>
-                    </div>
-                    <?php else: ?>
+                     <div class="text-center py-5">
+                         <?php if (!empty($search_query)): ?>
+                             <i class="ph ph-magnifying-glass icon-lg text-muted mb-3" style="font-size: 48px;"></i>
+                             <h4>Không tìm thấy hosting nào</h4>
+                             <p class="text-muted">
+                                 Không có kết quả cho từ khóa "<strong><?php echo esc_html($search_query); ?></strong>"
+                             </p>
+                             <a href="<?php echo home_url('/danh-sach-hosting/'); ?>" class="btn btn-secondary me-2 d-flex align-items-center">
+                                 <i class="ph ph-arrow-clockwise me-2"></i>Xóa bộ lọc
+                             </a>
+                         <?php else: ?>
+                             <i class="ph ph-cloud-slash icon-lg text-muted mb-3" style="font-size: 48px;"></i>
+                             <h4>Chưa có hosting nào</h4>
+                             <p class="text-muted">Bắt đầu bằng cách thêm hosting đầu tiên của bạn</p>
+                             <?php if (is_inova_admin()): ?>
+                             <a href="<?php echo home_url('/them-moi-hosting/'); ?>" class="btn btn-primary">
+                                 <i class="ph ph-plus-circle me-2"></i> Thêm mới Hosting
+                             </a>
+                             <?php endif; ?>
+                         <?php endif; ?>
+                     </div>
+                     <?php else: ?>
                     <div class="table-responsive">
                         <table class="table table-hover">
                             <thead>
-                                <tr class="bg-light">
-                                    <?php if (is_inova_admin()): ?>
-                                    <th style="width: 40px;">
-                                        <input type="checkbox" id="select-all-hostings" class="form-check form-check-danger">
-                                    </th>
-                                    <?php endif; ?>
-                                    <th style="width: 50px;">STT</th>
-                                    <th>Mã hosting</th>
-                                    <th>Website</th>
-                                    <th>Chủ sở hữu</th>
-                                    <th>Ngày hết hạn</th>
-                                    <th>Giá tiền</th>
-                                    <th>Trạng thái</th>
-                                    <th>Thao tác</th>
-                                </tr>
-                            </thead>
+                                 <tr class="bg-light">
+                                     <?php if (is_inova_admin()): ?>
+                                     <th style="width: 40px;">
+                                         <input type="checkbox" id="select-all-hostings" class="form-check form-check-danger">
+                                     </th>
+                                     <?php endif; ?>
+                                     <th style="width: 50px;">STT</th>
+                                     <th>Mã hosting</th>
+                                     <th>Website</th>
+                                     <th>Chủ sở hữu</th>
+                                     <th>Ngày hết hạn</th>
+                                     <th>Giá tiền</th>
+                                     <th>Trạng thái</th>
+                                     <th>Thông tin đăng nhập</th>
+                                     <th>Thao tác</th>
+                                 </tr>
+                             </thead>
                             <tbody>
                                 <?php 
                                 if (!empty($hostings)) {
@@ -251,7 +285,7 @@ get_header();
                                     <td>
                                         <div class="fw-bold">
                                             <?php if (!empty($hosting->owner_name)): ?>
-                                                <a href="<?php echo home_url('/user-detail/?user_id=' . $hosting->owner_user_id); ?>" class="text-decoration-none">
+                                                <a href="<?php echo home_url('/danh-sach-hosting/?search=' . $hosting->owner_name); ?>" class="text-decoration-none">
                                                     <?php echo esc_html($hosting->owner_name); ?>
                                                 </a>
                                             <?php else: ?>
@@ -315,6 +349,31 @@ get_header();
                                         </span>
                                     </td>
                                     <td>
+                                        <?php if (!empty($hosting->management_url)): ?>
+                                        <div class="d-flex align-items-center mb-1">
+                                            <small class="text-muted me-2">URL:</small>
+                                            <a href="<?php echo esc_url($hosting->management_url); ?>" target="_blank" class="badge bg-light text-dark text-decoration-none">
+                                                <?php echo esc_html(parse_url($hosting->management_url, PHP_URL_HOST)); ?>
+                                                <i class="ph ph-arrow-square-out ms-1"></i>
+                                            </a>
+                                        </div>
+                                        <?php endif; ?>
+                                        
+                                        <?php if (!empty($hosting->management_username)): ?>
+                                        <div class="d-flex align-items-center">
+                                            <small class="text-muted me-2">Login:</small>
+                                            <span class="badge bg-light text-dark text-truncate credential-badge" style="max-width: 150px;">
+                                                <?php echo esc_html($hosting->management_username); ?>
+                                            </span>
+                                            <?php if (!empty($hosting->management_password)): ?>
+                                            <button class="btn btn-sm btn-icon p-0 ms-1 show-password-btn" data-password="<?php echo esc_attr(im_decrypt_password($hosting->management_password)); ?>">
+                                                <i class="ph ph-eye"></i>
+                                            </button>
+                                            <?php endif; ?>
+                                        </div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
                                         <?php if (is_inova_admin()): ?>
                                         <div class="d-flex align-items-center">
                                             <a href="<?php echo home_url('/sua-hosting/?hosting_id=' . $hosting->id); ?>" class="nav-link text-warning me-2" title="Sửa hosting">
@@ -350,7 +409,7 @@ get_header();
                                 } else {
                                 ?>
                                 <tr>
-                                    <td colspan="8" class="text-center py-4">
+                                    <td colspan="10" class="text-center py-4">
                                         <div class="text-muted">
                                             <i class="fas fa-inbox fa-2x mb-2"></i>
                                             <div>Không có hosting nào được tìm thấy</div>
@@ -362,13 +421,69 @@ get_header();
                         </table>
                     </div>
                     <?php endif; ?>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<!-- Hidden form for deleting hosting -->
+                    <!-- Pagination -->
+                    <?php if ($total_pages > 1): ?>
+                    <div class="d-flex justify-content-between align-items-center mt-4">
+                       <div class="text-muted">
+                           Hiển thị <?php echo (($current_page - 1) * $items_per_page) + 1; ?>
+                           đến <?php echo min($current_page * $items_per_page, $total_items); ?>
+                           trong tổng số <?php echo $total_items; ?> hosting
+                       </div>
+                       <nav>
+                           <ul class="pagination">
+                               <?php if ($current_page > 1): ?>
+                               <li class="page-item">
+                                   <a class="page-link" href="?paged=<?php echo $current_page - 1; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                       <i class="ph ph-caret-left"></i>
+                                   </a>
+                               </li>
+                               <?php endif; ?>
+
+                               <?php
+                               $start_page = max(1, $current_page - 2);
+                               $end_page = min($total_pages, $current_page + 2);
+
+                               if ($start_page > 1): ?>
+                                   <li class="page-item"><a class="page-link" href="?paged=1<?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">1</a></li>
+                                   <?php if ($start_page > 2): ?>
+                                       <li class="page-item disabled"><span class="page-link">...</span></li>
+                                   <?php endif; ?>
+                               <?php endif; ?>
+
+                               <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
+                               <li class="page-item <?php echo $i == $current_page ? 'active' : ''; ?>">
+                                   <a class="page-link" href="?paged=<?php echo $i; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                       <?php echo $i; ?>
+                                   </a>
+                               </li>
+                               <?php endfor; ?>
+
+                               <?php if ($end_page < $total_pages): ?>
+                                   <?php if ($end_page < $total_pages - 1): ?>
+                                       <li class="page-item disabled"><span class="page-link">...</span></li>
+                                   <?php endif; ?>
+                                   <li class="page-item"><a class="page-link" href="?paged=<?php echo $total_pages; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>"><?php echo $total_pages; ?></a></li>
+                               <?php endif; ?>
+
+                               <?php if ($current_page < $total_pages): ?>
+                               <li class="page-item">
+                                   <a class="page-link" href="?paged=<?php echo $current_page + 1; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                       <i class="ph ph-caret-right"></i>
+                                   </a>
+                               </li>
+                               <?php endif; ?>
+                           </ul>
+                       </nav>
+                    </div>
+                    <?php endif; ?>
+                    </div>
+                    </div>
+                    </div>
+                    </div>
+                    </div>
+                    
+                    <!-- Hidden form for deleting hosting -->
 <form id="deleteHostingForm" method="POST" style="display: none;">
     <input type="hidden" name="delete_hosting_id" id="delete_hosting_id" value="">
     <input type="hidden" name="force_delete" id="force_delete" value="0">

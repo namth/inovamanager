@@ -470,6 +470,13 @@ get_header();
                                             <a href="<?php echo home_url(); ?>" class="d-flex align-items-center nav-link text-warning">
                                                 <i class="ph ph-info me-1 fa-120p"></i> Tìm hiểu thêm
                                             </a>
+                                            <?php else: ?>
+                                            <a href="<?php echo home_url('/dang-ky-bao-tri/?website_id=' . $website->id); ?>" class="d-flex align-items-center nav-link text-success">
+                                                <i class="ph ph-plus-circle me-1 fa-120p"></i> Đăng ký bảo trì
+                                            </a>
+                                            <a href="<?php echo home_url('/dang-ky-bao-tri/?website_id=' . $website->id); ?>" class="d-flex align-items-center nav-link text-warning">
+                                                <i class="ph ph-info me-1 fa-120p"></i> Tìm hiểu thêm
+                                            </a>
                                             <?php endif; ?>
                                         <?php endif; ?>
                                     </td>
