@@ -104,6 +104,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
 
                 $notification = '<div class="alert alert-success" role="alert">Thêm domain mới thành công!</div>';
+                
+                // Auto-redirect to previous page or domain list after 1.5 seconds
+                $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
+                    ? esc_url($_POST['redirect_url']) 
+                    : home_url('/danh-sach-ten-mien/');
+                echo '<script>
+                    setTimeout(function() {
+                        window.location.href = "' . $redirect_url . '";
+                    }, 1500);
+                </script>';
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Đã xảy ra lỗi khi thêm domain. Vui lòng thử lại sau.</div>';
             }
@@ -151,6 +161,8 @@ get_header();
                     } else {
                     ?>
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
+                        <!-- Store previous page URL -->
+                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
                         <div class="row">
                             <!-- Domain Information Section -->
                             <div class="col-md-6">
@@ -411,6 +423,17 @@ function calculateExpiryDate() {
 
 // Attach event listeners - Use jQuery after it's loaded
 jQuery(document).ready(function($) {
+    // Set redirect URL from previous page stored in sessionStorage
+    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
+    if (previousUrl && previousUrl.includes(window.location.hostname)) {
+        document.getElementById('redirect_url').value = previousUrl;
+    }
+    
+    // Store current page in sessionStorage before leaving
+    $(document).on('click', 'a', function() {
+        sessionStorage.setItem('previousPageUrl', window.location.href);
+    });
+    
     const registrationDateField = document.getElementById('registration_date');
     const registrationPeriodField = document.getElementById('registration_period_years');
 

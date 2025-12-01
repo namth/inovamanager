@@ -127,6 +127,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     
                     // Reload hosting data after update
                     $hosting = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_name WHERE id = %d", $hosting_id));
+                    
+                    // Auto-redirect to previous page or hosting list after 1.5 seconds
+                    $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
+                        ? esc_url($_POST['redirect_url']) 
+                        : home_url('/danh-sach-hosting/');
+                    echo '<script>
+                        setTimeout(function() {
+                            window.location.href = "' . $redirect_url . '";
+                        }, 1500);
+                    </script>';
                 } else {
                     $notification = '<div class="alert alert-danger" role="alert">Không thể cập nhật hosting. Vui lòng thử lại.</div>';
                 }
@@ -237,6 +247,8 @@ get_header();
                     
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
                         <input type="hidden" name="owner_user_id" value="<?php echo $hosting->owner_user_id; ?>">
+                        <!-- Store previous page URL -->
+                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
                         
                         <div class="row">
                             <!-- Hosting Information Section -->
@@ -478,6 +490,17 @@ function calculateExpiryDate() {
 
 // Attach event listeners
 jQuery(document).ready(function($) {
+    // Set redirect URL from previous page stored in sessionStorage
+    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
+    if (previousUrl && previousUrl.includes(window.location.hostname)) {
+        document.getElementById('redirect_url').value = previousUrl;
+    }
+    
+    // Store current page in sessionStorage before leaving
+    $(document).on('click', 'a', function() {
+        sessionStorage.setItem('previousPageUrl', window.location.href);
+    });
+    
     const registrationDateField = document.getElementById('registration_date');
     const billingCycleField = document.getElementById('billing_cycle_months');
     

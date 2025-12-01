@@ -133,10 +133,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     );
                 }
 
-                // Redirect back to the referrer page after successful creation
-                $redirect_url = !empty($_POST['referrer_url']) ? esc_url_raw($_POST['referrer_url']) : home_url('/danh-sach-bao-tri/');
-                wp_redirect($redirect_url);
-                exit;
+                // Auto-redirect to previous page or maintenance list after 1.5 seconds
+                $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
+                    ? esc_url($_POST['redirect_url']) 
+                    : home_url('/danh-sach-bao-tri/');
+                echo '<script>
+                    setTimeout(function() {
+                        window.location.href = "' . $redirect_url . '";
+                    }, 1500);
+                </script>';
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Không thể thêm mới gói bảo trì. Vui lòng thử lại.</div>';
             }
@@ -225,6 +230,8 @@ print_r($wpdb->last_error); // For debugging, remove in production
                     ?>
                     <h3 class="card-title p-2 mb-3">Thông tin gói bảo trì</h3>
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
+                        <!-- Store previous page URL -->
+                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
                         <div class="row">
                             <!-- Maintenance Package Information Section -->
                             <div class="col-md-6">
@@ -438,6 +445,17 @@ print_r($wpdb->last_error); // For debugging, remove in production
 
 <script>
 jQuery(document).ready(function($) {
+    // Set redirect URL from previous page stored in sessionStorage
+    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
+    if (previousUrl && previousUrl.includes(window.location.hostname)) {
+        document.getElementById('redirect_url').value = previousUrl;
+    }
+    
+    // Store current page in sessionStorage before leaving
+    $(document).on('click', 'a', function() {
+        sessionStorage.setItem('previousPageUrl', window.location.href);
+    });
+    
     // Maintenance package calculations
     const monthlyFeeInput = document.getElementById('monthly_fee');
     const billingCycleSelect = document.getElementById('billing_cycle_months');
