@@ -63,6 +63,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         
         // Validate required fields
         if (!empty($owner_user_id) && !empty($monthly_fee) && !empty($renew_date)) {
+            // Auto-generate order_code if it's empty
+            if (empty($order_code)) {
+                // Get user code
+                $users_table = $wpdb->prefix . 'im_users';
+                $user_data = $wpdb->get_row($wpdb->prepare("SELECT user_code FROM $users_table WHERE id = %d", $owner_user_id));
+                
+                if ($user_data) {
+                    // Count total maintenance packages for this user (excluding current maintenance) + 1
+                    $maintenance_count = $wpdb->get_var($wpdb->prepare(
+                        "SELECT COUNT(*) FROM $table_name WHERE owner_user_id = %d AND id != %d", 
+                        $owner_user_id, $maintenance_id
+                    ));
+                    $next_number = $maintenance_count + 1;
+                    
+                    // Add random number (0-9) after $next_number to prevent code collision
+                    $random_digit = rand(0, 9);
+                    
+                    // Generate maintenance code: BT + [Count] + [Random Digit] + [User Code]
+                    $order_code = 'BT' . str_pad($next_number, 2, '0', STR_PAD_LEFT) . $random_digit . $user_data->user_code;
+                }
+            }
+            
             $update_result = $wpdb->update(
                 $table_name,
                 array(
@@ -230,7 +252,6 @@ get_header();
                     ?>
                     <h3 class="card-title p-2 mb-3">Thông tin gói bảo trì</h3>
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
-                        <input type="hidden" name="owner_user_id" value="<?php echo $maintenance->owner_user_id; ?>">
                         <!-- Store previous page URL -->
                         <input type="hidden" name="redirect_url" id="redirect_url" value="">
                         
@@ -246,10 +267,29 @@ get_header();
                                     </div>
                                     <div class="card-body">
                                         <div class="form-group mb-3">
+                                            <label class="fw-bold">Khách hàng <span class="text-danger">*</span></label>
+                                            <select class="js-example-basic-single w-100" name="owner_user_id" id="owner_user_id" required>
+                                                <option value="">-- Chọn khách hàng --</option>
+                                                <?php
+                                                $users_table = $wpdb->prefix . 'im_users';
+                                                $users = $wpdb->get_results("SELECT * FROM $users_table WHERE status = 'ACTIVE'");
+                                                foreach ($users as $user_option) {
+                                                    $user_label = $user_option->name;
+                                                    if (!empty($user_option->company_name)) {
+                                                        $user_label .= ' (' . $user_option->company_name . ')';
+                                                    }
+                                                    $selected = ($user_option->id == $maintenance->owner_user_id) ? 'selected' : '';
+                                                    echo '<option value="' . $user_option->id . '" ' . $selected . '>' . $user_option->user_code . ' - ' . $user_label . '</option>';
+                                                }
+                                                ?>
+                                            </select>
+                                        </div>
+                                        
+                                        <div class="form-group mb-3">
                                             <label for="order_code" class="fw-bold">Mã gói bảo trì</label>
                                             <input type="text" class="form-control" id="order_code" name="order_code" 
                                                    placeholder="Mã gói bảo trì" value="<?php echo esc_attr($maintenance->order_code); ?>">
-                                            <small class="form-text text-muted">Mã định danh gói bảo trì</small>
+                                            <small class="form-text text-muted">Để trống để tự động tạo mã dựa trên khách hàng mới</small>
                                         </div>
                                         
                                         <div class="form-group mb-3">

@@ -95,9 +95,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     );
                 }
                 
-                // Redirect to website list after successful creation
-                wp_redirect(home_url('/list-website/'));
-                exit;
+                // Auto-redirect to previous page or website list after 1.5 seconds
+                $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
+                    ? esc_url($_POST['redirect_url']) 
+                    : home_url('/list-website/');
+                echo '<script>
+                    setTimeout(function() {
+                        window.location.href = "' . $redirect_url . '";
+                    }, 1500);
+                </script>';
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Đã có lỗi xảy ra khi thêm mới website. Vui lòng thử lại.</div>';
             }
@@ -129,6 +135,8 @@ get_header();
                     }
                     ?>
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
+                        <!-- Store previous page URL -->
+                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
                         <div class="row">
                             <!-- Website Information Section -->
                             <div class="col-md-6">
@@ -345,6 +353,17 @@ get_footer();
 
 <script>
 $(document).ready(function() {
+    // Set redirect URL from previous page stored in sessionStorage
+    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
+    if (previousUrl && previousUrl.includes(window.location.hostname)) {
+        document.getElementById('redirect_url').value = previousUrl;
+    }
+    
+    // Store current page in sessionStorage before leaving
+    $(document).on('click', 'a', function() {
+        sessionStorage.setItem('previousPageUrl', window.location.href);
+    });
+    
     // Store all original options for filtering - Load all options regardless of pre-selection
     var allDomains = $('<select>');
     <?php

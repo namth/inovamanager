@@ -88,8 +88,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         ));
                         $next_number = $hosting_count + 1;
                         
-                        // Generate hosting code: [Product Code][Count with padding][User Code]
-                        $hosting_code = $product->code . str_pad($next_number, 2, '0', STR_PAD_LEFT) . $user_data->user_code;
+                        // Add random number (0-9) after $next_number to prevent code collision
+                        $random_digit = rand(0, 9);
+                        
+                        // Generate hosting code: [Product Code][Count with padding][Random Digit][User Code]
+                        $hosting_code = $product->code . str_pad($next_number, 2, '0', STR_PAD_LEFT) . $random_digit . $user_data->user_code;
                     }
                 }
                 
@@ -246,7 +249,6 @@ get_header();
                     <?php endif; ?>
                     
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
-                        <input type="hidden" name="owner_user_id" value="<?php echo $hosting->owner_user_id; ?>">
                         <!-- Store previous page URL -->
                         <input type="hidden" name="redirect_url" id="redirect_url" value="">
                         
@@ -262,10 +264,29 @@ get_header();
                                     </div>
                                     <div class="card-body">
                                         <div class="form-group mb-3">
+                                            <label class="fw-bold">Chủ sở hữu <span class="text-danger">*</span></label>
+                                            <select class="js-example-basic-single w-100" name="owner_user_id" id="owner_user_id" required>
+                                                <option value="">-- Chọn chủ sở hữu --</option>
+                                                <?php
+                                                $users_table = $wpdb->prefix . 'im_users';
+                                                $users = $wpdb->get_results("SELECT * FROM $users_table ORDER BY name");
+                                                foreach ($users as $user_option) {
+                                                    $user_label = $user_option->name;
+                                                    if (!empty($user_option->company_name)) {
+                                                        $user_label .= ' (' . $user_option->company_name . ')';
+                                                    }
+                                                    $selected = ($user_option->id == $hosting->owner_user_id) ? 'selected' : '';
+                                                    echo '<option value="' . $user_option->id . '" ' . $selected . '>' . $user_option->user_code . ' - ' . $user_label . '</option>';
+                                                }
+                                                ?>
+                                            </select>
+                                        </div>
+                                        
+                                        <div class="form-group mb-3">
                                             <label for="hosting_code" class="fw-bold">Mã hosting</label>
                                             <input type="text" class="form-control" id="hosting_code" name="hosting_code" 
                                                    placeholder="HOST001" value="<?php echo esc_attr($hosting->hosting_code); ?>">
-                                            <small class="form-text text-muted">Để trống để tự động tạo mã</small>
+                                            <small class="form-text text-muted">Để trống để tự động tạo mã dựa trên chủ sở hữu mới</small>
                                         </div>
                                         
                                         <div class="form-group mb-3">

@@ -94,8 +94,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     ));
                     $next_number = $maintenance_count + 1;
                     
-                    // Generate maintenance code: BT + [Count] + [User Code]
-                    $order_code = 'BT' . str_pad($next_number, 2, '0', STR_PAD_LEFT) . $user_data->user_code;
+                    // Add random number (0-9) after $next_number to prevent code collision
+                    $random_digit = rand(0, 9);
+                    
+                    // Generate maintenance code: BT + [Count] + [Random Digit] + [User Code]
+                    $order_code = 'BT' . str_pad($next_number, 2, '0', STR_PAD_LEFT) . $random_digit . $user_data->user_code;
                 }
             }
             $wpdb->insert(
