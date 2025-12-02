@@ -10,6 +10,16 @@ $current_user_id = get_current_user_id();
 // Get maintenance ID from URL
 $maintenance_id = isset($_GET['maintenance_id']) ? intval($_GET['maintenance_id']) : 0;
 
+// Get redirect URL from HTTP_REFERER
+$redirect_url = '';
+if (!empty($_SERVER['HTTP_REFERER'])) {
+    $referer = esc_url($_SERVER['HTTP_REFERER']);
+    // Validate that referer is from same domain
+    if (strpos($referer, home_url()) === 0) {
+        $redirect_url = $referer;
+    }
+}
+
 // Redirect if no maintenance ID provided
 if (!$maintenance_id) {
     wp_redirect(home_url('/danh-sach-goi-bao-tri/'));
@@ -253,7 +263,7 @@ get_header();
                     <h3 class="card-title p-2 mb-3">Thông tin gói bảo trì</h3>
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
                         <!-- Store previous page URL -->
-                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
+                        <input type="hidden" name="redirect_url" id="redirect_url" value="<?php echo $redirect_url; ?>">
                         
                         <div class="row">
                             <!-- Maintenance Package Information Section -->
@@ -454,16 +464,6 @@ get_header();
 
 <script>
 jQuery(document).ready(function($) {
-    // Set redirect URL from previous page stored in sessionStorage
-    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
-    if (previousUrl && previousUrl.includes(window.location.hostname)) {
-        document.getElementById('redirect_url').value = previousUrl;
-    }
-    
-    // Store current page in sessionStorage before leaving
-    $(document).on('click', 'a', function() {
-        sessionStorage.setItem('previousPageUrl', window.location.href);
-    });
     
     // Maintenance package calculations
     const monthlyFeeInput = document.getElementById('monthly_fee');

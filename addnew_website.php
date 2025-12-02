@@ -19,6 +19,16 @@ $pre_selected_domain_id = isset($_GET['domain_id']) ? intval($_GET['domain_id'])
 $pre_selected_hosting_id = isset($_GET['hosting_id']) ? intval($_GET['hosting_id']) : 0;
 $pre_selected_maintenance_id = isset($_GET['maintenance_id']) ? intval($_GET['maintenance_id']) : 0;
 
+// Get redirect URL from HTTP_REFERER
+$redirect_url = '';
+if (!empty($_SERVER['HTTP_REFERER'])) {
+    $referer = esc_url($_SERVER['HTTP_REFERER']);
+    // Validate that referer is from same domain
+    if (strpos($referer, home_url()) === 0) {
+        $redirect_url = $referer;
+    }
+}
+
 // Get owner_user_id from the pre-selected items
 $pre_selected_owner_id = 0;
 if ($pre_selected_domain_id) {
@@ -136,7 +146,7 @@ get_header();
                     ?>
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
                         <!-- Store previous page URL -->
-                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
+                        <input type="hidden" name="redirect_url" id="redirect_url" value="<?php echo $redirect_url; ?>">
                         <div class="row">
                             <!-- Website Information Section -->
                             <div class="col-md-6">
@@ -353,17 +363,6 @@ get_footer();
 
 <script>
 $(document).ready(function() {
-    // Set redirect URL from previous page stored in sessionStorage
-    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
-    if (previousUrl && previousUrl.includes(window.location.hostname)) {
-        document.getElementById('redirect_url').value = previousUrl;
-    }
-    
-    // Store current page in sessionStorage before leaving
-    $(document).on('click', 'a', function() {
-        sessionStorage.setItem('previousPageUrl', window.location.href);
-    });
-    
     // Store all original options for filtering - Load all options regardless of pre-selection
     var allDomains = $('<select>');
     <?php

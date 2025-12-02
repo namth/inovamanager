@@ -10,6 +10,16 @@ $current_user_id = get_current_user_id();
 // Get hosting ID from URL
 $hosting_id = isset($_GET['hosting_id']) ? intval($_GET['hosting_id']) : 0;
 
+// Get redirect URL from HTTP_REFERER
+$redirect_url = '';
+if (!empty($_SERVER['HTTP_REFERER'])) {
+    $referer = esc_url($_SERVER['HTTP_REFERER']);
+    // Validate that referer is from same domain
+    if (strpos($referer, home_url()) === 0) {
+        $redirect_url = $referer;
+    }
+}
+
 // Redirect if no hosting ID provided
 if (!$hosting_id) {
     wp_redirect(home_url('/danh-sach-hosting/'));
@@ -250,7 +260,7 @@ get_header();
                     
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
                         <!-- Store previous page URL -->
-                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
+                        <input type="hidden" name="redirect_url" id="redirect_url" value="<?php echo $redirect_url; ?>">
                         
                         <div class="row">
                             <!-- Hosting Information Section -->
@@ -511,17 +521,6 @@ function calculateExpiryDate() {
 
 // Attach event listeners
 jQuery(document).ready(function($) {
-    // Set redirect URL from previous page stored in sessionStorage
-    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
-    if (previousUrl && previousUrl.includes(window.location.hostname)) {
-        document.getElementById('redirect_url').value = previousUrl;
-    }
-    
-    // Store current page in sessionStorage before leaving
-    $(document).on('click', 'a', function() {
-        sessionStorage.setItem('previousPageUrl', window.location.href);
-    });
-    
     const registrationDateField = document.getElementById('registration_date');
     const billingCycleField = document.getElementById('billing_cycle_months');
     

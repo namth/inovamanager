@@ -10,6 +10,16 @@ $current_user_id = get_current_user_id();
 
 $inova_user_id = get_user_inova_id($current_user_id);
 
+// Get redirect URL from HTTP_REFERER
+$redirect_url = '';
+if (!empty($_SERVER['HTTP_REFERER'])) {
+    $referer = esc_url($_SERVER['HTTP_REFERER']);
+    // Validate that referer is from same domain
+    if (strpos($referer, home_url()) === 0) {
+        $redirect_url = $referer;
+    }
+}
+
 /* 
  * Process data when form is submitted
  */
@@ -86,7 +96,7 @@ get_header();
                     ?>
                     <form class="forms-sample col-md-7 col-lg-8 col-12 d-flex flex-column" action="" method="post">
                         <!-- Store previous page URL -->
-                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
+                        <input type="hidden" name="redirect_url" id="redirect_url" value="<?php echo $redirect_url; ?>">
                         <div class="card mb-4">
                             <div class="card-header btn-primary">
                                 <h5 class="mb-1 mt-1">
@@ -161,16 +171,6 @@ get_header();
 
 <script>
 jQuery(document).ready(function($) {
-    // Set redirect URL from previous page stored in sessionStorage
-    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
-    if (previousUrl && previousUrl.includes(window.location.hostname)) {
-        document.getElementById('redirect_url').value = previousUrl;
-    }
-    
-    // Store current page in sessionStorage before leaving
-    $(document).on('click', 'a', function() {
-        sessionStorage.setItem('previousPageUrl', window.location.href);
-    });
 });
 </script>
 

@@ -780,7 +780,12 @@ get_header();
                     </div>
                 </div>
 
-                <!-- Copy Invoice Link Box -->
+                <?php
+                    endif;
+                endif;
+                ?>
+
+                <!-- Copy Invoice Link Box - Always visible regardless of status -->
                 <div class="card mb-4">
                     <div class="card-body">
                         <h6 class="card-title">
@@ -808,10 +813,6 @@ get_header();
                         </small>
                     </div>
                 </div>
-                <?php
-                    endif;
-                endif;
-                ?>
 
                 <?php if (!empty($related_invoices)): ?>
                 <div class="card mb-4">

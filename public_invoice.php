@@ -528,11 +528,11 @@ get_header('nologin');
                 }
             ?>
              <div class="items-section">
-                 <h3 class="text-muted"><i class="ph ph-list me-2"></i>Danh sách dịch vụ <?php echo $product_type_labels[$product_type] ?? $product_type; ?></h3>
+                 <h3 class="text-muted"><i class="ph ph-list me-2"></i>Danh sách <?php echo $product_type_labels[$product_type] ?? $product_type; ?></h3>
                 <table class="items-table">
                      <thead>
                          <tr>
-                             <th>Dịch vụ</th>
+                             <th>Tên sản phẩm/dịch vụ</th>
                              <?php if ($product_type !== 'website_service'): ?>
                              <th class="text-center">Ngày hết hạn</th>
                              <th class="text-center">Gia hạn đến</th>
