@@ -2983,6 +2983,15 @@ function auto_create_renewal_invoices_callback() {
             $vat_rate = get_vat_rate_for_service('Domain');
             $vat_amount = calculate_vat_amount($item_total, $vat_rate);
             
+            // Determine start_date and end_date based on status
+            if ($domain->status === 'NEW') {
+                $start_date = $domain->registration_date;
+                $end_date = $domain->expiry_date;
+            } else {
+                $start_date = $domain->expiry_date;
+                $end_date = date('Y-m-d', strtotime($domain->expiry_date . ' +1 year'));
+            }
+            
             $items[] = array(
                 'service_type' => 'domain',
                 'service_id' => $domain->id,
@@ -2992,8 +3001,8 @@ function auto_create_renewal_invoices_callback() {
                 'item_total' => $item_total,
                 'vat_rate' => $vat_rate,
                 'vat_amount' => $vat_amount,
-                'start_date' => $domain->expiry_date,
-                'end_date' => date('Y-m-d', strtotime($domain->expiry_date . ' +1 year'))
+                'start_date' => $start_date,
+                'end_date' => $end_date
             );
         }
 
@@ -3008,6 +3017,15 @@ function auto_create_renewal_invoices_callback() {
             $vat_rate = get_vat_rate_for_service('Hosting');
             $vat_amount = calculate_vat_amount($item_total, $vat_rate);
             
+            // Determine start_date and end_date based on status
+            if ($hosting->status === 'NEW') {
+                $start_date = $hosting->registration_date;
+                $end_date = $hosting->expiry_date;
+            } else {
+                $start_date = $hosting->expiry_date;
+                $end_date = date('Y-m-d', strtotime($hosting->expiry_date . ' +1 year'));
+            }
+            
             $items[] = array(
                 'service_type' => 'hosting',
                 'service_id' => $hosting->id,
@@ -3017,8 +3035,8 @@ function auto_create_renewal_invoices_callback() {
                 'item_total' => $item_total,
                 'vat_rate' => $vat_rate,
                 'vat_amount' => $vat_amount,
-                'start_date' => $hosting->expiry_date,
-                'end_date' => date('Y-m-d', strtotime($hosting->expiry_date . ' +1 year'))
+                'start_date' => $start_date,
+                'end_date' => $end_date
             );
         }
 
@@ -3034,6 +3052,15 @@ function auto_create_renewal_invoices_callback() {
             $vat_rate = get_vat_rate_for_service('Maintenance');
             $vat_amount = calculate_vat_amount($item_total, $vat_rate);
             
+            // Determine start_date and end_date based on status
+            if ($maintenance->status === 'NEW') {
+                $start_date = $maintenance->registration_date;
+                $end_date = $maintenance->expiry_date;
+            } else {
+                $start_date = $maintenance->expiry_date;
+                $end_date = date('Y-m-d', strtotime($maintenance->expiry_date . ' +' . $months . ' months'));
+            }
+            
             $items[] = array(
                 'service_type' => 'maintenance',
                 'service_id' => $maintenance->id,
@@ -3043,8 +3070,8 @@ function auto_create_renewal_invoices_callback() {
                 'item_total' => $item_total,
                 'vat_rate' => $vat_rate,
                 'vat_amount' => $vat_amount,
-                'start_date' => $maintenance->expiry_date,
-                'end_date' => date('Y-m-d', strtotime($maintenance->expiry_date . ' +' . $months . ' months'))
+                'start_date' => $start_date,
+                'end_date' => $end_date
             );
         }
 
@@ -3446,7 +3473,15 @@ function api_create_bulk_invoice($request) {
 
                 if ($domain) {
                     $price = $domain->renew_price ? $domain->renew_price : 0;
-                    $new_expiry = date('Y-m-d', strtotime($domain->expiry_date . ' +1 year'));
+                    
+                    // Determine start_date and end_date based on status
+                    if ($domain->status === 'NEW') {
+                        $start_date = $domain->registration_date;
+                        $end_date = $domain->expiry_date;
+                    } else {
+                        $start_date = $domain->expiry_date;
+                        $end_date = date('Y-m-d', strtotime($domain->expiry_date . ' +1 year'));
+                    }
 
                     $item_data = [
                         'service_type' => 'domain',
@@ -3455,8 +3490,8 @@ function api_create_bulk_invoice($request) {
                         'unit_price' => $price,
                         'quantity' => $quantity,
                         'item_total' => $price * $quantity,
-                        'start_date' => $domain->expiry_date,
-                        'end_date' => $new_expiry
+                        'start_date' => $start_date,
+                        'end_date' => $end_date
                     ];
                 }
                 break;
@@ -3472,7 +3507,15 @@ function api_create_bulk_invoice($request) {
                 if ($hosting) {
                     $price = $hosting->renew_price ? $hosting->renew_price : $hosting->price;
                     $months = $hosting->billing_cycle_months;
-                    $new_expiry = date('Y-m-d', strtotime($hosting->expiry_date . " +{$months} months"));
+                    
+                    // Determine start_date and end_date based on status
+                    if ($hosting->status === 'NEW') {
+                        $start_date = $hosting->registration_date;
+                        $end_date = $hosting->expiry_date;
+                    } else {
+                        $start_date = $hosting->expiry_date;
+                        $end_date = date('Y-m-d', strtotime($hosting->expiry_date . " +{$months} months"));
+                    }
 
                     $item_data = [
                         'service_type' => 'hosting',
@@ -3481,8 +3524,8 @@ function api_create_bulk_invoice($request) {
                         'unit_price' => $price,
                         'quantity' => $quantity,
                         'item_total' => $price * $quantity,
-                        'start_date' => $hosting->expiry_date,
-                        'end_date' => $new_expiry
+                        'start_date' => $start_date,
+                        'end_date' => $end_date
                     ];
                 }
                 break;
@@ -3495,7 +3538,15 @@ function api_create_bulk_invoice($request) {
                 if ($maintenance) {
                     $price = $maintenance->price_per_cycle;
                     $months = $maintenance->billing_cycle_months;
-                    $new_expiry = date('Y-m-d', strtotime($maintenance->expiry_date . " +{$months} months"));
+                    
+                    // Determine start_date and end_date based on status
+                    if ($maintenance->status === 'NEW') {
+                        $start_date = $maintenance->registration_date;
+                        $end_date = $maintenance->expiry_date;
+                    } else {
+                        $start_date = $maintenance->expiry_date;
+                        $end_date = date('Y-m-d', strtotime($maintenance->expiry_date . " +{$months} months"));
+                    }
 
                     $item_data = [
                         'service_type' => 'maintenance',
@@ -3504,8 +3555,8 @@ function api_create_bulk_invoice($request) {
                         'unit_price' => $price,
                         'quantity' => $quantity,
                         'item_total' => $price * $quantity,
-                        'start_date' => $maintenance->expiry_date,
-                        'end_date' => $new_expiry
+                        'start_date' => $start_date,
+                        'end_date' => $end_date
                     ];
                 }
                 break;
@@ -5824,6 +5875,15 @@ function build_renewal_products($items_data, $type) {
             $service_name = $item->title ?? $item->service_code;
         }
         
+        // Determine start_date and end_date based on status
+        if (isset($item->status) && $item->status === 'NEW') {
+            $start_date = $item->registration_date ?? $expiry_date;
+            $end_date = $expiry_date;
+        } else {
+            $start_date = $expiry_date;
+            $end_date = calculate_end_date($expiry_date, $period, $type === 'domain' ? 'years' : 'months');
+        }
+        
         $renewal_products[] = [
             'type' => $type,
             'id' => $item->id,
@@ -5836,8 +5896,8 @@ function build_renewal_products($items_data, $type) {
             'expiry_date' => $expiry_date,
             'website_name' => $website_name,
             'description' => build_service_description($type, $service_name, $product_name, $period),
-            'start_date' => $expiry_date,
-            'end_date' => calculate_end_date($expiry_date, $period, $type === 'domain' ? 'years' : 'months'),
+            'start_date' => $start_date,
+            'end_date' => $end_date,
             'discount_amount' => floatval($item->discount_amount ?? 0),
             'partner_id' => intval($item->partner_id ?? 0)
         ];

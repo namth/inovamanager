@@ -12,14 +12,14 @@ $user_id = $_GET['user_id'] ?? 0;
 // Get website ID from URL if provided
 $website_id = $_GET['website_id'] ?? 0;
 
-// Store referrer URL for redirect after submit
-$referrer_url = isset($_GET['referrer']) ? esc_url_raw($_GET['referrer']) : '';
-if (empty($referrer_url) && isset($_SERVER['HTTP_REFERER'])) {
-    $referrer_url = esc_url_raw($_SERVER['HTTP_REFERER']);
-}
-// Default to maintenance list if no referrer
-if (empty($referrer_url)) {
-    $referrer_url = home_url('/danh-sach-bao-tri/');
+// Get redirect URL from HTTP_REFERER
+$redirect_url = '';
+if (!empty($_SERVER['HTTP_REFERER'])) {
+    $referer = esc_url($_SERVER['HTTP_REFERER']);
+    // Validate that referer is from same domain
+    if (strpos($referer, home_url()) === 0) {
+        $redirect_url = $referer;
+    }
 }
 
 // If user ID is provided, get user data
@@ -136,13 +136,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     );
                 }
 
+                $notification = '<div class="alert alert-success" role="alert">Thêm gói bảo trì mới thành công!</div>';
+                
                 // Auto-redirect to previous page or maintenance list after 1.5 seconds
-                $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
+                $final_redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
                     ? esc_url($_POST['redirect_url']) 
                     : home_url('/danh-sach-bao-tri/');
                 echo '<script>
                     setTimeout(function() {
-                        window.location.href = "' . $redirect_url . '";
+                        window.location.href = "' . $final_redirect_url . '";
                     }, 1500);
                 </script>';
             } else {
@@ -164,7 +166,7 @@ print_r($wpdb->last_error); // For debugging, remove in production
         <div class="col-lg-12" id="relative">
             <div class="d-flex justify-content-between align-items-center mb-3 flex-column">
                 <!-- Add back button in the left side -->
-                <a href="<?php echo esc_url($referrer_url); ?>" class="abs-top-left nav-link">
+                <a href="<?php echo $user_id ? home_url('/user-detail/?user_id=') . $user_id : home_url('/danh-sach-bao-tri/'); ?>" class="abs-top-left nav-link">
                     <i class="ph ph-arrow-bend-up-left btn-icon-prepend fa-150p"></i>
                 </a>
                 <div class="justify-content-center">
@@ -233,8 +235,8 @@ print_r($wpdb->last_error); // For debugging, remove in production
                     ?>
                     <h3 class="card-title p-2 mb-3">Thông tin gói bảo trì</h3>
                     <form class="forms-sample col-md-8 col-lg-10 d-flex flex-column" action="" method="post">
-                        <!-- Store previous page URL -->
-                        <input type="hidden" name="redirect_url" id="redirect_url" value="">
+                         <!-- Store previous page URL -->
+                         <input type="hidden" name="redirect_url" id="redirect_url" value="<?php echo $redirect_url; ?>">
                         <div class="row">
                             <!-- Maintenance Package Information Section -->
                             <div class="col-md-6">
@@ -424,9 +426,8 @@ print_r($wpdb->last_error); // For debugging, remove in production
                         <input type="hidden" id="total_months_registered" name="total_months_registered" value="1">
 
                         <?php
-                        wp_nonce_field('post_maintenance', 'post_maintenance_field');
-                        ?>
-                        <input type="hidden" name="referrer_url" value="<?php echo esc_attr($referrer_url); ?>">
+                         wp_nonce_field('post_maintenance', 'post_maintenance_field');
+                         ?>
                         <div class="form-group d-flex justify-content-center mt-3">
                             <button type="submit"
                                 class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
@@ -448,17 +449,6 @@ print_r($wpdb->last_error); // For debugging, remove in production
 
 <script>
 jQuery(document).ready(function($) {
-    // Set redirect URL from previous page stored in sessionStorage
-    const previousUrl = sessionStorage.getItem('previousPageUrl') || document.referrer;
-    if (previousUrl && previousUrl.includes(window.location.hostname)) {
-        document.getElementById('redirect_url').value = previousUrl;
-    }
-    
-    // Store current page in sessionStorage before leaving
-    $(document).on('click', 'a', function() {
-        sessionStorage.setItem('previousPageUrl', window.location.href);
-    });
-    
     // Maintenance package calculations
     const monthlyFeeInput = document.getElementById('monthly_fee');
     const billingCycleSelect = document.getElementById('billing_cycle_months');

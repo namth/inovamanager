@@ -186,10 +186,4 @@ tr:last-child td:last-child {
 .bg-light-danger {
     background: #f95e521f;
 }
-.form-check .form-check-input {
-    margin-top: 0;
-    margin-left: 3px;
-}
-.form-check .form-check-label {
-    margin-left: 12px;
-}
+
