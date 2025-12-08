@@ -722,13 +722,20 @@ get_header();
                 );
 
                 if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
-                     // Calculate remaining amount based on requires_vat_invoice
+                     // Calculate final total (same logic as main totals section)
                      if ($invoice->requires_vat_invoice) {
-                         $invoice_total = $invoice->total_amount;
+                         $qr_final_total = $invoice->total_amount;
                      } else {
-                         $invoice_total = $invoice->sub_total - $invoice->discount_total;
+                         $qr_final_total = $invoice->sub_total - $invoice->discount_total;
                      }
-                     $remaining_amount = $invoice_total - $invoice->paid_amount;
+                     
+                     // Apply commission deduction if pending
+                     if ($invoice->status === 'pending') {
+                         $qr_final_total -= $total_commission_deduction;
+                     }
+                     
+                     // Calculate remaining amount after paid amount
+                     $remaining_amount = $qr_final_total - $invoice->paid_amount;
 
                      // Generate QR code with invoice code as reference
                      // Pass requires_vat_invoice to select appropriate bank account
@@ -763,9 +770,7 @@ get_header();
                                 <tr>
                                     <td class="text-muted"><small>Số tiền:</small></td>
                                     <td><strong><small><?php 
-                                        // QR amount should be the final total without VAT if requires_vat_invoice=0
-                                        $qr_amount = $remaining_amount - $total_commission_deduction;
-                                        echo number_format(max(0, $qr_amount)); 
+                                        echo number_format(max(0, $remaining_amount)); 
                                     ?> VNĐ</small></strong></td>
                                 </tr>
                             </table>
