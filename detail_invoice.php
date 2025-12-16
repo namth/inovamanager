@@ -359,6 +359,20 @@ $related_invoices = $wpdb->get_results($wpdb->prepare("
     ORDER BY i2.created_at
 ", $invoice_id, $invoice_id));
 
+// Calculate final total once (used in both totals display and QR code)
+if ($invoice->requires_vat_invoice) {
+    // With VAT: total_amount already includes tax
+    $final_total = $invoice->total_amount;
+} else {
+    // Without VAT: total should be sub_total - discount
+    $final_total = $invoice->sub_total - $invoice->discount_total;
+}
+
+// Apply commission deduction if pending
+if ($invoice->status === 'pending') {
+    $final_total -= $total_commission_deduction;
+}
+
 // Get status options and colors
 $status_options = array(
     'draft' => 'Nháp',
@@ -665,18 +679,6 @@ get_header();
                                      <tr class="table-primary">
                                      <td><strong>Tổng cộng:</strong></td>
                                      <td class="text-end"><strong><?php 
-                                     // Calculate final total based on requires_vat_invoice
-                                     if ($invoice->requires_vat_invoice) {
-                                     // With VAT: total_amount already includes tax
-                                     $final_total = $invoice->total_amount;
-                                     } else {
-                                     // Without VAT: total should be sub_total - discount
-                                     $final_total = $invoice->sub_total - $invoice->discount_total;
-                                     }
-                                     
-                                     if ($invoice->status === 'pending') {
-                                     $final_total -= $total_commission_deduction;
-                                     }
                                      echo number_format($final_total); 
                                      ?> VNĐ</strong></td>
                                      </tr>
@@ -722,20 +724,8 @@ get_header();
                 );
 
                 if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
-                     // Calculate final total (same logic as main totals section)
-                     if ($invoice->requires_vat_invoice) {
-                         $qr_final_total = $invoice->total_amount;
-                     } else {
-                         $qr_final_total = $invoice->sub_total - $invoice->discount_total;
-                     }
-                     
-                     // Apply commission deduction if pending
-                     if ($invoice->status === 'pending') {
-                         $qr_final_total -= $total_commission_deduction;
-                     }
-                     
                      // Calculate remaining amount after paid amount
-                     $remaining_amount = $qr_final_total - $invoice->paid_amount;
+                     $remaining_amount = $final_total - $invoice->paid_amount;
 
                      // Generate QR code with invoice code as reference
                      // Pass requires_vat_invoice to select appropriate bank account
