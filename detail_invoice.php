@@ -282,9 +282,10 @@ if (!$invoice) {
 }
 
 // Check user permission - only admin/manager can edit invoice
+// Note: $invoice->user_id is INOVA user ID (from im_users table), not WordPress ID
 $can_edit_invoice = current_user_can('manage_options') || 
                     current_user_can('edit_users') || 
-                    (is_user_logged_in() && get_current_user_id() == $invoice->user_id && current_user_can('manage_own_invoice'));
+                    (is_user_logged_in() && get_user_inova_id() == $invoice->user_id && current_user_can('manage_own_invoice'));
 
 
 // Get invoice items with service details and website names
@@ -1186,6 +1187,8 @@ jQuery(document).ready(function($) {
             },
             success: function(response) {
                 $('#mergeLoadingSpinner').addClass('d-none');
+                console.log('Merge invoices response:', response);
+                console.log('Invoice count:', response.data ? response.data.invoices.length : 0);
                 
                 if (response.success && response.data.invoices.length > 0) {
                     var listHtml = '';

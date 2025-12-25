@@ -6471,17 +6471,38 @@ function load_merge_invoices_callback() {
     global $wpdb;
     
     $invoice_id = intval($_POST['invoice_id']);
-    $customer_id = intval($_POST['customer_id']);
+    $inova_customer_id = intval($_POST['customer_id']); // This is INOVA user ID from im_users table
     
     $invoice_table = $wpdb->prefix . 'im_invoices';
     
-    if ($invoice_id <= 0 || $customer_id <= 0) {
+    if ($invoice_id <= 0 || $inova_customer_id <= 0) {
+        error_log('Load merge invoices - Invalid params: invoice_id=' . $invoice_id . ', customer_id=' . $inova_customer_id);
         wp_send_json_error(['message' => 'Thông tin không hợp lệ']);
         return;
     }
     
+    // Verify invoice exists and belongs to this customer
+    $invoice = $wpdb->get_row($wpdb->prepare("
+        SELECT id, user_id, status 
+        FROM $invoice_table 
+        WHERE id = %d
+    ", $invoice_id));
+    
+    if (!$invoice) {
+        error_log('Load merge invoices - Invoice not found: ' . $invoice_id);
+        wp_send_json_error(['message' => 'Hóa đơn không tồn tại']);
+        return;
+    }
+    
+    if ($invoice->user_id != $inova_customer_id) {
+        error_log('Load merge invoices - Customer mismatch: invoice customer=' . $invoice->user_id . ', requested=' . $inova_customer_id);
+        wp_send_json_error(['message' => 'Hóa đơn không thuộc khách hàng này']);
+        return;
+    }
+    
     // Get all pending invoices for the same customer, excluding current invoice
-    $invoices = $wpdb->get_results($wpdb->prepare("
+    // user_id in im_invoices is the INOVA user ID (from im_users table)
+    $query = $wpdb->prepare("
         SELECT 
             id,
             invoice_code,
@@ -6493,7 +6514,18 @@ function load_merge_invoices_callback() {
         AND id != %d
         AND status = 'pending'
         ORDER BY created_at DESC
-    ", $customer_id, $invoice_id));
+    ", $inova_customer_id, $invoice_id);
+    
+    error_log('Load merge invoices - Query for customer (Inova ID): ' . $inova_customer_id . ', excluding invoice: ' . $invoice_id);
+    
+    $invoices = $wpdb->get_results($query);
+    
+    error_log('Load merge invoices - Found: ' . count($invoices) . ' pending invoices');
+    if (count($invoices) > 0) {
+        foreach ($invoices as $inv) {
+            error_log('  - Invoice: ' . $inv->invoice_code . ' (ID: ' . $inv->id . ', Amount: ' . $inv->total_amount . ')');
+        }
+    }
     
     if (!empty($invoices)) {
         wp_send_json_success([
