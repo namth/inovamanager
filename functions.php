@@ -6459,3 +6459,165 @@ function register_maintenance_package_callback() {
         wp_send_json_error(['message' => 'Có lỗi xảy ra khi gửi email. Vui lòng thử lại.']);
     }
 }
+
+/**
+ * Load pending invoices for merging
+ * Returns list of pending invoices for same customer
+ */
+add_action('wp_ajax_load_merge_invoices', 'load_merge_invoices_callback');
+add_action('wp_ajax_nopriv_load_merge_invoices', 'load_merge_invoices_callback');
+
+function load_merge_invoices_callback() {
+    global $wpdb;
+    
+    $invoice_id = intval($_POST['invoice_id']);
+    $customer_id = intval($_POST['customer_id']);
+    
+    $invoice_table = $wpdb->prefix . 'im_invoices';
+    
+    if ($invoice_id <= 0 || $customer_id <= 0) {
+        wp_send_json_error(['message' => 'Thông tin không hợp lệ']);
+        return;
+    }
+    
+    // Get all pending invoices for the same customer, excluding current invoice
+    $invoices = $wpdb->get_results($wpdb->prepare("
+        SELECT 
+            id,
+            invoice_code,
+            total_amount,
+            DATE_FORMAT(created_at, '%d/%m/%Y %H:%i') as created_at,
+            status
+        FROM $invoice_table
+        WHERE user_id = %d
+        AND id != %d
+        AND status = 'pending'
+        ORDER BY created_at DESC
+    ", $customer_id, $invoice_id));
+    
+    if (!empty($invoices)) {
+        wp_send_json_success([
+            'invoices' => $invoices,
+            'count' => count($invoices)
+        ]);
+    } else {
+        wp_send_json_success([
+            'invoices' => [],
+            'count' => 0
+        ]);
+    }
+}
+
+/**
+ * Merge multiple invoices into one
+ * Moves invoice items from source invoices to target invoice
+ * Updates im_partner_commissions and deletes source invoices
+ */
+add_action('wp_ajax_merge_invoices', 'merge_invoices_callback');
+add_action('wp_ajax_nopriv_merge_invoices', 'merge_invoices_callback');
+
+function merge_invoices_callback() {
+    global $wpdb;
+    
+    $target_invoice_id = intval($_POST['target_invoice_id']);
+    $source_invoice_ids = array_map('intval', (array) $_POST['source_invoice_ids']);
+    
+    if ($target_invoice_id <= 0 || empty($source_invoice_ids)) {
+        wp_send_json_error(['message' => 'Dữ liệu không hợp lệ']);
+        return;
+    }
+    
+    // Define table names
+    $invoice_table = $wpdb->prefix . 'im_invoices';
+    $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+    $commissions_table = $wpdb->prefix . 'im_partner_commissions';
+    
+    try {
+        // Start transaction
+        $wpdb->query('START TRANSACTION');
+        
+        // Get target invoice details
+        $target_invoice = $wpdb->get_row($wpdb->prepare("
+            SELECT * FROM $invoice_table WHERE id = %d
+        ", $target_invoice_id));
+        
+        if (!$target_invoice) {
+            throw new Exception('Hóa đơn đích không tồn tại');
+        }
+        
+        // Initialize totals
+        $total_amount = floatval($target_invoice->total_amount);
+        $sub_total = floatval($target_invoice->sub_total);
+        $tax_amount = floatval($target_invoice->tax_amount);
+        $discount_total = floatval($target_invoice->discount_total);
+        $merged_count = 0;
+        
+        // Process each source invoice
+        foreach ($source_invoice_ids as $source_id) {
+            $source_invoice = $wpdb->get_row($wpdb->prepare("
+                SELECT * FROM $invoice_table WHERE id = %d
+            ", $source_id));
+            
+            if (!$source_invoice) {
+                continue;
+            }
+            
+            // Add amounts from source invoice
+            $total_amount += floatval($source_invoice->total_amount);
+            $sub_total += floatval($source_invoice->sub_total);
+            $tax_amount += floatval($source_invoice->tax_amount);
+            $discount_total += floatval($source_invoice->discount_total);
+            
+            // Move all invoice items from source to target
+            $items = $wpdb->get_results($wpdb->prepare("
+                SELECT * FROM $invoice_items_table WHERE invoice_id = %d
+            ", $source_id));
+            
+            foreach ($items as $item) {
+                // Update invoice_id for the item
+                $wpdb->update(
+                    $invoice_items_table,
+                    ['invoice_id' => $target_invoice_id],
+                    ['id' => $item->id]
+                );
+            }
+            
+            // Update commissions - change invoice_id to target invoice
+            $wpdb->update(
+                $commissions_table,
+                ['invoice_id' => $target_invoice_id],
+                ['invoice_id' => $source_id]
+            );
+            
+            // Delete source invoice
+            $wpdb->delete($invoice_table, ['id' => $source_id]);
+            
+            $merged_count++;
+        }
+        
+        // Update target invoice with new totals
+        $wpdb->update(
+            $invoice_table,
+            [
+                'total_amount' => intval($total_amount),
+                'sub_total' => intval($sub_total),
+                'tax_amount' => intval($tax_amount),
+                'discount_total' => intval($discount_total),
+                'updated_at' => current_time('mysql')
+            ],
+            ['id' => $target_invoice_id]
+        );
+        
+        // Commit transaction
+        $wpdb->query('COMMIT');
+        
+        wp_send_json_success([
+            'message' => 'Đã gộp ' . $merged_count . ' hóa đơn. Tổng tiền cập nhật thành ' . number_format($total_amount) . ' VNĐ',
+            'merged_count' => $merged_count
+        ]);
+        
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        wp_send_json_error(['message' => 'Lỗi: ' . $e->getMessage()]);
+    }
+}

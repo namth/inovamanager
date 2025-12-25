@@ -860,12 +860,18 @@ get_header();
                              </button>
                              <?php endif; ?>
                              
+                             <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
+                             <button type="button" class="btn btn-info mb-2" data-bs-toggle="modal" data-bs-target="#mergeInvoiceModal">
+                                 <i class="ph ph-plus me-2"></i>Gộp hóa đơn
+                             </button>
+                             <?php endif; ?>
+                             
                              <a href="<?php echo home_url('/danh-sach-hoa-don/'); ?>" class="btn btn-secondary mb-2">
                                  <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
                              </a>
-                         </div>
-                    </div>
-                </div>
+                             </div>
+                             </div>
+                             </div>
             </div>
         </div>
     </div>
@@ -1000,6 +1006,56 @@ get_header();
 </div>
 <?php endif; ?>
 
+<!-- Merge Invoice Modal -->
+<?php if ($can_edit_invoice): ?>
+<div class="modal fade" id="mergeInvoiceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="ph ph-plus me-2"></i>Gộp hóa đơn
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            
+            <div class="modal-body">
+                <p class="text-muted mb-3">Chọn một hoặc nhiều hóa đơn chờ thanh toán của cùng khách hàng để gộp:</p>
+                
+                <!-- Loading indicator -->
+                <div id="mergeLoadingSpinner" class="text-center d-none mb-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Đang tải...</span>
+                    </div>
+                </div>
+                
+                <!-- Invoice list -->
+                <div id="mergeInvoiceList" class="d-none">
+                    <div class="list-group" style="max-height: 400px; overflow-y: auto;">
+                        <!-- Invoices will be loaded here -->
+                    </div>
+                </div>
+                
+                <!-- Empty state -->
+                <div id="mergeNoInvoices" class="alert alert-info d-none">
+                    <i class="ph ph-info me-2"></i>
+                    Không có hóa đơn khác của khách hàng này để gộp.
+                </div>
+                
+                <!-- Error message -->
+                <div id="mergeErrorMsg" class="alert alert-danger d-none" role="alert"></div>
+            </div>
+            
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" id="mergeSubmitBtn" disabled>
+                    <i class="ph ph-check me-2"></i>Gộp hóa đơn
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if ($auto_open_payment && $invoice->status !== 'paid'): ?>
 <script>
 jQuery(document).ready(function($) {
@@ -1102,6 +1158,134 @@ jQuery(document).ready(function($) {
     } else {
         console.error('Payment form not found');
     }
+    
+    /**
+     * Merge Invoice Modal Handler
+     * Loads list of pending invoices for same customer
+     */
+    $('#mergeInvoiceModal').on('show.bs.modal', function(e) {
+        var invoiceId = <?php echo $invoice_id; ?>;
+        var customerId = <?php echo $invoice->user_id; ?>;
+        
+        // Show loading spinner
+        $('#mergeLoadingSpinner').removeClass('d-none');
+        $('#mergeInvoiceList').addClass('d-none');
+        $('#mergeNoInvoices').addClass('d-none');
+        $('#mergeErrorMsg').addClass('d-none');
+        $('#mergeSubmitBtn').prop('disabled', true);
+        
+        // Load invoices via AJAX
+        $.ajax({
+            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+            type: 'POST',
+            dataType: 'json',
+            data: {
+                action: 'load_merge_invoices',
+                invoice_id: invoiceId,
+                customer_id: customerId
+            },
+            success: function(response) {
+                $('#mergeLoadingSpinner').addClass('d-none');
+                
+                if (response.success && response.data.invoices.length > 0) {
+                    var listHtml = '';
+                    $.each(response.data.invoices, function(index, invoice) {
+                        var invoiceAmount = parseInt(invoice.total_amount).toLocaleString('vi-VN');
+                        listHtml += '<label class="list-group-item">' +
+                            '<input class="form-check-input merge-invoice-checkbox" type="checkbox" value="' + invoice.id + '" data-amount="' + invoice.total_amount + '">' +
+                            '<div class="d-flex justify-content-between w-100 ms-2">' +
+                            '<div>' +
+                            '<strong>' + invoice.invoice_code + '</strong>' +
+                            '<br><small class="text-muted">Ngày tạo: ' + invoice.created_at + '</small>' +
+                            '</div>' +
+                            '<div class="text-end">' +
+                            '<strong>' + invoiceAmount + ' VNĐ</strong>' +
+                            '</div>' +
+                            '</div>' +
+                            '</label>';
+                    });
+                    
+                    $('#mergeInvoiceList .list-group').html(listHtml);
+                    $('#mergeInvoiceList').removeClass('d-none');
+                    
+                    // Checkbox change handler
+                    $(document).on('change', '.merge-invoice-checkbox', function() {
+                        var hasChecked = $('.merge-invoice-checkbox:checked').length > 0;
+                        $('#mergeSubmitBtn').prop('disabled', !hasChecked);
+                    });
+                } else {
+                    $('#mergeNoInvoices').removeClass('d-none');
+                }
+            },
+            error: function(xhr, status, error) {
+                $('#mergeLoadingSpinner').addClass('d-none');
+                $('#mergeErrorMsg').html('Có lỗi xảy ra khi tải danh sách hóa đơn: ' + error).removeClass('d-none');
+            }
+        });
+    });
+    
+    /**
+     * Merge submit handler
+     */
+    $(document).on('click', '#mergeSubmitBtn', function(e) {
+        e.preventDefault();
+        
+        var selectedIds = [];
+        $('.merge-invoice-checkbox:checked').each(function() {
+            selectedIds.push($(this).val());
+        });
+        
+        if (selectedIds.length === 0) {
+            alert('Vui lòng chọn ít nhất một hóa đơn để gộp');
+            return;
+        }
+        
+        // Confirm action
+        if (!confirm('Xác nhận gộp ' + selectedIds.length + ' hóa đơn? Các chi tiết sẽ được chuyển sang hóa đơn hiện tại và hóa đơn cũ sẽ bị xóa.')) {
+            return;
+        }
+        
+        var btn = $(this);
+        var originalHtml = btn.html();
+        btn.html('<i class="ph ph-spinner ph-spin me-2"></i>Đang xử lý...').prop('disabled', true);
+        
+        $.ajax({
+            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+            type: 'POST',
+            dataType: 'json',
+            data: {
+                action: 'merge_invoices',
+                target_invoice_id: <?php echo $invoice_id; ?>,
+                source_invoice_ids: selectedIds
+            },
+            success: function(response) {
+                if (response.success) {
+                    // Show success message
+                    var successMsg = '<div class="alert alert-success alert-dismissible fade show" role="alert">' +
+                        '<i class="ph ph-check-circle me-2"></i>' +
+                        'Gộp hóa đơn thành công! ' + response.data.message +
+                        '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>' +
+                        '</div>';
+                    $('.content-wrapper').prepend(successMsg);
+                    
+                    // Close modal and reload page
+                    var modal = bootstrap.Modal.getInstance(document.getElementById('mergeInvoiceModal'));
+                    modal.hide();
+                    
+                    setTimeout(function() {
+                        location.reload();
+                    }, 2000);
+                } else {
+                    alert('Lỗi: ' + response.data.message);
+                    btn.html(originalHtml).prop('disabled', false);
+                }
+            },
+            error: function(xhr, status, error) {
+                alert('Có lỗi xảy ra: ' + error);
+                btn.html(originalHtml).prop('disabled', false);
+            }
+        });
+    });
     
     // Auto-dismiss alerts after 5 seconds
     const alerts = document.querySelectorAll('.alert-dismissible');
