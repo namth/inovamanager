@@ -112,14 +112,15 @@ get_header();
                                                 switch ($cart_item->service_type) {
                                                     case 'domain':
                                                         $service = $wpdb->get_row($wpdb->prepare("
-                                                            SELECT d.domain_name, d.expiry_date, COALESCE(pc.renew_price, 0) AS price
+                                                            SELECT d.domain_name, d.expiry_date, d.status, COALESCE(pc.renew_price, 0) AS renew_price, COALESCE(pc.register_price, 0) AS register_price
                                                             FROM $domains_table d
                                                             LEFT JOIN $product_catalog_table pc ON d.product_catalog_id = pc.id
                                                             WHERE d.id = %d
                                                         ", $cart_item->service_id));
                                                         if ($service) {
                                                             $service_name = $service->domain_name;
-                                                            $service_price = $service->price;
+                                                            // Use renew_price if ACTIVE, register_price if PENDING
+                                                            $service_price = ($service->status === 'ACTIVE') ? $service->renew_price : $service->register_price;
                                                             $expiry_date = $service->expiry_date;
                                                         }
                                                         $service_icon = 'ph-globe';

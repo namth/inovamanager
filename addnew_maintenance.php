@@ -138,15 +138,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 $notification = '<div class="alert alert-success" role="alert">Thêm gói bảo trì mới thành công!</div>';
                 
-                // Auto-redirect to previous page or maintenance list after 1.5 seconds
+                // Redirect to previous page or maintenance list immediately
                 $final_redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
                     ? esc_url($_POST['redirect_url']) 
                     : home_url('/danh-sach-bao-tri/');
-                echo '<script>
-                    setTimeout(function() {
-                        window.location.href = "' . $final_redirect_url . '";
-                    }, 1500);
-                </script>';
+                wp_redirect($final_redirect_url);
+                exit;
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Không thể thêm mới gói bảo trì. Vui lòng thử lại.</div>';
             }

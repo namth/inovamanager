@@ -141,15 +141,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     // Reload hosting data after update
                     $hosting = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_name WHERE id = %d", $hosting_id));
                     
-                    // Auto-redirect to previous page or hosting list after 1.5 seconds
+                    // Redirect to previous page or hosting list immediately
                     $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
                         ? esc_url($_POST['redirect_url']) 
                         : home_url('/danh-sach-hosting/');
-                    echo '<script>
-                        setTimeout(function() {
-                            window.location.href = "' . $redirect_url . '";
-                        }, 1500);
-                    </script>';
+                    wp_redirect($redirect_url);
+                    exit;
                 } else {
                     $notification = '<div class="alert alert-danger" role="alert">Không thể cập nhật hosting. Vui lòng thử lại.</div>';
                 }

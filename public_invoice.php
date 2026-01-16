@@ -10,9 +10,18 @@ $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
 $users_table = $wpdb->prefix . 'im_users';
 $service_table = $wpdb->prefix . 'im_website_services';
 
-// Get invoice ID and token from URL parameters
-$invoice_id = isset($_GET['invoice_id']) ? intval($_GET['invoice_id']) : 0;
+// Get token from URL parameters
 $token = isset($_GET['token']) ? sanitize_text_field($_GET['token']) : '';
+
+// Extract invoice_id from token
+$invoice_id = 0;
+if (!empty($token)) {
+    $decoded_token = base64_decode($token);
+    if ($decoded_token) {
+        $token_parts = explode('|', $decoded_token);
+        $invoice_id = intval($token_parts[0]);
+    }
+}
 
 // Get invoice
 $invoice = $wpdb->get_row($wpdb->prepare("
@@ -39,7 +48,7 @@ if (!$invoice) {
 }
 
 // Verify token - generate a simple hash from invoice ID and creation date
-// Token format: base64(invoice_id + invoice_date)
+// Token format: base64(invoice_id | invoice_date)
 $expected_token = base64_encode($invoice->id . '|' . $invoice->created_at);
 
 // Allow either: authenticated user who owns invoice, or valid token provided
@@ -134,7 +143,7 @@ $status_classes = array(
 // Get site logo
 $logo_url = get_template_directory_uri() . '/img/inova_logo.png';
 $site_name = get_bloginfo('name');
-$public_invoice_url = home_url('/public-invoice/?invoice_id=' . $invoice->id . '&token=' . urlencode(base64_encode($invoice->id . '|' . $invoice->created_at)));
+$public_invoice_url = home_url('/public-invoice/?token=' . urlencode(base64_encode($invoice->id . '|' . $invoice->created_at)));
 
 get_header('nologin');
 ?>
@@ -165,9 +174,8 @@ get_header('nologin');
     }
         
     .invoice-header {
-        padding: 40px 30px;
+        padding: 40px 30px 20px;
         text-align: center;
-        border-bottom: 1px solid #eee;
     }
     
     .invoice-header img {
@@ -187,12 +195,12 @@ get_header('nologin');
     }
     
     .invoice-content {
-        padding: 40px 30px;
+        padding: 20px 30px 40px;
     }
     
     .invoice-info-row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: 30px;
         margin-bottom: 40px;
     }
@@ -214,6 +222,7 @@ get_header('nologin');
         .info-table {
             width: 100%;
             border-collapse: collapse;
+            border-top: 1px solid #e2e2e2;
         }
         
         .info-table td {
@@ -308,11 +317,13 @@ get_header('nologin');
     }
     
     .totals-table {
-        width: 100%;
-        border-collapse: collapse;
         background-color: #f8f9fa;
         border-radius: 6px;
         overflow: hidden;
+    }
+
+    .totals-table tr {
+        border-bottom: 1px solid #dadada;
     }
     
     .totals-table tr:last-child {

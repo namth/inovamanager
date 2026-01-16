@@ -262,8 +262,8 @@ get_header();
                     
                     <div class="row justify-content-center">
                         <div class="col-md-10">
-                            <div class="card border-warning mb-4">
-                                <div class="card-header bg-warning text-dark">
+                            <div class="card border-info mb-4">
+                                <div class="card-header bg-light-info text-info">
                                     <h5 class="mb-0">
                                         <i class="ph ph-info me-2"></i>
                                         Chọn dịch vụ cần xóa
@@ -280,11 +280,6 @@ get_header();
                                         
                                         <!-- Services selection -->
                                         <div class="mb-4">
-                                            <h6 class="mb-3">
-                                                <i class="ph ph-list me-2"></i>
-                                                Chọn dịch vụ cần xóa:
-                                            </h6>
-                                            
                                             <div class="mb-3">
                                                 <div class="form-check">
                                                     <label class="form-check-label fw-bold" for="select_all_services">
@@ -303,25 +298,25 @@ get_header();
                                                             Dịch vụ Domain
                                                         </h6>
                                                         <div class="form-check mb-2 ms-3 d-flex gap-2">
-                                                            <label class="form-check-label" for="domain_service">
-                                                                <input class="form-check-input service-checkbox" type="checkbox" 
-                                                                       value="domain" 
-                                                                       id="domain_service" 
-                                                                       name="selected_domain">
+                                                            <input class="form-check service-checkbox ps-3" type="checkbox" 
+                                                                value="domain" 
+                                                                id="domain_service" 
+                                                                name="selected_domain">
+                                                            <label class="" for="domain_service">
+                                                                    <div class="d-flex justify-content-between align-items-start">
+                                                                        <div>
+                                                                            <strong><?php echo esc_html($domain->domain_name); ?></strong>
+                                                                            <span class="badge bg-<?php echo ($domain->status === 'ACTIVE') ? 'success' : 'secondary'; ?> ms-2">
+                                                                                <?php echo esc_html($domain->status); ?>
+                                                                            </span>
+                                                                            <br>
+                                                                            <small class="text-muted">
+                                                                                Đăng ký: <?php echo $domain->registration_date ? date('d/m/Y', strtotime($domain->registration_date)) : 'N/A'; ?> | 
+                                                                                Hết hạn: <?php echo $domain->expiry_date ? date('d/m/Y', strtotime($domain->expiry_date)) : 'N/A'; ?>
+                                                                            </small>
+                                                                        </div>
+                                                                    </div>
                                                             </label>
-                                                            <div class="d-flex justify-content-between align-items-start">
-                                                                <div>
-                                                                    <strong><?php echo esc_html($domain->domain_name); ?></strong>
-                                                                    <span class="badge bg-<?php echo ($domain->status === 'ACTIVE') ? 'success' : 'secondary'; ?> ms-2">
-                                                                        <?php echo esc_html($domain->status); ?>
-                                                                    </span>
-                                                                    <br>
-                                                                    <small class="text-muted">
-                                                                        Đăng ký: <?php echo $domain->registration_date ? date('d/m/Y', strtotime($domain->registration_date)) : 'N/A'; ?> | 
-                                                                        Hết hạn: <?php echo $domain->expiry_date ? date('d/m/Y', strtotime($domain->expiry_date)) : 'N/A'; ?>
-                                                                    </small>
-                                                                </div>
-                                                            </div>
                                                         </div>
                                                     </div>
                                                 <?php endif; ?>
@@ -333,30 +328,30 @@ get_header();
                                                             <i class="ph ph-cloud me-2"></i>
                                                             Dịch vụ Hosting
                                                         </h6>
-                                                        <div class="form-check mb-2 ms-3 d-flex gap-2">
+                                                        <div class=" mb-2 ms-3 d-flex gap-2">
+                                                            <input class=" service-checkbox" type="checkbox" 
+                                                                   value="hosting" 
+                                                                   id="hosting_service" 
+                                                                   name="selected_hosting">
                                                             <label class="form-check-label" for="hosting_service">
-                                                                <input class="form-check-input service-checkbox" type="checkbox" 
-                                                                       value="hosting" 
-                                                                       id="hosting_service" 
-                                                                       name="selected_hosting">
-                                                            </label>
-                                                            <div class="d-flex justify-content-between align-items-start">
-                                                                <div>
-                                                                    <strong><?php echo esc_html($hosting->hosting_code ?: 'HOST-' . $hosting->id); ?></strong>
-                                                                    <span class="badge bg-<?php echo ($hosting->status === 'ACTIVE') ? 'success' : 'secondary'; ?> ms-2">
-                                                                        <?php echo esc_html($hosting->status); ?>
-                                                                    </span>
-                                                                    <br>
-                                                                    <small class="text-muted">
-                                                                        Đăng ký: <?php echo date('d/m/Y', strtotime($hosting->registration_date)); ?> | 
-                                                                        Hết hạn: <?php echo date('d/m/Y', strtotime($hosting->expiry_date)); ?>
-                                                                    </small>
-                                                                    <?php if ($hosting->ip_address): ?>
-                                                                    <br>
-                                                                    <small class="text-muted">IP: <?php echo esc_html($hosting->ip_address); ?></small>
-                                                                    <?php endif; ?>
+                                                                <div class="d-flex justify-content-between align-items-start">
+                                                                    <div>
+                                                                        <strong><?php echo esc_html($hosting->hosting_code ?: 'HOST-' . $hosting->id); ?></strong>
+                                                                        <span class="badge bg-<?php echo ($hosting->status === 'ACTIVE') ? 'success' : 'secondary'; ?> ms-2">
+                                                                            <?php echo esc_html($hosting->status); ?>
+                                                                        </span>
+                                                                        <br>
+                                                                        <small class="text-muted">
+                                                                            Đăng ký: <?php echo date('d/m/Y', strtotime($hosting->registration_date)); ?> | 
+                                                                            Hết hạn: <?php echo date('d/m/Y', strtotime($hosting->expiry_date)); ?>
+                                                                        </small>
+                                                                        <?php if ($hosting->ip_address): ?>
+                                                                        <br>
+                                                                        <small class="text-muted">IP: <?php echo esc_html($hosting->ip_address); ?></small>
+                                                                        <?php endif; ?>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
+                                                            </label>
                                                         </div>
                                                     </div>
                                                 <?php endif; ?>
@@ -368,30 +363,27 @@ get_header();
                                                             <i class="ph ph-wrench me-2"></i>
                                                             Dịch vụ Bảo trì
                                                         </h6>
-                                                        <div class="form-check mb-2 ms-3 d-flex gap-2">
+                                                        <div class=" mb-2 ms-3 d-flex gap-2">
+                                                            <input class="service-checkbox" type="checkbox" value="maintenance" id="maintenance_service" name="selected_maintenance">
                                                             <label class="form-check-label" for="maintenance_service">
-                                                                <input class="form-check-input service-checkbox" type="checkbox" 
-                                                                       value="maintenance" 
-                                                                       id="maintenance_service" 
-                                                                       name="selected_maintenance">
-                                                            </label>
-                                                            <div class="d-flex justify-content-between align-items-start">
-                                                                <div>
-                                                                    <strong><?php echo esc_html($maintenance->order_code ?: 'MAINT-' . $maintenance->id); ?></strong>
-                                                                    <span class="badge bg-<?php echo ($maintenance->status === 'ACTIVE') ? 'success' : 'secondary'; ?> ms-2">
-                                                                        <?php echo esc_html($maintenance->status); ?>
-                                                                    </span>
-                                                                    <br>
-                                                                    <small class="text-muted">
-                                                                        Gia hạn: <?php echo date('d/m/Y', strtotime($maintenance->renew_date)); ?> | 
-                                                                        Hết hạn: <?php echo date('d/m/Y', strtotime($maintenance->expiry_date)); ?>
-                                                                    </small>
-                                                                    <br>
-                                                                    <small class="text-muted">
-                                                                        Phí hàng tháng: <?php echo number_format($maintenance->monthly_fee, 0, ',', '.'); ?>đ
-                                                                    </small>
+                                                                <div class="d-flex justify-content-between align-items-start">
+                                                                    <div>
+                                                                        <strong><?php echo esc_html($maintenance->order_code ?: 'MAINT-' . $maintenance->id); ?></strong>
+                                                                        <span class="badge bg-<?php echo ($maintenance->status === 'ACTIVE') ? 'success' : 'secondary'; ?> ms-2">
+                                                                            <?php echo esc_html($maintenance->status); ?>
+                                                                        </span>
+                                                                        <br>
+                                                                        <small class="text-muted">
+                                                                            Gia hạn: <?php echo date('d/m/Y', strtotime($maintenance->renew_date)); ?> | 
+                                                                            Hết hạn: <?php echo date('d/m/Y', strtotime($maintenance->expiry_date)); ?>
+                                                                        </small>
+                                                                        <br>
+                                                                        <small class="text-muted">
+                                                                            Phí hàng tháng: <?php echo number_format($maintenance->monthly_fee, 0, ',', '.'); ?>đ
+                                                                        </small>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
+                                                            </label>
                                                         </div>
                                                     </div>
                                                 <?php endif; ?>
@@ -457,24 +449,18 @@ get_header();
                                             </h6>
                                             <div class="row">
                                                 <div class="col-md-6">
-                                                    <div class="form-check d-flex align-items-center gap-2">
-                                                        <div class="d-flex">
-                                                            <label class="form-check-label mt-2" for="soft_delete">
-                                                                <input class="form-check-input" type="radio" name="delete_method" value="soft" id="soft_delete" checked>
-                                                            </label>
-                                                        </div>
-                                                        <span><b></b>Xóa mềm<br>
-                                                            <small class="text-muted">Chỉ ẩn khỏi danh sách, có thể khôi phục sau</small>
-                                                        </span>
+                                                    <div class="form-check form-check-flat form-check-primary">
+                                                        <label class="form-check-label">
+                                                            <input type="radio" class="form-check-input" type="radio" name="delete_method" value="soft" id="soft_delete">
+                                                            Xóa mềm <i class="input-helper"></i>
+                                                        </label>
                                                     </div>
                                                 </div>
                                                 <div class="col-md-6">
-                                                    <div class="form-check">
-                                                        <label class="form-check-label" for="hard_delete">
-                                                            <input class="form-check-input" type="radio" name="delete_method" value="hard" id="hard_delete">
-                                                            <strong>Xóa cứng</strong>
-                                                            <br>
-                                                            <small class="text-muted">Xóa vĩnh viễn khỏi database, không thể khôi phục</small>
+                                                    <div class="form-check form-check-flat form-check-primary">
+                                                        <label class="form-check-label">
+                                                            <input type="radio" class="form-check-input" type="radio" name="delete_method" value="hard" id="hard_delete">
+                                                            Xóa vĩnh viễn <i class="input-helper"></i>
                                                         </label>
                                                     </div>
                                                 </div>
@@ -562,33 +548,41 @@ document.addEventListener('DOMContentLoaded', function() {
         const checkedCount = document.querySelectorAll('.service-checkbox:checked').length;
         const deleteMethod = document.querySelector('input[name="delete_method"]:checked').value;
         
-        if (checkedCount === 0) {
+        if (totalServices === 0) {
+            // Website không có dịch vụ đính kèm - luôn cho phép xóa website
+            deleteBtn.disabled = false;
+            deleteWebsiteField.value = '1';
+            deleteBtnText.textContent = deleteMethod === 'hard' ? 'Xóa website vĩnh viễn' : 'Xóa website (mềm)';
+            warningText.textContent = deleteMethod === 'hard' ? 
+                'Sẽ xóa website vĩnh viễn khỏi database!' : 
+                'Sẽ ẩn website khỏi danh sách (có thể khôi phục).';
+            warningMessage.style.display = 'block';
+        } else if (checkedCount === 0) {
+            // Có dịch vụ nhưng chưa chọn cái nào
             deleteBtn.disabled = true;
             deleteBtnText.textContent = 'Chọn dịch vụ để xóa';
             warningMessage.style.display = 'none';
             deleteWebsiteField.value = '0';
-        } else {
+        } else if (checkedCount === totalServices) {
+            // Đã chọn tất cả dịch vụ - sẽ xóa website
             deleteBtn.disabled = false;
-            
-            if (checkedCount === totalServices) {
-                // All services selected - will delete website
-                deleteWebsiteField.value = '1';
-                deleteBtnText.textContent = deleteMethod === 'hard' ? 'Xóa website vĩnh viễn' : 'Xóa website (mềm)';
-                warningText.textContent = deleteMethod === 'hard' ? 
-                    'Sẽ xóa toàn bộ website và tất cả dịch vụ vĩnh viễn khỏi database!' : 
-                    'Sẽ ẩn website và tất cả dịch vụ khỏi danh sách (có thể khôi phục).';
-                warningMessage.style.display = 'block';
-            } else {
-                // Some services selected - will keep website
-                deleteWebsiteField.value = '0';
-                deleteBtnText.textContent = deleteMethod === 'hard' ? 
-                    `Xóa vĩnh viễn ${checkedCount} dịch vụ` : 
-                    `Xóa mềm ${checkedCount} dịch vụ`;
-                warningText.textContent = deleteMethod === 'hard' ? 
-                    `Sẽ xóa vĩnh viễn ${checkedCount} dịch vụ đã chọn khỏi database!` : 
-                    `Sẽ ẩn ${checkedCount} dịch vụ đã chọn khỏi danh sách (có thể khôi phục).`;
-                warningMessage.style.display = 'block';
-            }
+            deleteWebsiteField.value = '1';
+            deleteBtnText.textContent = deleteMethod === 'hard' ? 'Xóa website vĩnh viễn' : 'Xóa website (mềm)';
+            warningText.textContent = deleteMethod === 'hard' ? 
+                'Sẽ xóa toàn bộ website và tất cả dịch vụ vĩnh viễn khỏi database!' : 
+                'Sẽ ẩn website và tất cả dịch vụ khỏi danh sách (có thể khôi phục).';
+            warningMessage.style.display = 'block';
+        } else {
+            // Chỉ chọn một số dịch vụ - sẽ giữ website
+            deleteBtn.disabled = false;
+            deleteWebsiteField.value = '0';
+            deleteBtnText.textContent = deleteMethod === 'hard' ? 
+                `Xóa vĩnh viễn ${checkedCount} dịch vụ` : 
+                `Xóa mềm ${checkedCount} dịch vụ`;
+            warningText.textContent = deleteMethod === 'hard' ? 
+                `Sẽ xóa vĩnh viễn ${checkedCount} dịch vụ đã chọn khỏi database!` : 
+                `Sẽ ẩn ${checkedCount} dịch vụ đã chọn khỏi danh sách (có thể khôi phục).`;
+            warningMessage.style.display = 'block';
         }
     }
     

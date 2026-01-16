@@ -54,6 +54,41 @@ function register_bookorder_api_routes() {
         'callback' => 'update_website_status_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for getting services expiring soon or expired
+    register_rest_route('bookorder/v1', '/services-expiring', array(
+        'methods' => 'GET',
+        'callback' => 'get_services_expiring_api',
+        'permission_callback' => 'validate_api_key'
+    ));
+
+    // Register route for getting pending invoices
+    register_rest_route('bookorder/v1', '/invoices-pending', array(
+        'methods' => 'GET',
+        'callback' => 'get_pending_invoices_api',
+        'permission_callback' => 'validate_api_key'
+    ));
+
+    // Register route for updating invoice status
+    register_rest_route('bookorder/v1', '/update-invoice-status', array(
+        'methods' => 'POST',
+        'callback' => 'update_invoice_status_api',
+        'permission_callback' => 'validate_api_key'
+    ));
+
+    // Register route for getting domain management info
+    register_rest_route('bookorder/v1', '/domain-management-info', array(
+        'methods' => 'GET',
+        'callback' => 'get_domain_management_info_api',
+        'permission_callback' => 'validate_api_key'
+    ));
+
+    // Register route for getting website management info
+    register_rest_route('bookorder/v1', '/website-management-info', array(
+        'methods' => 'GET',
+        'callback' => 'get_website_management_info_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -729,6 +764,540 @@ function update_website_status_api($request) {
             'success' => true,
             'active_time' => $updated_website->active_time,
             'message' => 'Status updated successfully'
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for getting services expiring soon or expired
+ * Lấy danh sách các dịch vụ (domain, hosting, maintenance) sắp hết hạn hoặc quá hạn
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function get_services_expiring_api($request) {
+    global $wpdb;
+
+    // Get parameters
+    $days_offset = isset($request['days']) ? intval($request['days']) : 0;  // +3 (3 days left), -30 (30 days overdue)
+    $owner_user_id = isset($request['owner_user_id']) ? intval($request['owner_user_id']) : 0;
+    $service_type = isset($request['service_type']) ? sanitize_text_field($request['service_type']) : '';  // 'domain', 'hosting', 'maintenance', or '' for all
+    $page = isset($request['page']) ? max(1, intval($request['page'])) : 1;
+    $per_page = isset($request['per_page']) ? intval($request['per_page']) : 20;
+
+    if ($per_page < 1 || $per_page > 100) {
+        $per_page = 20;
+    }
+
+    $offset = ($page - 1) * $per_page;
+    $today = date('Y-m-d');
+    $target_date = date('Y-m-d', strtotime("{$days_offset} days"));
+
+    $results = array();
+    $total = 0;
+
+    // Query domains
+    if (empty($service_type) || $service_type === 'domain') {
+        $domains_table = $wpdb->prefix . 'im_domains';
+        $users_table = $wpdb->prefix . 'im_users';
+
+        $domain_query = "
+            SELECT
+                d.id,
+                d.domain_name,
+                d.owner_user_id,
+                d.expiry_date,
+                u.name AS owner_name,
+                d.status,
+                'domain' AS service_type
+            FROM {$domains_table} d
+            LEFT JOIN {$users_table} u ON d.owner_user_id = u.id
+            WHERE d.status NOT IN ('DELETED')
+        ";
+
+        $query_params = array();
+
+        if ($owner_user_id > 0) {
+            $domain_query .= " AND d.owner_user_id = %d";
+            $query_params[] = $owner_user_id;
+        }
+
+        if ($days_offset >= 0) {
+            // Expiring soon: expiry_date = target_date (still have days left)
+            $domain_query .= " AND d.expiry_date = %s";
+            $query_params[] = $target_date;
+        } else {
+            // Already expired: expiry_date <= target_date (past the due date)
+            $domain_query .= " AND d.expiry_date <= %s";
+            $query_params[] = $target_date;
+        }
+
+        if (!empty($query_params)) {
+            $domain_results = $wpdb->get_results($wpdb->prepare($domain_query, $query_params), ARRAY_A);
+        } else {
+            $domain_results = $wpdb->get_results($domain_query, ARRAY_A);
+        }
+
+        $results = array_merge($results, $domain_results ? $domain_results : array());
+    }
+
+    // Query hostings
+    if (empty($service_type) || $service_type === 'hosting') {
+        $hostings_table = $wpdb->prefix . 'im_hostings';
+        $users_table = $wpdb->prefix . 'im_users';
+
+        $hosting_query = "
+            SELECT
+                h.id,
+                h.hosting_code AS name,
+                h.owner_user_id,
+                h.expiry_date,
+                u.name AS owner_name,
+                h.status,
+                'hosting' AS service_type
+            FROM {$hostings_table} h
+            LEFT JOIN {$users_table} u ON h.owner_user_id = u.id
+            WHERE h.status NOT IN ('DELETED')
+        ";
+
+        $query_params = array();
+
+        if ($owner_user_id > 0) {
+            $hosting_query .= " AND h.owner_user_id = %d";
+            $query_params[] = $owner_user_id;
+        }
+
+        if ($days_offset >= 0) {
+            $hosting_query .= " AND h.expiry_date = %s";
+            $query_params[] = $target_date;
+        } else {
+            $hosting_query .= " AND h.expiry_date <= %s";
+            $query_params[] = $target_date;
+        }
+
+        if (!empty($query_params)) {
+            $hosting_results = $wpdb->get_results($wpdb->prepare($hosting_query, $query_params), ARRAY_A);
+        } else {
+            $hosting_results = $wpdb->get_results($hosting_query, ARRAY_A);
+        }
+
+        $results = array_merge($results, $hosting_results ? $hosting_results : array());
+    }
+
+    // Query maintenance packages
+    if (empty($service_type) || $service_type === 'maintenance') {
+        $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+        $users_table = $wpdb->prefix . 'im_users';
+
+        $maintenance_query = "
+            SELECT
+                m.id,
+                m.order_code AS name,
+                m.owner_user_id,
+                m.expiry_date,
+                u.name AS owner_name,
+                m.status,
+                'maintenance' AS service_type
+            FROM {$maintenance_table} m
+            LEFT JOIN {$users_table} u ON m.owner_user_id = u.id
+            WHERE m.status NOT IN ('DELETED')
+        ";
+
+        $query_params = array();
+
+        if ($owner_user_id > 0) {
+            $maintenance_query .= " AND m.owner_user_id = %d";
+            $query_params[] = $owner_user_id;
+        }
+
+        if ($days_offset >= 0) {
+            $maintenance_query .= " AND m.expiry_date = %s";
+            $query_params[] = $target_date;
+        } else {
+            $maintenance_query .= " AND m.expiry_date <= %s";
+            $query_params[] = $target_date;
+        }
+
+        if (!empty($query_params)) {
+            $maintenance_results = $wpdb->get_results($wpdb->prepare($maintenance_query, $query_params), ARRAY_A);
+        } else {
+            $maintenance_results = $wpdb->get_results($maintenance_query, ARRAY_A);
+        }
+
+        $results = array_merge($results, $maintenance_results ? $maintenance_results : array());
+    }
+
+    $total = count($results);
+
+    // Apply pagination to combined results
+    $paginated_results = array_slice($results, $offset, $per_page);
+    $total_pages = ceil($total / $per_page);
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'total_results' => $total,
+            'total_pages' => $total_pages,
+            'current_page' => $page,
+            'per_page' => $per_page,
+            'days_offset' => $days_offset,
+            'target_date' => $target_date,
+            'results' => $paginated_results
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for getting pending invoices
+ * Lấy danh sách các hóa đơn đang chờ thanh toán
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function get_pending_invoices_api($request) {
+    global $wpdb;
+
+    $invoices_table = $wpdb->prefix . 'im_invoices';
+    $users_table = $wpdb->prefix . 'im_users';
+
+    $page = isset($request['page']) ? max(1, intval($request['page'])) : 1;
+    $per_page = isset($request['per_page']) ? intval($request['per_page']) : 20;
+    $user_id = isset($request['user_id']) ? intval($request['user_id']) : 0;
+    $overdue_days = isset($request['overdue_days']) ? intval($request['overdue_days']) : 0;  // If > 0, get only overdue invoices
+
+    if ($per_page < 1 || $per_page > 100) {
+        $per_page = 20;
+    }
+
+    $offset = ($page - 1) * $per_page;
+    $today = date('Y-m-d');
+
+    // Build query
+    $query = "
+        SELECT
+            i.id,
+            i.invoice_code,
+            i.user_id,
+            i.invoice_date,
+            i.due_date,
+            i.sub_total,
+            i.discount_total,
+            i.tax_amount,
+            i.total_amount,
+            i.paid_amount,
+            i.payment_date,
+            i.payment_method,
+            i.status,
+            i.notes,
+            u.name AS customer_name,
+            u.email,
+            DATEDIFF(%s, i.due_date) AS days_overdue
+        FROM {$invoices_table} i
+        LEFT JOIN {$users_table} u ON i.user_id = u.id
+        WHERE i.status IN ('ISSUED', 'OVERDUE')
+    ";
+
+    $query_params = array($today);
+
+    // Filter by user if provided
+    if ($user_id > 0) {
+        $query .= " AND i.user_id = %d";
+        $query_params[] = $user_id;
+    }
+
+    // Filter by overdue if specified
+    if ($overdue_days > 0) {
+        $query .= " AND i.due_date <= DATE_SUB(%s, INTERVAL %d DAY)";
+        $query_params[] = $today;
+        $query_params[] = $overdue_days;
+    }
+
+    // Add ordering and pagination
+    $query .= " ORDER BY i.due_date ASC LIMIT %d OFFSET %d";
+    $query_params[] = $per_page;
+    $query_params[] = $offset;
+
+    // Get results
+    $invoices = !empty($query_params) ? $wpdb->get_results($wpdb->prepare($query, $query_params), ARRAY_A) : $wpdb->get_results($query, ARRAY_A);
+
+    // Get total count
+    $count_query = "
+        SELECT COUNT(*) FROM {$invoices_table} i
+        WHERE i.status IN ('ISSUED', 'OVERDUE')
+    ";
+
+    $count_params = array();
+
+    if ($user_id > 0) {
+        $count_query .= " AND i.user_id = %d";
+        $count_params[] = $user_id;
+    }
+
+    if ($overdue_days > 0) {
+        $count_query .= " AND i.due_date <= DATE_SUB(%s, INTERVAL %d DAY)";
+        $count_params[] = $today;
+        $count_params[] = $overdue_days;
+    }
+
+    $total = !empty($count_params) ? $wpdb->get_var($wpdb->prepare($count_query, $count_params)) : $wpdb->get_var($count_query);
+    $total_pages = ceil($total / $per_page);
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'total_results' => intval($total),
+            'total_pages' => $total_pages,
+            'current_page' => $page,
+            'per_page' => $per_page,
+            'results' => $invoices
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for updating invoice status
+ * Cập nhật trạng thái hóa đơn, nếu là PAID thì cập nhật payment_date, paid_amount, payment_method
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function update_invoice_status_api($request) {
+    global $wpdb;
+
+    $invoices_table = $wpdb->prefix . 'im_invoices';
+
+    $invoice_id = isset($request['invoice_id']) ? intval($request['invoice_id']) : 0;
+    $status = isset($request['status']) ? sanitize_text_field($request['status']) : '';
+    $payment_date = isset($request['payment_date']) ? sanitize_text_field($request['payment_date']) : null;
+    $paid_amount = isset($request['paid_amount']) ? intval($request['paid_amount']) : null;
+    $payment_method = isset($request['payment_method']) ? sanitize_text_field($request['payment_method']) : null;
+
+    // Validate required fields
+    if ($invoice_id <= 0) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Invoice ID is required'
+            ),
+            400
+        );
+    }
+
+    if (empty($status)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Status is required'
+            ),
+            400
+        );
+    }
+
+    // Validate status value
+    $valid_statuses = array('DRAFT', 'ISSUED', 'OVERDUE', 'PAID', 'CANCELLED');
+    if (!in_array($status, $valid_statuses)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => "Invalid status - must be one of: " . implode(', ', $valid_statuses)
+            ),
+            400
+        );
+    }
+
+    // Check if invoice exists
+    $invoice = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$invoices_table} WHERE id = %d",
+        $invoice_id
+    ));
+
+    if (!$invoice) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Invoice not found'
+            ),
+            404
+        );
+    }
+
+    // Prepare update data
+    $update_data = array('status' => $status);
+    $update_formats = array('%s');
+
+    // If status is PAID, update payment information
+    if ($status === 'PAID') {
+        if (!$payment_date) {
+            $payment_date = current_time('mysql');
+        }
+        if ($paid_amount === null) {
+            $paid_amount = $invoice->total_amount;
+        }
+        if (!$payment_method) {
+            $payment_method = 'Manual';
+        }
+
+        $update_data['payment_date'] = $payment_date;
+        $update_data['paid_amount'] = $paid_amount;
+        $update_data['payment_method'] = $payment_method;
+
+        $update_formats[] = '%s';
+        $update_formats[] = '%d';
+        $update_formats[] = '%s';
+    }
+
+    // Update invoice
+    $result = $wpdb->update(
+        $invoices_table,
+        $update_data,
+        array('id' => $invoice_id),
+        $update_formats,
+        array('%d')
+    );
+
+    if ($result === false) {
+        error_log("Failed to update invoice ID {$invoice_id}: " . $wpdb->last_error);
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Failed to update invoice status'
+            ),
+            500
+        );
+    }
+
+    // Get updated invoice
+    $updated_invoice = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$invoices_table} WHERE id = %d",
+        $invoice_id
+    ), ARRAY_A);
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'message' => 'Invoice status updated successfully',
+            'invoice' => $updated_invoice
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for getting domain management info
+ * Lấy thông tin quản lý domain (management_url, management_username, management_password)
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function get_domain_management_info_api($request) {
+    global $wpdb;
+
+    $domains_table = $wpdb->prefix . 'im_domains';
+
+    $domain_id = isset($request['domain_id']) ? intval($request['domain_id']) : 0;
+    $domain_name = isset($request['domain_name']) ? sanitize_text_field($request['domain_name']) : '';
+
+    // Validate - at least one parameter required
+    if ($domain_id <= 0 && empty($domain_name)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Either domain_id or domain_name is required'
+            ),
+            400
+        );
+    }
+
+    // Build query
+    if ($domain_id > 0) {
+        $domain = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, domain_name, management_url, management_username, management_password FROM {$domains_table} WHERE id = %d",
+            $domain_id
+        ), ARRAY_A);
+    } else {
+        $domain = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, domain_name, management_url, management_username, management_password FROM {$domains_table} WHERE domain_name = %s",
+            $domain_name
+        ), ARRAY_A);
+    }
+
+    if (!$domain) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Domain not found'
+            ),
+            404
+        );
+    }
+
+    // Decrypt password if exists
+    if (!empty($domain['management_password'])) {
+        $domain['management_password'] = im_decrypt_password($domain['management_password']);
+    }
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'domain' => $domain
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for getting website management info
+ * Lấy thông tin quản lý website (admin_url, admin_username, admin_password)
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function get_website_management_info_api($request) {
+    global $wpdb;
+
+    $websites_table = $wpdb->prefix . 'im_websites';
+
+    $website_id = isset($request['website_id']) ? intval($request['website_id']) : 0;
+
+    // Validate
+    if ($website_id <= 0) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'website_id is required'
+            ),
+            400
+        );
+    }
+
+    // Get website
+    $website = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, name, admin_url, admin_username, admin_password FROM {$websites_table} WHERE id = %d",
+        $website_id
+    ), ARRAY_A);
+
+    if (!$website) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Website not found'
+            ),
+            404
+        );
+    }
+
+    // Decrypt password if exists
+    if (!empty($website['admin_password'])) {
+        $website['admin_password'] = im_decrypt_password($website['admin_password']);
+    }
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'website' => $website
         ),
         200
     );

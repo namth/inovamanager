@@ -108,15 +108,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 // Refresh domain data
                 $domain = $wpdb->get_row($wpdb->prepare("SELECT * FROM $domains_table WHERE id = %d", $domain_id));
                 
-                // Auto-redirect to previous page or domain list after 1.5 seconds
+                // Redirect to previous page or domain list immediately
                 $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
                     ? esc_url($_POST['redirect_url']) 
                     : home_url('/danh-sach-ten-mien/');
-                echo '<script>
-                    setTimeout(function() {
-                        window.location.href = "' . $redirect_url . '";
-                    }, 1500);
-                </script>';
+                wp_redirect($redirect_url);
+                exit;
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Cập nhật thất bại hoặc không có thay đổi</div>';
             }

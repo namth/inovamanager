@@ -790,13 +790,14 @@ get_header();
                         <p class="text-muted small mb-3">Copy link để gửi cho khách hàng</p>
 
                         <?php
-                        // Generate public invoice link
-                        $public_invoice_link = home_url('/public-invoice/?invoice_id=' . $invoice->id . '&token=' . urlencode(base64_encode($invoice->id . '|' . $invoice->created_at)));
+                        // Generate public invoice link (token only - invoice_id is encoded in token)
+                        $public_invoice_link = home_url('/public-invoice/?token=' . urlencode(base64_encode($invoice->id . '|' . $invoice->created_at)));
                         ?>
 
                         <div class="input-group mb-2">
                             <input type="text" class="form-control" id="invoiceLinkInput" 
                                    value="<?php echo esc_attr($public_invoice_link); ?>" readonly>
+                            <a href="<?php echo esc_attr($public_invoice_link); ?>" target="_blank" class="btn bg-light-info border-info text-info"><i class="ph ph-arrow-square-out"></i></a>
                             <button class="btn btn-info" type="button" id="copyInvoiceLinkBtn" 
                                     data-link="<?php echo esc_attr($public_invoice_link); ?>">
                                 <i class="ph ph-copy me-1"></i>Copy
@@ -1194,14 +1195,14 @@ jQuery(document).ready(function($) {
                     var listHtml = '';
                     $.each(response.data.invoices, function(index, invoice) {
                         var invoiceAmount = parseInt(invoice.total_amount).toLocaleString('vi-VN');
-                        listHtml += '<label class="list-group-item">' +
+                        listHtml += '<label class="list-group-item d-flex">' +
                             '<input class="form-check-input merge-invoice-checkbox" type="checkbox" value="' + invoice.id + '" data-amount="' + invoice.total_amount + '">' +
-                            '<div class="d-flex justify-content-between w-100 ms-2">' +
+                            '<div class="d-flex flex-column justify-content-between w-100 ms-2">' +
                             '<div>' +
                             '<strong>' + invoice.invoice_code + '</strong>' +
                             '<br><small class="text-muted">Ngày tạo: ' + invoice.created_at + '</small>' +
                             '</div>' +
-                            '<div class="text-end">' +
+                            '<div>' +
                             '<strong>' + invoiceAmount + ' VNĐ</strong>' +
                             '</div>' +
                             '</div>' +
@@ -1275,9 +1276,8 @@ jQuery(document).ready(function($) {
                     var modal = bootstrap.Modal.getInstance(document.getElementById('mergeInvoiceModal'));
                     modal.hide();
                     
-                    setTimeout(function() {
-                        location.reload();
-                    }, 2000);
+                    // Reload page immediately
+                    location.reload();
                 } else {
                     alert('Lỗi: ' + response.data.message);
                     btn.html(originalHtml).prop('disabled', false);

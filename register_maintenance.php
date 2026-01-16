@@ -301,10 +301,8 @@ jQuery(document).ready(function($) {
                     // Reset form
                     $('#maintenance-registration-form')[0].reset();
                     
-                    // Redirect after 3 seconds
-                    setTimeout(function() {
-                        window.location.href = '<?php echo home_url('/list-website/'); ?>';
-                    }, 3000);
+                    // Redirect immediately
+                    window.location.href = '<?php echo home_url('/list-website/'); ?>';
                 } else {
                     alert('Lỗi: ' + (response.data.message || 'Có lỗi xảy ra'));
                     submitBtn.prop('disabled', false).html(originalBtnText);

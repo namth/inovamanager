@@ -48,6 +48,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_vat'])) {
 
             $message = 'Cài đặt thanh toán QR đã được lưu thành công!';
             $message_type = 'success';
+        } elseif ($action === 'save_webhook_settings') {
+            // Save webhook settings
+            update_option('inova_webhook_url', sanitize_text_field($_POST['inova_webhook_url']));
+            update_option('inova_webhook_enabled_renewal', isset($_POST['inova_webhook_enabled_renewal']) ? 1 : 0);
+            update_option('inova_webhook_enabled_expiry', isset($_POST['inova_webhook_enabled_expiry']) ? 1 : 0);
+
+            $message = 'Cài đặt Webhook đã được lưu thành công!';
+            $message_type = 'success';
         }
     } else {
         $message = 'Lỗi bảo mật!';
@@ -66,6 +74,11 @@ $payment_bank_code_no_vat = get_option('payment_bank_code_no_vat', '');
 $payment_account_number_no_vat = get_option('payment_account_number_no_vat', '');
 $payment_bank_code_with_vat = get_option('payment_bank_code_with_vat', '');
 $payment_account_number_with_vat = get_option('payment_account_number_with_vat', '');
+
+// Get webhook settings
+$webhook_url = get_option('inova_webhook_url', 'https://ai.inova.io.vn/webhook-test/inova-manager');
+$webhook_enabled_renewal = get_option('inova_webhook_enabled_renewal', 1);
+$webhook_enabled_expiry = get_option('inova_webhook_enabled_expiry', 1);
 
 // Static banks list from Sepay
 $banks_list = array(
@@ -173,6 +186,11 @@ get_header();
                         <li class="nav-item" role="presentation">
                             <button class="nav-link" id="payment-tab" data-bs-toggle="tab" data-bs-target="#payment" type="button" role="tab" aria-controls="payment" aria-selected="false">
                                 <i class="ph ph-qr-code me-2"></i>Thanh toán QR
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="webhook-tab" data-bs-toggle="tab" data-bs-target="#webhook" type="button" role="tab" aria-controls="webhook" aria-selected="false">
+                                <i class="ph ph-webhook me-2"></i>Webhook
                             </button>
                         </li>
                     </ul>
@@ -409,6 +427,80 @@ get_header();
                                 <div class="text-center">
                                     <button type="submit" class="btn btn-primary btn-lg">
                                         <i class="ph ph-floppy-disk me-2"></i>Lưu cấu hình thanh toán
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Webhook Settings Tab -->
+                        <div class="tab-pane fade" id="webhook" role="tabpanel" aria-labelledby="webhook-tab">
+                            <form method="post">
+                                <?php wp_nonce_field('system_settings_action', 'system_settings_nonce'); ?>
+                                <input type="hidden" name="update_vat" value="save_webhook_settings">
+
+                                <div class="alert alert-info">
+                                    <i class="ph ph-info me-2"></i>
+                                    <strong>Hướng dẫn:</strong> Cấu hình webhook để gửi dữ liệu tới n8n hoặc các dịch vụ tích hợp khác khi các cronjob chạy.
+                                </div>
+
+                                <div class="card border-primary mb-4">
+                                    <div class="card-header bg-primary text-white">
+                                        <h6 class="mb-0">
+                                            <i class="ph ph-webhook me-2"></i>Cấu hình Webhook
+                                        </h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="inova_webhook_url" class="form-label fw-bold">Webhook URL <span class="text-danger">*</span></label>
+                                            <input type="url" class="form-control" id="inova_webhook_url" name="inova_webhook_url" 
+                                                   value="<?php echo esc_attr($webhook_url); ?>" 
+                                                   placeholder="https://ai.inova.io.vn/webhook-test/inova-manager"
+                                                   required>
+                                            <small class="form-text text-muted">URL đầu cuối để nhận dữ liệu webhook (POST request)</small>
+                                        </div>
+
+                                        <div class="card border-warning mb-4">
+                                            <div class="card-header bg-light">
+                                                <h6 class="mb-0">
+                                                    <i class="ph ph-check-circle me-2"></i>Kích hoạt Webhook cho các sự kiện
+                                                </h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="d-flex gap-3 mb-2">
+                                                    <input type="checkbox" id="inova_webhook_enabled_renewal" 
+                                                           name="inova_webhook_enabled_renewal" value="1"
+                                                           <?php checked($webhook_enabled_renewal, 1); ?>>
+                                                    <label class="form-check-label" for="inova_webhook_enabled_renewal">
+                                                        <strong>Tự động tạo hóa đơn gia hạn</strong>
+                                                        <small class="d-block text-muted">Gửi dữ liệu khi cronjob auto_create_renewal_invoices tạo hóa đơn</small>
+                                                    </label>
+                                                </div>
+
+                                                <div class="d-flex gap-3">
+                                                    <input type="checkbox" id="inova_webhook_enabled_expiry" 
+                                                           name="inova_webhook_enabled_expiry" value="1"
+                                                           <?php checked($webhook_enabled_expiry, 1); ?>>
+                                                    <label class="form-check-label" for="inova_webhook_enabled_expiry">
+                                                        <strong>Kiểm tra dịch vụ hết hạn</strong>
+                                                        <small class="d-block text-muted">Gửi dữ liệu khi cronjob inovamanager_check_expiry_daily kiểm tra hóa đơn hết hạn</small>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="alert alert-secondary">
+                                            <strong><i class="ph ph-info me-2"></i>Định dạng dữ liệu gửi:</strong>
+                                            <ul class="mb-0 mt-2">
+                                                <li><strong>Renewal Invoice:</strong> invoice_id, invoice_link, customer_id, customer_name, total_amount, items (JSON)</li>
+                                                <li><strong>Expiry Check:</strong> services_expiring (array of domains, hostings, maintenances with details)</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="text-center">
+                                    <button type="submit" class="btn btn-primary btn-lg">
+                                        <i class="ph ph-floppy-disk me-2"></i>Lưu cấu hình Webhook
                                     </button>
                                 </div>
                             </form>

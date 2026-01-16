@@ -126,15 +126,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 // Reload maintenance data after update
                 $maintenance = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_name WHERE id = %d", $maintenance_id));
                 
-                // Auto-redirect to previous page or maintenance list after 1.5 seconds
+                // Redirect to previous page or maintenance list immediately
                 $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
                     ? esc_url($_POST['redirect_url']) 
                     : home_url('/danh-sach-goi-bao-tri/');
-                echo '<script>
-                    setTimeout(function() {
-                        window.location.href = "' . $redirect_url . '";
-                    }, 1500);
-                </script>';
+                wp_redirect($redirect_url);
+                exit;
             } else {
                 $notification = '<div class="alert alert-danger" role="alert">Không thể cập nhật gói bảo trì. Vui lòng thử lại.</div>';
             }

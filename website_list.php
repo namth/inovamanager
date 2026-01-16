@@ -87,7 +87,8 @@ $query = "
         $maintenance_table m ON w.maintenance_package_id = m.id
     {$where_clause}
     ORDER BY
-        w.name ASC
+        w.active_time IS NULL ASC,
+        w.active_time ASC
 ";
 
 // Pagination settings
