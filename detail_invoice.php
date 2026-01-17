@@ -21,6 +21,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
     
     if (isset($_POST['action'])) {
         switch ($_POST['action']) {
+            case 'delete_item':
+                $item_id = intval($_POST['item_id']);
+                
+                try {
+                    // Start transaction
+                    $wpdb->query('START TRANSACTION');
+                    
+                    // Get the item to delete
+                    $item_to_delete = $wpdb->get_row($wpdb->prepare("
+                        SELECT * FROM $invoice_items_table WHERE id = %d AND invoice_id = %d
+                    ", $item_id, $invoice_id));
+                    
+                    if (!$item_to_delete) {
+                        throw new Exception('Không tìm thấy item cần xóa');
+                    }
+                    
+                    // Delete the item
+                    $delete_result = $wpdb->delete($invoice_items_table, array('id' => $item_id));
+                    
+                    if ($delete_result === false) {
+                        throw new Exception('Lỗi khi xóa item khỏi hóa đơn');
+                    }
+                    
+                    // Recalculate invoice totals from remaining items
+                    $remaining_items = $wpdb->get_results($wpdb->prepare("
+                        SELECT ii.item_total, ii.vat_rate
+                        FROM $invoice_items_table ii
+                        WHERE ii.invoice_id = %d
+                        ORDER BY ii.id
+                    ", $invoice_id));
+                    
+                    // Calculate new totals
+                    $new_sub_total = 0;
+                    $new_tax_amount = 0;
+                    $has_vat = $invoice->requires_vat_invoice;
+                    
+                    foreach ($remaining_items as $item) {
+                        $item_total = floatval($item->item_total);
+                        $new_sub_total += $item_total;
+                        
+                        if ($has_vat) {
+                            $vat_rate = floatval($item->vat_rate);
+                            $item_tax = ($item_total * $vat_rate) / 100;
+                            $new_tax_amount += $item_tax;
+                        }
+                    }
+                    
+                    // Calculate new total with discount
+                    $discount_total = floatval($invoice->discount_total);
+                    $new_total_amount = $new_sub_total + $new_tax_amount - $discount_total;
+                    
+                    // Update invoice with new totals
+                    $update_result = $wpdb->update(
+                        $invoice_table,
+                        array(
+                            'sub_total' => $new_sub_total,
+                            'tax_amount' => $new_tax_amount,
+                            'total_amount' => $new_total_amount,
+                            'updated_at' => current_time('mysql')
+                        ),
+                        array('id' => $invoice_id)
+                    );
+                    
+                    if ($update_result === false) {
+                        throw new Exception('Lỗi khi cập nhật tổng tiền hóa đơn');
+                    }
+                    
+                    // Commit transaction
+                    $wpdb->query('COMMIT');
+                    
+                    $success_message = 'Đã xóa item khỏi hóa đơn. Tổng tiền đã được tính lại.';
+                    
+                } catch (Exception $e) {
+                    $wpdb->query('ROLLBACK');
+                    $error_message = 'Lỗi: ' . $e->getMessage();
+                }
+                break;
+                
             case 'mark_as_paid':
                 error_log('Processing mark_as_paid for invoice ID: ' . $invoice_id);
                 $paid_amount = floatval($_POST['paid_amount']);
@@ -563,6 +641,9 @@ get_header();
                                              <?php if ($invoice->requires_vat_invoice): ?>
                                              <th class="text-end">Tổng</th>
                                              <?php endif; ?>
+                                             <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
+                                             <th class="text-center">Thao tác</th>
+                                             <?php endif; ?>
                                          </tr>
                                      </thead>
                                      <tbody>
@@ -638,8 +719,18 @@ get_header();
                                                  echo number_format($item_total_final); 
                                              ?>đ</strong></td>
                                              <?php endif; ?>
-                                         </tr>
-                                         <?php endforeach; ?>
+                                             <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
+                                             <td class="text-center">
+                                                 <button type="button" class="btn btn-sm btn-danger delete-invoice-item" 
+                                                         data-item-id="<?php echo $item->id; ?>"
+                                                         data-item-name="<?php echo esc_attr($item->service_title ?: $item->description); ?>"
+                                                         title="Xóa item">
+                                                     <i class="ph ph-trash"></i>
+                                                 </button>
+                                             </td>
+                                             <?php endif; ?>
+                                             </tr>
+                                             <?php endforeach; ?>
                                      </tbody>
                                  </table>
                              </div>
@@ -1077,8 +1168,55 @@ jQuery(document).ready(function($) {
 <?php endif; ?>
 
 <script>
-// Form validation for payment modal and copy invoice link
+// Form validation for payment modal, copy invoice link, and delete invoice item
 jQuery(document).ready(function($) {
+    /**
+     * Delete invoice item handler
+     * Files using this: detail_invoice.php
+     */
+    $(document).on('click', '.delete-invoice-item', function(e) {
+        e.preventDefault();
+        
+        var itemId = $(this).data('item-id');
+        var itemName = $(this).data('item-name');
+        var invoiceId = <?php echo $invoice_id; ?>;
+        
+        // Confirm deletion
+        if (!confirm('Bạn chắc chắn muốn xóa item "' + itemName + '" khỏi hóa đơn?\n\nTổng tiền hóa đơn sẽ được tính lại.')) {
+            return;
+        }
+        
+        var btn = $(this);
+        var originalHtml = btn.html();
+        
+        // Show loading state
+        btn.prop('disabled', true);
+        btn.html('<i class="ph ph-spinner ph-spin"></i>');
+        
+        // Submit delete form via AJAX
+        $.ajax({
+            url: window.location.href,
+            type: 'POST',
+            data: {
+                action: 'delete_item',
+                item_id: itemId,
+                action_nonce: '<?php echo wp_create_nonce('invoice_action'); ?>'
+            },
+            success: function(response) {
+                // Reload page to show updated invoice
+                window.location.reload();
+            },
+            error: function(xhr, status, error) {
+                console.error('Error deleting item:', error);
+                alert('Lỗi khi xóa item. Vui lòng thử lại.');
+                
+                // Restore button
+                btn.prop('disabled', false);
+                btn.html(originalHtml);
+            }
+        });
+    });
+    
     /**
      * Copy invoice link handler
      */
