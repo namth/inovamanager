@@ -28,6 +28,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                     // Start transaction
                     $wpdb->query('START TRANSACTION');
                     
+                    // Get invoice requires_vat_invoice setting
+                    $invoice_record = $wpdb->get_row($wpdb->prepare(
+                        "SELECT requires_vat_invoice FROM $invoice_table WHERE id = %d",
+                        $invoice_id
+                    ));
+                    
+                    if (!$invoice_record) {
+                        throw new Exception('Không tìm thấy hóa đơn');
+                    }
+                    
                     // Get the item to delete
                     $item_to_delete = $wpdb->get_row($wpdb->prepare("
                         SELECT * FROM $invoice_items_table WHERE id = %d AND invoice_id = %d
@@ -46,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                     
                     // Recalculate invoice totals from remaining items
                     $remaining_items = $wpdb->get_results($wpdb->prepare("
-                        SELECT ii.item_total, ii.vat_rate
+                        SELECT ii.item_total, ii.vat_rate, ii.service_type, ii.service_id
                         FROM $invoice_items_table ii
                         WHERE ii.invoice_id = %d
                         ORDER BY ii.id
@@ -55,22 +65,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                     // Calculate new totals
                     $new_sub_total = 0;
                     $new_tax_amount = 0;
-                    $has_vat = $invoice->requires_vat_invoice;
+                    $new_discount_total = 0;
+                    $has_vat = $invoice_record->requires_vat_invoice;
                     
+                    // Sum up all item totals and calculate VAT per item (some items may have VAT, others may not)
+                    $hostings_table = $wpdb->prefix . 'im_hostings';
+                    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+                    
+                    // First pass: calculate subtotal and tax
+                     foreach ($remaining_items as $item) {
+                         $item_total = floatval($item->item_total);
+                         $new_sub_total += $item_total;
+                         
+                         // Calculate VAT for this item using VAT rate from item
+                         if ($has_vat) {
+                             $item_vat_rate = floatval($item->vat_rate ?? 0);
+                             $item_tax = ($item_total * $item_vat_rate) / 100;
+                             $new_tax_amount += $item_tax;
+                         }
+                     }
+                    
+                    // Second pass: calculate discount from services
                     foreach ($remaining_items as $item) {
-                        $item_total = floatval($item->item_total);
-                        $new_sub_total += $item_total;
-                        
-                        if ($has_vat) {
-                            $vat_rate = floatval($item->vat_rate);
-                            $item_tax = ($item_total * $vat_rate) / 100;
-                            $new_tax_amount += $item_tax;
+                        $discount_amount = 0;
+                        if ($item->service_type === 'hosting') {
+                            $service = $wpdb->get_row($wpdb->prepare(
+                                "SELECT discount_amount FROM $hostings_table WHERE id = %d",
+                                $item->service_id
+                            ));
+                            if ($service) {
+                                $discount_amount = floatval($service->discount_amount ?? 0);
+                            }
+                        } elseif ($item->service_type === 'maintenance') {
+                            $service = $wpdb->get_row($wpdb->prepare(
+                                "SELECT discount_amount FROM $maintenance_table WHERE id = %d",
+                                $item->service_id
+                            ));
+                            if ($service) {
+                                $discount_amount = floatval($service->discount_amount ?? 0);
+                            }
                         }
+                        
+                        $new_discount_total += $discount_amount;
                     }
                     
-                    // Calculate new total with discount
-                    $discount_total = floatval($invoice->discount_total);
-                    $new_total_amount = $new_sub_total + $new_tax_amount - $discount_total;
+                    // Calculate final total: subtotal + tax - discount
+                    $new_total_amount = $new_sub_total + $new_tax_amount - $new_discount_total;
                     
                     // Update invoice with new totals
                     $update_result = $wpdb->update(
@@ -79,6 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                             'sub_total' => $new_sub_total,
                             'tax_amount' => $new_tax_amount,
                             'total_amount' => $new_total_amount,
+                            'discount_total' => $new_discount_total,
                             'updated_at' => current_time('mysql')
                         ),
                         array('id' => $invoice_id)
@@ -90,6 +131,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                     
                     // Commit transaction
                     $wpdb->query('COMMIT');
+                    
+                    // Reload invoice to get updated values for display
+                    $invoice = $wpdb->get_row($wpdb->prepare("
+                        SELECT 
+                            i.*,
+                            u.name AS customer_name,
+                            u.user_code AS customer_code,
+                            u.email AS customer_email,
+                            u.tax_code,
+                            u.address AS customer_address,
+                            u.phone_number AS customer_phone,
+                            u.requires_vat_invoice
+                        FROM 
+                            $invoice_table i
+                        LEFT JOIN 
+                            $users_table u ON i.user_id = u.id
+                        WHERE 
+                            i.id = %d
+                    ", $invoice_id));
                     
                     $success_message = 'Đã xóa item khỏi hóa đơn. Tổng tiền đã được tính lại.';
                     
