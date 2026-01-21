@@ -654,10 +654,20 @@ function get_website_id_api($request) {
     $domain = preg_replace('#^https?://(www\.)?#', '', $domain);
     $domain = rtrim($domain, '/');
 
+    // Extract base domain from subdomain
+    // If domain is api.example.com, extract example.com
+    $base_domain = $domain;
+    $domain_parts = explode('.', $domain);
+    if (count($domain_parts) > 2) {
+        // It's a subdomain, extract base domain
+        $base_domain = implode('.', array_slice($domain_parts, -2));
+    }
+
     // Find website by domain name
     $domains_table = $wpdb->prefix . 'im_domains';
     $websites_table = $wpdb->prefix . 'im_websites';
 
+    // First try exact match
     $query = $wpdb->prepare("
         SELECT w.id, w.name, d.domain_name
         FROM {$websites_table} w
@@ -668,6 +678,20 @@ function get_website_id_api($request) {
     ", $domain);
 
     $website = $wpdb->get_row($query);
+
+    // If not found and domain is a subdomain, try base domain
+    if (!$website && $base_domain !== $domain) {
+        $query = $wpdb->prepare("
+            SELECT w.id, w.name, d.domain_name
+            FROM {$websites_table} w
+            LEFT JOIN {$domains_table} d ON w.domain_id = d.id
+            WHERE d.domain_name = %s
+            AND (w.status IS NULL OR w.status != 'DELETED')
+            LIMIT 1
+        ", $base_domain);
+
+        $website = $wpdb->get_row($query);
+    }
 
     if (!$website) {
         return new WP_REST_Response(
