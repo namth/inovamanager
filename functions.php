@@ -3349,13 +3349,13 @@ function get_services_at_expiry_milestone($milestone)
     $hostings = $wpdb->get_results($wpdb->prepare("
         SELECT
             h.id,
-            h.hosting_code,
+            h.hosting_code AS name,
             h.owner_user_id,
             u.name AS owner_name,
             u.email AS owner_email,
             u.user_code AS owner_code,
             h.expiry_date,
-            COALESCE(pc.renew_price, 0) AS renew_price,
+            COALESCE(pc.renew_price, 0) AS price,
             pc.name AS product_name,
             h.status,
             GROUP_CONCAT(w.name SEPARATOR ', ') AS website_names
@@ -3375,13 +3375,13 @@ function get_services_at_expiry_milestone($milestone)
     $maintenances = $wpdb->get_results($wpdb->prepare("
         SELECT
             m.id,
-            m.order_code,
+            m.order_code AS name,
             m.owner_user_id,
             u.name AS owner_name,
             u.email AS owner_email,
             u.user_code AS owner_code,
             m.expiry_date,
-            m.price_per_cycle,
+            m.price_per_cycle AS price,
             CONCAT('Gói bảo trì ', m.billing_cycle_months, ' tháng') AS product_name,
             m.status,
             GROUP_CONCAT(w.name SEPARATOR ', ') AS website_names
@@ -6975,7 +6975,7 @@ function prepare_expiry_webhook_data($expiring_domains, $expiring_hostings, $exp
         'domains' => array_map(function ($domain) {
             return array(
                 'id' => intval($domain->id),
-                'domain_name' => $domain->domain_name,
+                'domain_name' => $domain->name,
                 'owner_id' => intval($domain->owner_user_id),
                 'owner_name' => $domain->owner_name,
                 'expiry_date' => $domain->expiry_date,
@@ -6992,7 +6992,7 @@ function prepare_expiry_webhook_data($expiring_domains, $expiring_hostings, $exp
                 'owner_name' => $hosting->owner_name,
                 'expiry_date' => $hosting->expiry_date,
                 'days_until_expiry' => intval((strtotime($hosting->expiry_date) - time()) / 86400),
-                'renewal_price' => floatval($hosting->renew_price ?? 0),
+                'renewal_price' => floatval($hosting->price ?? 0),
                 'websites' => !empty($hosting->website_names) ? explode(', ', $hosting->website_names) : [],
                 'status' => $hosting->status
             );
@@ -7005,7 +7005,7 @@ function prepare_expiry_webhook_data($expiring_domains, $expiring_hostings, $exp
                 'owner_name' => $maintenance->owner_name,
                 'expiry_date' => $maintenance->expiry_date,
                 'days_until_expiry' => intval((strtotime($maintenance->expiry_date) - time()) / 86400),
-                'price_per_cycle' => floatval($maintenance->price_per_cycle ?? 0),
+                'price_per_cycle' => floatval($maintenance->price ?? 0),
                 'websites' => !empty($maintenance->website_names) ? explode(', ', $maintenance->website_names) : [],
                 'status' => $maintenance->status
             );

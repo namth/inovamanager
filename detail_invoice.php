@@ -169,6 +169,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                 // Start transaction to ensure data consistency
                 $wpdb->query('START TRANSACTION');
 
+                $payment_notes = $payment_notes?"\n\nGhi chú thanh toán: " . $payment_notes:"";
+
                 try {
                     // Update invoice status
                     $invoice_result = $wpdb->update(
@@ -177,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                             'paid_amount' => $paid_amount,
                             'payment_date' => $payment_date,
                             'payment_method' => $payment_method,
-                            'notes' => $wpdb->get_var($wpdb->prepare("SELECT notes FROM $invoice_table WHERE id = %d", $invoice_id)) . "\n\nGhi chú thanh toán: " . $payment_notes,
+                            'notes' => $wpdb->get_var($wpdb->prepare("SELECT notes FROM $invoice_table WHERE id = %d", $invoice_id)) . $payment_notes,
                             'status' => 'paid',
                             'updated_at' => current_time('mysql')
                         ),
@@ -507,10 +509,8 @@ if ($invoice->requires_vat_invoice) {
     $final_total = $invoice->sub_total - $invoice->discount_total;
 }
 
-// Apply commission deduction if pending
-if ($invoice->status === 'pending') {
-    $final_total -= $total_commission_deduction;
-}
+// Apply commission deduction (always apply regardless of status)
+$final_total -= $total_commission_deduction;
 
 // Get status options and colors
 $status_options = array(
@@ -695,7 +695,7 @@ get_header();
                                              <?php if ($invoice->requires_vat_invoice): ?>
                                              <th class="text-end">VAT <?php echo $group_vat_rate > 0 ? '(' . intval($group_vat_rate) . '%)' : ''; ?></th>
                                              <?php endif; ?>
-                                             <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
+                                             <?php if ($has_commission_deduction): ?>
                                              <th class="text-end">Chiết khấu</th>
                                              <?php endif; ?>
                                              <?php if ($invoice->requires_vat_invoice): ?>
@@ -762,7 +762,7 @@ get_header();
                                                  ?>
                                              </td>
                                              <?php endif; ?>
-                                             <?php if ($has_commission_deduction && $invoice->status === 'pending'): ?>
+                                             <?php if ($has_commission_deduction): ?>
                                              <td class="text-end">
                                                  <?php if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0): ?>
                                                      <span class="text-danger">-<?php echo number_format($item->withdrawn_commission); ?>đ</span>
@@ -820,8 +820,8 @@ get_header();
                                      </tr>
                                      <?php endif; ?>
                                      
-                                     <!-- Commission deduction for pending invoices -->
-                                     <?php if ($total_commission_deduction > 0 && $invoice->status === 'pending'): ?>
+                                     <!-- Commission deduction (always show if exists) -->
+                                     <?php if ($total_commission_deduction > 0): ?>
                                      <tr class="table-light">
                                          <td class="text-muted">Chiết khấu (rút tiền hoa hồng):</td>
                                          <td class="text-end text-danger">-<?php echo number_format($total_commission_deduction); ?> VNĐ</td>
@@ -1050,10 +1050,10 @@ get_header();
                     <div class="mb-3">
                         <label class="form-label">Số tiền thanh toán <span class="text-danger">*</span></label>
                         <input type="number" class="form-control" name="paid_amount" 
-                               value="<?php echo $invoice->total_amount - $invoice->paid_amount; ?>" 
-                               min="0" max="<?php echo $invoice->total_amount - $invoice->paid_amount; ?>" 
+                               value="<?php echo $final_total - $invoice->paid_amount; ?>" 
+                               min="0" max="<?php echo $final_total - $invoice->paid_amount; ?>" 
                                step="1000" required>
-                        <div class="form-text">Còn lại: <?php echo number_format($invoice->total_amount - $invoice->paid_amount); ?> VNĐ</div>
+                        <div class="form-text">Còn lại: <?php echo number_format($final_total - $invoice->paid_amount); ?> VNĐ</div>
                     </div>
                     
                     <div class="mb-3">

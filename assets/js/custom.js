@@ -883,6 +883,7 @@ jQuery(document).ready(function($) {
         $.ajax({
             url: AJAX.ajaxurl,
             type: 'POST',
+            dataType: 'json',
             data: {
                 action: 'renew_domain_one_year',
                 domain_id: domainId,
@@ -890,11 +891,6 @@ jQuery(document).ready(function($) {
             },
             success: function(response) {
                 if (response.success) {
-                    // Show success message
-                    alert('✅ Đã gia hạn thành công!\n\n' +
-                          'Tên miền: ' + domainName + '\n' +
-                          'Ngày hết hạn mới: ' + formatDate(response.data.new_expiry_date));
-
                     // Reload page to show updated data
                     location.reload();
                 } else {

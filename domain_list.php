@@ -217,7 +217,7 @@ get_header();
                     </div>
                     <?php else: ?>
                     <div class="table-responsive">
-                        <table class="table table-hover">
+                        <table class="table table-hover" data-renew-nonce="<?php echo wp_create_nonce('renew_domain_nonce'); ?>">
                             <thead>
                                 <tr class="bg-light">
                                     <?php if (is_inova_admin()): ?>

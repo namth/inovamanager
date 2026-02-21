@@ -306,7 +306,7 @@ get_header();
                                                  $current_time = current_time('timestamp');
                                                  $diff_minutes = ($current_time - $active_time) / 60;
 
-                                                 if ($diff_minutes <= 10) {
+                                                 if ($diff_minutes <= 1440) {
                                                      $status_color = 'success'; // Green (up)
                                                      $status_title = 'Website is up';
                                                  }

@@ -89,6 +89,13 @@ function register_bookorder_api_routes() {
         'callback' => 'get_website_management_info_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for getting users managed by a partner
+    register_rest_route('bookorder/v1', '/partner-managed-users', array(
+        'methods' => 'GET',
+        'callback' => 'get_partner_managed_users_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -791,6 +798,17 @@ function get_services_expiring_api($request) {
     $offset = ($page - 1) * $per_page;
     $today = date('Y-m-d');
     $target_date = date('Y-m-d', strtotime("{$days_offset} days"));
+    
+    // Determine date range for filtering
+    // days >= 0: Expiring soon (today to future)
+    // days < 0: Already expired within N days (past to today)
+    if ($days_offset >= 0) {
+        $start_date = $today;
+        $end_date = $target_date;
+    } else {
+        $start_date = $target_date;
+        $end_date = $today;
+    }
 
     $results = array();
     $total = 0;
@@ -821,15 +839,10 @@ function get_services_expiring_api($request) {
             $query_params[] = $owner_user_id;
         }
 
-        if ($days_offset >= 0) {
-            // Expiring soon: expiry_date = target_date (still have days left)
-            $domain_query .= " AND d.expiry_date = %s";
-            $query_params[] = $target_date;
-        } else {
-            // Already expired: expiry_date <= target_date (past the due date)
-            $domain_query .= " AND d.expiry_date <= %s";
-            $query_params[] = $target_date;
-        }
+        // Filter by date range (start_date to end_date)
+        $domain_query .= " AND d.expiry_date >= %s AND d.expiry_date <= %s";
+        $query_params[] = $start_date;
+        $query_params[] = $end_date;
 
         if (!empty($query_params)) {
             $domain_results = $wpdb->get_results($wpdb->prepare($domain_query, $query_params), ARRAY_A);
@@ -866,13 +879,10 @@ function get_services_expiring_api($request) {
             $query_params[] = $owner_user_id;
         }
 
-        if ($days_offset >= 0) {
-            $hosting_query .= " AND h.expiry_date = %s";
-            $query_params[] = $target_date;
-        } else {
-            $hosting_query .= " AND h.expiry_date <= %s";
-            $query_params[] = $target_date;
-        }
+        // Filter by date range (start_date to end_date)
+        $hosting_query .= " AND h.expiry_date >= %s AND h.expiry_date <= %s";
+        $query_params[] = $start_date;
+        $query_params[] = $end_date;
 
         if (!empty($query_params)) {
             $hosting_results = $wpdb->get_results($wpdb->prepare($hosting_query, $query_params), ARRAY_A);
@@ -909,13 +919,10 @@ function get_services_expiring_api($request) {
             $query_params[] = $owner_user_id;
         }
 
-        if ($days_offset >= 0) {
-            $maintenance_query .= " AND m.expiry_date = %s";
-            $query_params[] = $target_date;
-        } else {
-            $maintenance_query .= " AND m.expiry_date <= %s";
-            $query_params[] = $target_date;
-        }
+        // Filter by date range (start_date to end_date)
+        $maintenance_query .= " AND m.expiry_date >= %s AND m.expiry_date <= %s";
+        $query_params[] = $start_date;
+        $query_params[] = $end_date;
 
         if (!empty($query_params)) {
             $maintenance_results = $wpdb->get_results($wpdb->prepare($maintenance_query, $query_params), ARRAY_A);
@@ -962,8 +969,8 @@ function get_pending_invoices_api($request) {
 
     $page = isset($request['page']) ? max(1, intval($request['page'])) : 1;
     $per_page = isset($request['per_page']) ? intval($request['per_page']) : 20;
-    $user_id = isset($request['user_id']) ? intval($request['user_id']) : 0;
-    $overdue_days = isset($request['overdue_days']) ? intval($request['overdue_days']) : 0;  // If > 0, get only overdue invoices
+    $user_ids = isset($request['user_id']) ? $request['user_id'] : '';
+    $overdue_days = isset($request['overdue_days']) ? intval($request['overdue_days']) : 0;
 
     if ($per_page < 1 || $per_page > 100) {
         $per_page = 20;
@@ -971,6 +978,26 @@ function get_pending_invoices_api($request) {
 
     $offset = ($page - 1) * $per_page;
     $today = date('Y-m-d');
+
+    // Parse user_ids - can be single ID, comma-separated string, or JSON array
+    $user_id_array = array();
+    if (!empty($user_ids)) {
+        if (is_array($user_ids)) {
+            // Already an array
+            $user_id_array = array_map('intval', $user_ids);
+        } else {
+            // Try to parse as JSON array first
+            $parsed = json_decode($user_ids, true);
+            if (is_array($parsed)) {
+                $user_id_array = array_map('intval', $parsed);
+            } else {
+                // Parse as comma-separated string
+                $user_id_array = array_map('intval', array_filter(array_map('trim', explode(',', $user_ids))));
+            }
+        }
+        // Filter out zeros
+        $user_id_array = array_filter($user_id_array);
+    }
 
     // Build query
     $query = "
@@ -991,18 +1018,19 @@ function get_pending_invoices_api($request) {
             i.notes,
             u.name AS customer_name,
             u.email,
-            DATEDIFF(%s, i.due_date) AS days_overdue
+            IF(i.due_date >= %s, 0, DATEDIFF(%s, i.due_date)) AS days_overdue
         FROM {$invoices_table} i
         LEFT JOIN {$users_table} u ON i.user_id = u.id
-        WHERE i.status IN ('ISSUED', 'OVERDUE')
+        WHERE i.status IN ('pending', 'pending_completion')
     ";
 
-    $query_params = array($today);
+    $query_params = array($today, $today);
 
-    // Filter by user if provided
-    if ($user_id > 0) {
-        $query .= " AND i.user_id = %d";
-        $query_params[] = $user_id;
+    // Filter by user_ids if provided
+    if (!empty($user_id_array)) {
+        $placeholders = implode(',', array_fill(0, count($user_id_array), '%d'));
+        $query .= " AND i.user_id IN ({$placeholders})";
+        $query_params = array_merge($query_params, $user_id_array);
     }
 
     // Filter by overdue if specified
@@ -1018,19 +1046,46 @@ function get_pending_invoices_api($request) {
     $query_params[] = $offset;
 
     // Get results
-    $invoices = !empty($query_params) ? $wpdb->get_results($wpdb->prepare($query, $query_params), ARRAY_A) : $wpdb->get_results($query, ARRAY_A);
+    $invoices = $wpdb->get_results($wpdb->prepare($query, $query_params), ARRAY_A);
+
+    // Get invoice items for each invoice
+    $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+    
+    foreach ($invoices as &$invoice) {
+        $items_query = "
+            SELECT
+                id,
+                service_type,
+                service_id,
+                description,
+                renewal_period_description,
+                start_date,
+                end_date,
+                quantity,
+                unit_price,
+                item_total,
+                vat_rate,
+                vat_amount
+            FROM {$invoice_items_table}
+            WHERE invoice_id = %d
+            ORDER BY id
+        ";
+        
+        $invoice['items'] = $wpdb->get_results($wpdb->prepare($items_query, $invoice['id']), ARRAY_A);
+    }
 
     // Get total count
     $count_query = "
         SELECT COUNT(*) FROM {$invoices_table} i
-        WHERE i.status IN ('ISSUED', 'OVERDUE')
+        WHERE i.status IN ('pending', 'pending_completion')
     ";
 
     $count_params = array();
 
-    if ($user_id > 0) {
-        $count_query .= " AND i.user_id = %d";
-        $count_params[] = $user_id;
+    if (!empty($user_id_array)) {
+        $placeholders = implode(',', array_fill(0, count($user_id_array), '%d'));
+        $count_query .= " AND i.user_id IN ({$placeholders})";
+        $count_params = $user_id_array;
     }
 
     if ($overdue_days > 0) {
@@ -1039,7 +1094,7 @@ function get_pending_invoices_api($request) {
         $count_params[] = $overdue_days;
     }
 
-    $total = !empty($count_params) ? $wpdb->get_var($wpdb->prepare($count_query, $count_params)) : $wpdb->get_var($count_query);
+    $total = $wpdb->get_var($wpdb->prepare($count_query, $count_params));
     $total_pages = ceil($total / $per_page);
 
     return new WP_REST_Response(
@@ -1094,8 +1149,9 @@ function update_invoice_status_api($request) {
         );
     }
 
-    // Validate status value
-    $valid_statuses = array('DRAFT', 'ISSUED', 'OVERDUE', 'PAID', 'CANCELLED');
+    // Validate status value - convert to lowercase for consistency
+    $status = strtolower($status);
+    $valid_statuses = array('draft', 'pending', 'pending_completion', 'paid', 'canceled');
     if (!in_array($status, $valid_statuses)) {
         return new WP_REST_Response(
             array(
@@ -1126,25 +1182,28 @@ function update_invoice_status_api($request) {
     $update_data = array('status' => $status);
     $update_formats = array('%s');
 
-    // If status is PAID, update payment information
-    if ($status === 'PAID') {
+    // If status is paid, update payment information
+    if ($status === 'paid') {
         if (!$payment_date) {
             $payment_date = current_time('mysql');
         }
         if ($paid_amount === null) {
             $paid_amount = $invoice->total_amount;
         }
-        if (!$payment_method) {
-            $payment_method = 'Manual';
+        // Default payment method is bank transfer if not provided but amount is specified
+        if (!$payment_method && $paid_amount > 0) {
+            $payment_method = 'chuyển khoản ngân hàng';
         }
 
         $update_data['payment_date'] = $payment_date;
         $update_data['paid_amount'] = $paid_amount;
-        $update_data['payment_method'] = $payment_method;
+        if ($payment_method) {
+            $update_data['payment_method'] = $payment_method;
+            $update_formats[] = '%s';
+        }
 
         $update_formats[] = '%s';
         $update_formats[] = '%d';
-        $update_formats[] = '%s';
     }
 
     // Update invoice
@@ -1296,6 +1355,59 @@ function get_website_management_info_api($request) {
         array(
             'success' => true,
             'website' => $website
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for getting users managed by a partner
+ * Lấy danh sách user_id mà partner đó quản lý
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function get_partner_managed_users_api($request) {
+    global $wpdb;
+
+    $users_table = $wpdb->prefix . 'im_users';
+    $partner_id = isset($request['partner_id']) ? intval($request['partner_id']) : 0;
+
+    // Validate required parameter
+    if ($partner_id <= 0) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Missing or invalid required parameter: partner_id'
+            ),
+            400
+        );
+    }
+
+    // Get all users managed by this partner
+    $query = "
+        SELECT id, name, email, user_code, user_type, status
+        FROM {$users_table}
+        WHERE partner_id = %d
+        ORDER BY name ASC
+    ";
+
+    $users = $wpdb->get_results($wpdb->prepare($query, $partner_id), ARRAY_A);
+
+    // Extract user IDs and prepend partner_id at the beginning (convert all to integers)
+    $managed_user_ids = array_map('intval', array_column($users, 'id'));
+    $user_ids = array_merge([$partner_id], $managed_user_ids);
+
+    // Get total count
+    $total = count($users);
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'partner_id' => $partner_id,
+            'total_users' => $total,
+            'user_ids' => $user_ids,
+            'users' => $users
         ),
         200
     );
