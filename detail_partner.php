@@ -235,6 +235,19 @@ get_header();
                                 <?php if (!empty($contact->position)): ?>
                                 <span class="text-primary"><?php echo $contact->position; ?></span>
                                 <?php endif; ?>
+                                <?php if (!empty($contact->gender)): ?>
+                                <span class="text-muted">
+                                    <?php 
+                                        $gender_text = '';
+                                        switch($contact->gender) {
+                                            case 'MALE': $gender_text = 'Nam'; break;
+                                            case 'FEMALE': $gender_text = 'Nữ'; break;
+                                            case 'OTHER': $gender_text = 'Khác'; break;
+                                        }
+                                        echo $gender_text;
+                                    ?>
+                                </span>
+                                <?php endif; ?>
                                 <?php if (!empty($contact->email)): ?>
                                 <span><?php echo $contact->email; ?></span>
                                 <?php endif; ?>

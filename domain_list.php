@@ -523,8 +523,8 @@ get_header();
                     </div>
 
                     <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="confirmForceDelete">
                         <label class="form-check-label text-danger fw-bold" for="confirmForceDelete">
+                            <input class="form-check-input" type="checkbox" id="confirmForceDelete">
                             Tôi hiểu và muốn xóa domain kể cả khi đang được sử dụng
                         </label>
                     </div>

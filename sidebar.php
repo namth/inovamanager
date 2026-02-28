@@ -107,6 +107,12 @@ $user_type = get_inova_user_type();
         <!-- Admin Section - ADMIN ONLY -->
         <li class="nav-item nav-category">Dành cho quản trị viên</li>
         <li class="nav-item">
+            <a class="nav-link" href="<?php echo home_url('/thong-ke-doanh-thu/'); ?>">
+                <i class="menu-icon ph ph-chart-line"></i>
+                <span class="menu-title">Thống kê doanh thu</span>
+            </a>
+        </li>
+        <li class="nav-item">
             <a class="nav-link" href="<?php echo home_url('/danh-sach-doi-tac/'); ?>">
                 <i class="menu-icon ph ph-users-three"></i>
                 <span class="menu-title">Đối tác</span>
@@ -122,6 +128,12 @@ $user_type = get_inova_user_type();
             <a class="nav-link" href="<?php echo home_url('/danh-sach-san-pham/'); ?>">
                 <i class="menu-icon ph ph-package"></i>
                 <span class="menu-title">Danh mục sản phẩm</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" href="<?php echo home_url('/danh-sach-chi-tieu/'); ?>">
+                <i class="menu-icon ph ph-receipt"></i>
+                <span class="menu-title">Quản lý Chi tiêu</span>
             </a>
         </li>
         <?php endif; ?>

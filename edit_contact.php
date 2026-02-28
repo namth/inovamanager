@@ -35,6 +35,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $email = sanitize_email($_POST['email']);
         $phone_number = sanitize_text_field($_POST['phone_number']);
         $position = sanitize_text_field($_POST['position']);
+        $gender = sanitize_text_field($_POST['gender']) ?: null;
         $is_primary = isset($_POST['is_primary']) ? 1 : 0;
         
         // If this contact is marked as primary, update all other contacts to not be primary
@@ -54,6 +55,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 'email' => $email,
                 'phone_number' => $phone_number,
                 'position' => $position,
+                'gender' => $gender,
                 'is_primary' => $is_primary
             ),
             array('id' => $contact_id)
@@ -115,13 +117,23 @@ get_header();
                                     </div>
                                     
                                     <div class="form-group">
+                                        <label for="gender" class="fw-bold">Giới tính</label>
+                                        <select class="form-control" id="gender" name="gender">
+                                            <option value="">-- Chọn giới tính --</option>
+                                            <option value="MALE" <?php selected($contact->gender, 'MALE'); ?>>Nam</option>
+                                            <option value="FEMALE" <?php selected($contact->gender, 'FEMALE'); ?>>Nữ</option>
+                                            <option value="OTHER" <?php selected($contact->gender, 'OTHER'); ?>>Khác</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="form-group">
                                         <div class="form-check form-check-primary">
-                                            <label class="form-check-label">
-                                                <input type="checkbox" class="form-check-input" name="is_primary" <?php checked($contact->is_primary); ?>>
-                                                Đây là người liên hệ chính
-                                            </label>
-                                        </div>
-                                        <small class="form-text text-muted">Nếu đánh dấu, người này sẽ trở thành liên hệ chính thay thế liên hệ chính hiện tại (nếu có).</small>
+                                             <label class="form-check-label">
+                                                 <input type="checkbox" class="form-check-input" name="is_primary" <?php checked($contact->is_primary); ?>>
+                                                 Đây là người liên hệ chính
+                                             </label>
+                                         </div>
+                                         <small class="form-text text-muted">Nếu đánh dấu, người này sẽ trở thành liên hệ chính thay thế liên hệ chính hiện tại (nếu có).</small>
                                     </div>
                                     
                                     <?php
