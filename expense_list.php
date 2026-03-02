@@ -228,7 +228,7 @@ get_header();
                                     </td>
                                     <td><?php echo esc_html($expense->vendor ?? '-'); ?></td>
                                     <td>
-                                        <strong><?php echo $expense->amount; ?> VNĐ</strong>
+                                        <strong><?php echo number_format($expense->amount); ?> VNĐ</strong>
                                     </td>
                                     <td><?php echo date('d/m/Y', strtotime($expense->start_date)); ?></td>
                                     <td>

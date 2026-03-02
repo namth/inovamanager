@@ -60,6 +60,7 @@ $offset = ($current_page - 1) * $per_page;
 // Search filters
 $search_term = isset($_GET['search']) ? sanitize_text_field($_GET['search']) : '';
 $status_filter = isset($_GET['status']) ? sanitize_text_field($_GET['status']) : '';
+$status_type = isset($_GET['status_type']) ? sanitize_text_field($_GET['status_type']) : ''; // 'unpaid' or empty for paid
 $date_from = isset($_GET['date_from']) ? sanitize_text_field($_GET['date_from']) : '';
 $date_to = isset($_GET['date_to']) ? sanitize_text_field($_GET['date_to']) : '';
 
@@ -78,7 +79,10 @@ if (!empty($search_term)) {
     );
 }
 
-if (!empty($status_filter)) {
+// Handle status_type filter (unpaid filters by status != PAID and != CANCELED)
+if ($status_type === 'unpaid') {
+    $where_clause .= " AND i.status != 'PAID' AND i.status != 'CANCELED'";
+} elseif (!empty($status_filter)) {
     $where_clause .= $wpdb->prepare(" AND i.status = %s", $status_filter);
 }
 
@@ -87,7 +91,9 @@ if (!empty($date_from)) {
     $date_parts = explode('/', $date_from);
     if (count($date_parts) === 3) {
         $db_date = $date_parts[2] . '-' . $date_parts[1] . '-' . $date_parts[0];
-        $where_clause .= $wpdb->prepare(" AND i.invoice_date >= %s", $db_date);
+        // If filtering unpaid invoices, use invoice_date; otherwise use payment_date
+        $date_field = ($status_type === 'unpaid') ? 'i.invoice_date' : 'i.payment_date';
+        $where_clause .= $wpdb->prepare(" AND DATE({$date_field}) >= %s", $db_date);
     }
 }
 
@@ -96,7 +102,9 @@ if (!empty($date_to)) {
     $date_parts = explode('/', $date_to);
     if (count($date_parts) === 3) {
         $db_date = $date_parts[2] . '-' . $date_parts[1] . '-' . $date_parts[0];
-        $where_clause .= $wpdb->prepare(" AND i.invoice_date <= %s", $db_date);
+        // If filtering unpaid invoices, use invoice_date; otherwise use payment_date
+        $date_field = ($status_type === 'unpaid') ? 'i.invoice_date' : 'i.payment_date';
+        $where_clause .= $wpdb->prepare(" AND DATE({$date_field}) <= %s", $db_date);
     }
 }
 
@@ -235,6 +243,7 @@ get_header();
                                     <th>Sản phẩm/Dịch vụ</th>
                                     <th>Ngày xuất</th>
                                     <th>Hạn thanh toán</th>
+                                    <th>Ngày thanh toán</th>
                                     <th>Tổng tiền</th>
                                     <th>Thanh toán</th>
                                     <th>Trạng thái</th>
@@ -244,7 +253,7 @@ get_header();
                             <tbody>
                                 <?php if (empty($invoices)): ?>
                                 <tr>
-                                    <td colspan="9" class="text-center">Không tìm thấy hóa đơn nào</td>
+                                    <td colspan="10" class="text-center">Không tìm thấy hóa đơn nào</td>
                                 </tr>
                                 <?php else: ?>
                                     <?php foreach ($invoices as $invoice): ?>
@@ -276,8 +285,17 @@ get_header();
                                               </div>
                                           </td>
                                          <td><?php echo date('d/m/Y', strtotime($invoice->invoice_date)); ?></td>
-                                        <td><?php echo date('d/m/Y', strtotime($invoice->due_date)); ?></td>
-                                        <td><?php echo number_format($invoice->total_amount, 0, ',', '.'); ?> VNĐ</td>
+                                         <td><?php echo date('d/m/Y', strtotime($invoice->due_date)); ?></td>
+                                         <td>
+                                            <?php 
+                                            if (!empty($invoice->payment_date)) {
+                                                echo date('d/m/Y', strtotime($invoice->payment_date));
+                                            } else {
+                                                echo '<span class="text-muted">-</span>';
+                                            }
+                                            ?>
+                                         </td>
+                                         <td><?php echo number_format($invoice->total_amount, 0, ',', '.'); ?> VNĐ</td>
                                         <td><?php echo number_format($invoice->paid_amount, 0, ',', '.'); ?> VNĐ</td>
                                         <td>
                                             <?php

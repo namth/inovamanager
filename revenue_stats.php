@@ -36,9 +36,10 @@ if ($selected_year < $min_year || $selected_year > $max_year) {
 // Get permission where clause
 $permission_where = get_user_permission_where_clause('u', 'id');
 
-// Build WHERE clause
-$where_clause = "WHERE YEAR(i.invoice_date) = {$selected_year} 
-                 AND i.status = 'PAID' 
+// Build WHERE clause - Use payment_date for accurate revenue statistics
+$where_clause = "WHERE YEAR(i.payment_date) = {$selected_year} 
+                 AND i.status = 'PAID'
+                 AND i.payment_date IS NOT NULL
                  {$permission_where}";
 
 // Add partner filter if specified
@@ -46,20 +47,47 @@ if ($partner_filter > 0) {
     $where_clause .= $wpdb->prepare(" AND i.partner_id = %d", $partner_filter);
 }
 
-// Get monthly statistics for the year
+// Get monthly statistics for the year - Based on payment_date for paid, invoice_date for unpaid
 $monthly_stats = $wpdb->get_results("
     SELECT 
-        MONTH(i.invoice_date) AS month_num,
+        MONTH(i.payment_date) AS month_num,
         COUNT(i.id) AS invoice_count,
         SUM(i.total_amount) AS total_revenue,
-        SUM(CASE WHEN i.payment_date IS NOT NULL THEN i.total_amount ELSE 0 END) AS paid_amount,
-        SUM(CASE WHEN i.payment_date IS NULL THEN i.total_amount ELSE 0 END) AS unpaid_amount
+        SUM(i.total_amount) AS paid_amount,
+        0 AS unpaid_amount
     FROM {$invoices_table} i
     LEFT JOIN {$users_table} u ON i.user_id = u.id
     {$where_clause}
-    GROUP BY MONTH(i.invoice_date)
+    GROUP BY MONTH(i.payment_date)
     ORDER BY month_num ASC
 ");
+
+// Get monthly unpaid statistics - Based on invoice_date (excluding PAID and CANCELED)
+$unpaid_stats_query = "
+    SELECT 
+        MONTH(i.invoice_date) AS month_num,
+        SUM(i.total_amount) AS unpaid_amount
+    FROM {$invoices_table} i
+    LEFT JOIN {$users_table} u ON i.user_id = u.id
+    WHERE YEAR(i.invoice_date) = {$selected_year}
+    AND i.status != 'PAID'
+    AND i.status != 'CANCELED'
+    {$permission_where}";
+
+if ($partner_filter > 0) {
+    $unpaid_stats_query .= $wpdb->prepare(" AND i.partner_id = %d", $partner_filter);
+}
+
+$unpaid_stats_query .= " GROUP BY MONTH(i.invoice_date)
+    ORDER BY month_num ASC";
+
+$unpaid_monthly = $wpdb->get_results($unpaid_stats_query);
+
+// Map unpaid statistics by month
+$unpaid_by_month = array();
+foreach ($unpaid_monthly as $stat) {
+    $unpaid_by_month[$stat->month_num] = $stat->unpaid_amount;
+}
 
 // Get total statistics for the year
 $total_stats = $wpdb->get_row("
@@ -85,13 +113,15 @@ $outstanding_stats = $wpdb->get_row("
     {$permission_where}
 ");
 
-// Get partners list for filter
+// Get partners list for filter - Based on payment_date
 $partners = $wpdb->get_results("
     SELECT DISTINCT i.partner_id, u.name, u.user_code
     FROM {$invoices_table} i
     LEFT JOIN {$users_table} u ON i.partner_id = u.id
     WHERE i.partner_id IS NOT NULL
-    AND YEAR(i.invoice_date) = {$selected_year}
+    AND YEAR(i.payment_date) = {$selected_year}
+    AND i.status = 'PAID'
+    AND i.payment_date IS NOT NULL
     {$permission_where}
     ORDER BY u.name ASC
 ");
@@ -260,31 +290,36 @@ get_header();
                                 $invoice_count = $stat ? intval($stat->invoice_count) : 0;
                                 $total = $stat ? intval($stat->total_revenue) : 0;
                                 $paid = $stat ? intval($stat->paid_amount) : 0;
-                                $unpaid = $stat ? intval($stat->unpaid_amount) : 0;
+                                $unpaid = isset($unpaid_by_month[$m]) ? intval($unpaid_by_month[$m]) : 0;
                                 $percentage = $total > 0 ? round(($paid / $total) * 100) : 0;
                                 ?>
                                 <tr>
                                     <td><?php echo esc_html($month_names[$m]); ?></td>
                                     <td class="text-right">
-                                        <span class="badge bg-primary"><?php echo $invoice_count; ?></span>
+                                        <span class="badge bg-danger border-radius-9"><?php echo $invoice_count; ?></span>
                                     </td>
                                     <td class="text-right fw-bold">
                                         <?php echo number_format($total); ?> ₫
                                     </td>
                                     <td class="text-right">
-                                        <span class="text-success">
+                                        <span class="text-success fw-bold">
                                             <?php echo number_format($paid); ?> ₫
                                         </span>
                                     </td>
                                     <td class="text-right">
-                                        <span class="text-warning">
+                                        <span class="text-danger fw-bold">
                                             <?php echo number_format($unpaid); ?> ₫
                                         </span>
                                     </td>
                                     <td class="text-center">
-                                        <button class="btn btn-sm btn-info view-month-details" data-month="<?php echo $m; ?>" data-year="<?php echo $selected_year; ?>">
-                                            <i class="ph ph-eye"></i> Chi tiết
-                                        </button>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn bg-success text-white border-success view-month-details d-flex align-items-center gap-1" data-month="<?php echo $m; ?>" data-year="<?php echo $selected_year; ?>" title="Xem hóa đơn đã thanh toán">
+                                                <i class="ph ph-eye"></i> Đã TT
+                                            </button>
+                                            <button class="btn bg-light-warning text-dark border-dark view-month-unpaid d-flex align-items-center gap-1" data-month="<?php echo $m; ?>" data-year="<?php echo $selected_year; ?>" title="Xem hóa đơn chưa thanh toán">
+                                                <i class="ph ph-eye"></i> Chưa TT
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endfor; ?>
@@ -297,20 +332,24 @@ get_header();
 </div>
 
 <?php
-// Data for JavaScript
-$chart_data = array();
+// Data for JavaScript - Include both paid and unpaid
+$chart_data_paid = array();
+$chart_data_unpaid = array();
 $labels = array();
 for ($m = 1; $m <= 12; $m++) {
     $labels[] = 'T' . $m;
     $stat = isset($stats_by_month[$m]) ? $stats_by_month[$m] : null;
-    $chart_data[] = $stat ? intval($stat->total_revenue) : 0;
+    $chart_data_paid[] = $stat ? intval($stat->total_revenue) : 0;
+    $unpaid = isset($unpaid_by_month[$m]) ? intval($unpaid_by_month[$m]) : 0;
+    $chart_data_unpaid[] = $unpaid;
 }
 ?>
 
 <script>
 // Data for chart
 const chartLabels = <?php echo json_encode($labels); ?>;
-const chartData = <?php echo json_encode($chart_data); ?>;
+const chartDataPaid = <?php echo json_encode($chart_data_paid); ?>;
+const chartDataUnpaid = <?php echo json_encode($chart_data_unpaid); ?>;
 
 jQuery(document).ready(function($) {
     // Initialize Chart.js if available
@@ -321,18 +360,31 @@ jQuery(document).ready(function($) {
                 type: 'bar',
                 data: {
                     labels: chartLabels,
-                    datasets: [{
-                        label: 'Doanh Thu (VNĐ)',
-                        data: chartData,
-                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1
-                    }]
+                    datasets: [
+                        {
+                            label: 'Đã Thanh Toán (VNĐ)',
+                            data: chartDataPaid,
+                            backgroundColor: 'rgba(75, 192, 75, 0.6)',
+                            borderColor: 'rgba(75, 192, 75, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Chưa Thanh Toán (VNĐ)',
+                            data: chartDataUnpaid,
+                            backgroundColor: 'rgba(255, 159, 64, 0.6)',
+                            borderColor: 'rgba(255, 159, 64, 1)',
+                            borderWidth: 1
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     scales: {
+                        x: {
+                            stacked: true
+                        },
                         y: {
+                            stacked: true,
                             beginAtZero: true,
                             ticks: {
                                 callback: function(value) {
@@ -365,12 +417,28 @@ jQuery(document).ready(function($) {
         window.location.href = '<?php echo home_url('/revenue-stats/'); ?>?year=' + year + '&partner=' + partner;
     });
 
-    // View month details
+    // View month details - Format: d/m/Y with correct last day of month
     $(document).on('click', '.view-month-details', function() {
         const month = $(this).data('month');
         const year = $(this).data('year');
-        window.location.href = '<?php echo home_url('/list-invoice/'); ?>?date_from=' + month + '/01/' + year + 
-                               '&date_to=' + month + '/31/' + year + '&status=PAID';
+        // Get last day of month (handles Feb 28/29, 30-day months, etc.)
+        const lastDay = new Date(year, month, 0).getDate();
+        // Pad month with leading zero if needed
+        const paddedMonth = String(month).padStart(2, '0');
+        window.location.href = '<?php echo home_url('/list-invoice/'); ?>?date_from=01/' + paddedMonth + '/' + year + 
+                               '&date_to=' + lastDay + '/' + paddedMonth + '/' + year + '&status=PAID';
+    });
+
+    // View unpaid invoices - Format: d/m/Y with correct last day of month
+    $(document).on('click', '.view-month-unpaid', function() {
+        const month = $(this).data('month');
+        const year = $(this).data('year');
+        // Get last day of month (handles Feb 28/29, 30-day months, etc.)
+        const lastDay = new Date(year, month, 0).getDate();
+        // Pad month with leading zero if needed
+        const paddedMonth = String(month).padStart(2, '0');
+        window.location.href = '<?php echo home_url('/list-invoice/'); ?>?date_from=01/' + paddedMonth + '/' + year + 
+                               '&date_to=' + lastDay + '/' + paddedMonth + '/' + year + '&status_type=unpaid';
     });
 });
 </script>
