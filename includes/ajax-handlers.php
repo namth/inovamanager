@@ -2341,6 +2341,92 @@ function export_revenue_report_callback()
     exit;
 }
 
+/**
+ * Edit recurring expense - POST handler
+ */
+function edit_expense_post_callback() {
+    if (!is_inova_admin()) {
+        wp_redirect(home_url('/'));
+        exit;
+    }
+
+    if (isset($_POST['post_expense_field']) && wp_verify_nonce($_POST['post_expense_field'], 'post_expense')) {
+        global $wpdb;
+        $table = $wpdb->prefix . 'im_recurring_expenses';
+
+        $expense_id = intval($_POST['expense_id']);
+        $name = sanitize_text_field($_POST['name']);
+        $category = sanitize_text_field($_POST['category']);
+        $vendor = sanitize_text_field($_POST['vendor']);
+        $amount = intval($_POST['amount']);
+        $status = sanitize_text_field($_POST['status']);
+        $note = sanitize_textarea_field($_POST['note']);
+
+        // Validation
+        if (empty($name)) {
+            wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=name'));
+            exit;
+        } elseif ($amount <= 0) {
+            wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=amount'));
+            exit;
+        }
+
+        // Start date handling
+        if (isset($_POST['start_date']) && !empty($_POST['start_date'])) {
+            // Convert from dd/mm/yyyy to yyyy-mm-dd
+            $start_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['start_date'])));
+            
+            // End date handling (optional)
+            $end_date = null;
+            if (isset($_POST['end_date']) && !empty($_POST['end_date'])) {
+                $end_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['end_date'])));
+            }
+
+            if (!empty($end_date) && strtotime($end_date) < strtotime($start_date)) {
+                wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=date'));
+                exit;
+            }
+
+            $data = array(
+                'name' => $name,
+                'category' => $category,
+                'vendor' => $vendor,
+                'amount' => $amount,
+                'start_date' => $start_date,
+                'end_date' => $end_date,
+                'status' => $status,
+                'note' => $note
+            );
+            
+            $update = $wpdb->update(
+                $table,
+                $data,
+                array('id' => $expense_id),
+                array('%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s'),
+                array('%d')
+            );
+
+            if ($update !== false) {
+                // Redirect to previous page or expense list
+                $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
+                    ? esc_url($_POST['redirect_url']) 
+                    : home_url('/danh-sach-chi-tieu/');
+                wp_redirect($redirect_url);
+                exit;
+            } else {
+                wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=update'));
+                exit;
+            }
+        } else {
+            wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=start_date'));
+            exit;
+        }
+    }
+
+    wp_redirect(home_url('/danh-sach-chi-tieu/'));
+    exit;
+}
+
 // Expense management
 add_action('wp_ajax_delete_expense', 'delete_expense_callback');
 add_action('wp_ajax_update_expense_status', 'update_expense_status_callback');
