@@ -295,8 +295,8 @@ get_header();
                                             }
                                             ?>
                                          </td>
-                                         <td><?php echo number_format($invoice->total_amount, 0, ',', '.'); ?> VNĐ</td>
-                                        <td><?php echo number_format($invoice->paid_amount, 0, ',', '.'); ?> VNĐ</td>
+                                         <td><?php echo number_format($invoice->total_amount); ?> VNĐ</td>
+                                         <td><?php echo number_format($invoice->paid_amount); ?> VNĐ</td>
                                         <td>
                                             <?php
                                             switch ($invoice->status) {

@@ -681,7 +681,7 @@ jQuery(document).ready(function($) {
          * Format prices with thousand separators (Vietnamese format: 1.000.000)
          */
         function formatPrice(price) {
-            return parseInt(price).toLocaleString('vi-VN');
+            return parseInt(price).toLocaleString('en-US');
         }
 
         /**
@@ -997,21 +997,4 @@ jQuery(document).ready(function($) {
             }
         });
     });
-
-    /**
-     * Recurring Expenses Management
-     * Files using this: expense_list.php, edit_expense.php, addnew_expense.php
-     */
-    
-    // Format currency in expense list
-    if ($('table').length) {
-        $('table td').each(function() {
-            var text = $(this).text();
-            // Format numbers that look like currency (with VNĐ)
-            if (text.includes('VNĐ') && !isNaN(parseFloat(text))) {
-                var amount = parseFloat(text);
-                $(this).text(new Intl.NumberFormat('vi-VN').format(amount) + ' VNĐ');
-            }
-        });
-    }
 });
