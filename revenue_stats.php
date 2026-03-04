@@ -5,7 +5,9 @@
 
 global $wpdb;
 $invoices_table = $wpdb->prefix . 'im_invoices';
+$invoice_items_table = $wpdb->prefix . 'im_invoice_items';
 $users_table = $wpdb->prefix . 'im_users';
+$commissions_table = $wpdb->prefix . 'im_partner_commissions';
 
 // Check authentication
 if (!is_user_logged_in()) {
@@ -53,7 +55,7 @@ $monthly_stats = $wpdb->get_results("
         MONTH(i.payment_date) AS month_num,
         COUNT(i.id) AS invoice_count,
         SUM(i.total_amount) AS total_revenue,
-        SUM(i.total_amount) AS paid_amount,
+        SUM(i.paid_amount) AS paid_amount,
         0 AS unpaid_amount
     FROM {$invoices_table} i
     LEFT JOIN {$users_table} u ON i.user_id = u.id
@@ -89,6 +91,51 @@ foreach ($unpaid_monthly as $stat) {
     $unpaid_by_month[$stat->month_num] = $stat->unpaid_amount;
 }
 
+// Get monthly commission statistics - Based on created_at, no status filter
+$commission_stats_query = "
+    SELECT 
+        MONTH(c.created_at) AS month_num,
+        SUM(c.commission_amount) AS commission_amount
+    FROM {$commissions_table} c
+    WHERE YEAR(c.created_at) = {$selected_year}
+    {$permission_where}";
+
+if ($partner_filter > 0) {
+    $commission_stats_query .= $wpdb->prepare(" AND c.partner_id = %d", $partner_filter);
+}
+
+$commission_stats_query .= " GROUP BY MONTH(c.created_at)
+    ORDER BY month_num ASC";
+
+$commission_monthly = $wpdb->get_results($commission_stats_query);
+
+// Map commission statistics by month
+$commission_by_month = array();
+foreach ($commission_monthly as $stat) {
+    $commission_by_month[$stat->month_num] = $stat->commission_amount;
+}
+
+// Get paid amount by service type for the year
+// Calculate proportional paid amount based on item_total ratio
+$service_type_stats = $wpdb->get_results("
+    SELECT 
+        ii.service_type,
+        SUM(ii.item_total) AS total_item_amount,
+        SUM(i.paid_amount) AS total_paid_for_invoice,
+        SUM(ii.item_total * i.paid_amount / i.total_amount) AS service_paid_amount
+    FROM {$invoices_table} i
+    LEFT JOIN {$invoice_items_table} ii ON i.id = ii.invoice_id
+    LEFT JOIN {$users_table} u ON i.user_id = u.id
+    WHERE YEAR(i.payment_date) = {$selected_year}
+    AND i.status = 'PAID'
+    AND i.payment_date IS NOT NULL
+    AND i.total_amount > 0
+    {$permission_where}
+    " . ($partner_filter > 0 ? $wpdb->prepare("AND i.partner_id = %d", $partner_filter) : "") . "
+    GROUP BY ii.service_type
+    ORDER BY ii.service_type ASC
+");
+
 // Get total statistics for the year
 $total_stats = $wpdb->get_row("
     SELECT 
@@ -112,6 +159,22 @@ $outstanding_stats = $wpdb->get_row("
     AND i.status != 'PAID'
     {$permission_where}
 ");
+
+// Get unique service types and prepare service type map
+$service_type_map = array(
+    'domain' => 'Tên Miền',
+    'hosting' => 'Hosting',
+    'maintenance' => 'Bảo Trì',
+    'website_service' => 'Dịch Vụ Website'
+);
+
+$service_types = array();
+foreach ($service_type_stats as $stat) {
+    if ($stat->service_type && $stat->service_paid_amount > 0) {
+        $service_types[$stat->service_type] = true;
+    }
+}
+$service_types = array_keys($service_types);
 
 // Get partners list for filter - Based on payment_date
 $partners = $wpdb->get_results("
@@ -260,6 +323,40 @@ get_header();
                 </div>
             </div>
 
+            <!-- Service Type Summary Cards -->
+            <div class="row mt-4">
+                <?php 
+                $service_colors = array(
+                    'website_service' => array('color' => 'text-info', 'bg' => 'border-info'),
+                    'domain' => array('color' => 'text-primary', 'bg' => 'border-primary'),
+                    'hosting' => array('color' => 'text-success', 'bg' => 'border-success'),
+                    'maintenance' => array('color' => 'text-warning', 'bg' => 'border-warning')
+                );
+                
+                foreach ($service_types as $st):
+                    $stat = null;
+                    foreach ($service_type_stats as $s) {
+                        if ($s->service_type == $st) {
+                            $stat = $s;
+                            break;
+                        }
+                    }
+                    $amount = $stat ? intval($stat->service_paid_amount) : 0;
+                    $colors = isset($service_colors[$st]) ? $service_colors[$st] : array('color' => 'text-secondary', 'bg' => 'border-secondary');
+                ?>
+                <div class="col-md-3">
+                    <div class="card <?php echo $colors['bg']; ?>">
+                        <div class="card-body">
+                            <div class="text-muted"><?php echo isset($service_type_map[$st]) ? $service_type_map[$st] : $st; ?></div>
+                            <div class="fs-4 fw-bold <?php echo $colors['color']; ?>">
+                                <?php echo number_format($amount); ?> ₫
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+
             <!-- Monthly Table -->
             <div class="card mt-4">
                 <div class="card-header">
@@ -274,6 +371,7 @@ get_header();
                                 <th class="text-right">Tổng Tiền</th>
                                 <th class="text-right">Đã TT</th>
                                 <th class="text-right">Chưa TT</th>
+                                <th class="text-right">Hoa Hồng</th>
                                 <th class="text-center">Thao Tác</th>
                             </tr>
                         </thead>
@@ -291,6 +389,7 @@ get_header();
                                 $total = $stat ? intval($stat->total_revenue) : 0;
                                 $paid = $stat ? intval($stat->paid_amount) : 0;
                                 $unpaid = isset($unpaid_by_month[$m]) ? intval($unpaid_by_month[$m]) : 0;
+                                $commission = isset($commission_by_month[$m]) ? intval($commission_by_month[$m]) : 0;
                                 $percentage = $total > 0 ? round(($paid / $total) * 100) : 0;
                                 ?>
                                 <tr>
@@ -307,8 +406,13 @@ get_header();
                                         </span>
                                     </td>
                                     <td class="text-right">
-                                        <span class="text-danger fw-bold">
+                                        <span class="text-warning fw-bold">
                                             <?php echo number_format($unpaid); ?> ₫
+                                        </span>
+                                    </td>
+                                    <td class="text-right">
+                                        <span class="text-danger fw-bold">
+                                            <?php echo number_format($commission); ?> ₫
                                         </span>
                                     </td>
                                     <td class="text-center">
@@ -332,14 +436,58 @@ get_header();
 </div>
 
 <?php
-// Data for JavaScript - Include both paid and unpaid
-$chart_data_paid = array();
+// Get monthly paid amount by service type
+$monthly_service_type_query = "
+    SELECT 
+        MONTH(i.payment_date) AS month_num,
+        ii.service_type,
+        SUM(ii.item_total * i.paid_amount / i.total_amount) AS service_paid_amount
+    FROM {$invoices_table} i
+    LEFT JOIN {$invoice_items_table} ii ON i.id = ii.invoice_id
+    LEFT JOIN {$users_table} u ON i.user_id = u.id
+    WHERE YEAR(i.payment_date) = {$selected_year}
+    AND i.status = 'PAID'
+    AND i.payment_date IS NOT NULL
+    AND i.total_amount > 0
+    {$permission_where}
+    " . ($partner_filter > 0 ? $wpdb->prepare("AND i.partner_id = %d", $partner_filter) : "") . "
+    GROUP BY MONTH(i.payment_date), ii.service_type
+    ORDER BY MONTH(i.payment_date) ASC, ii.service_type ASC";
+
+$monthly_service_type_data = $wpdb->get_results($monthly_service_type_query);
+
+// Build map of monthly service type data: [month][service_type] = amount
+$service_type_by_month = array();
+foreach ($monthly_service_type_data as $data) {
+    if (!isset($service_type_by_month[$data->month_num])) {
+        $service_type_by_month[$data->month_num] = array();
+    }
+    $service_type_by_month[$data->month_num][$data->service_type] = intval($data->service_paid_amount);
+}
+
+// Data for JavaScript - Chart shows: Đã TT (tổng), Chưa TT, Hoa Hồng
+$chart_data_paid = array(); // Tổng đã TT
 $chart_data_unpaid = array();
+$chart_data_commission = array();
 $labels = array();
+
 for ($m = 1; $m <= 12; $m++) {
     $labels[] = 'T' . $m;
-    $stat = isset($stats_by_month[$m]) ? $stats_by_month[$m] : null;
-    $chart_data_paid[] = $stat ? intval($stat->total_revenue) : 0;
+    
+    // Tổng Đã TT = sum of all service types in this month
+    $total_paid = 0;
+    if (isset($service_type_by_month[$m])) {
+        foreach ($service_type_by_month[$m] as $amount) {
+            $total_paid += intval($amount);
+        }
+    }
+    $chart_data_paid[] = $total_paid;
+    
+    // Commission as negative (chi phí)
+    $commission = isset($commission_by_month[$m]) ? intval($commission_by_month[$m]) : 0;
+    $chart_data_commission[] = -$commission;
+    
+    // Unpaid
     $unpaid = isset($unpaid_by_month[$m]) ? intval($unpaid_by_month[$m]) : 0;
     $chart_data_unpaid[] = $unpaid;
 }
@@ -350,6 +498,7 @@ for ($m = 1; $m <= 12; $m++) {
 const chartLabels = <?php echo json_encode($labels); ?>;
 const chartDataPaid = <?php echo json_encode($chart_data_paid); ?>;
 const chartDataUnpaid = <?php echo json_encode($chart_data_unpaid); ?>;
+const chartDataCommission = <?php echo json_encode($chart_data_commission); ?>;
 
 jQuery(document).ready(function($) {
     // Initialize Chart.js if available
@@ -373,6 +522,13 @@ jQuery(document).ready(function($) {
                             data: chartDataUnpaid,
                             backgroundColor: 'rgba(255, 159, 64, 0.6)',
                             borderColor: 'rgba(255, 159, 64, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Hoa Hồng - Chi Phí (VNĐ)',
+                            data: chartDataCommission,
+                            backgroundColor: 'rgba(220, 53, 69, 0.6)',
+                            borderColor: 'rgba(220, 53, 69, 1)',
                             borderWidth: 1
                         }
                     ]
