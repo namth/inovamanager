@@ -12,7 +12,8 @@ if (!defined('ABSPATH')) {
 /**
  * Register REST API endpoints
  */
-function register_bookorder_api_routes() {
+function register_bookorder_api_routes()
+{
     // Register route for importing a single partner
     register_rest_route('bookorder/v1', '/import-partner', array(
         'methods' => 'POST',
@@ -105,17 +106,18 @@ add_action('rest_api_init', 'register_bookorder_api_routes');
  * @param WP_REST_Request $request The request object
  * @return bool True if valid API key, false otherwise
  */
-function validate_api_key($request) {
+function validate_api_key($request)
+{
     // Get API key from request headers
     $api_key = $request->get_header('X-API-KEY');
-    
+
     if (!$api_key) {
         return false;
     }
-    
+
     // Define your API key or retrieve it from options
     $valid_api_key = get_option('bookorder_api_key', 'your-secure-api-key-here');
-    
+
     return $api_key === $valid_api_key;
 }
 
@@ -125,10 +127,11 @@ function validate_api_key($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function import_partner_api($request) {
+function import_partner_api($request)
+{
     // Get parameters from request
     $params = $request->get_params();
-    
+
     // Validate required fields
     $required_fields = ['user_code', 'user_type', 'name'];
     foreach ($required_fields as $field) {
@@ -137,12 +140,12 @@ function import_partner_api($request) {
                 array(
                     'success' => false,
                     'message' => "Missing required field: {$field}"
-                ), 
+                ),
                 400
             );
         }
     }
-    
+
     // Validate user_type
     $valid_user_types = ['INDIVIDUAL', 'BUSINESS', 'PARTNER', 'SUPPLIER'];
     if (!in_array($params['user_type'], $valid_user_types)) {
@@ -150,40 +153,40 @@ function import_partner_api($request) {
             array(
                 'success' => false,
                 'message' => "Invalid user_type - must be one of: " . implode(', ', $valid_user_types)
-            ), 
+            ),
             400
         );
     }
-    
+
     // Validate email if provided
     if (!empty($params['email']) && !is_email($params['email'])) {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "Invalid email format"
-            ), 
+            ),
             400
         );
     }
-    
+
     global $wpdb;
     $users_table = $wpdb->prefix . 'im_users';
-    
+
     // Check if user_code already exists
     $existing = $wpdb->get_var(
         $wpdb->prepare("SELECT COUNT(*) FROM $users_table WHERE user_code = %s", $params['user_code'])
     );
-    
+
     if ($existing > 0) {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "User code '{$params['user_code']}' already exists"
-            ), 
+            ),
             400
         );
     }
-    
+
     // Prepare data for insertion
     $insert_data = array(
         'user_code' => sanitize_text_field($params['user_code']),
@@ -196,10 +199,10 @@ function import_partner_api($request) {
         'notes' => !empty($params['notes']) ? sanitize_text_field($params['notes']) : '',
         'status' => 'ACTIVE'
     );
-    
+
     // Insert into database
     $result = $wpdb->insert($users_table, $insert_data);
-    
+
     if ($result) {
         $user_id = $wpdb->insert_id;
         return new WP_REST_Response(
@@ -208,7 +211,7 @@ function import_partner_api($request) {
                 'message' => "Partner imported successfully",
                 'user_id' => $user_id,
                 'user_data' => $insert_data
-            ), 
+            ),
             201
         );
     } else {
@@ -216,7 +219,7 @@ function import_partner_api($request) {
             array(
                 'success' => false,
                 'message' => "Database error while inserting partner"
-            ), 
+            ),
             500
         );
     }
@@ -228,39 +231,40 @@ function import_partner_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function update_partner_api($request) {
+function update_partner_api($request)
+{
     // Get parameters from request
     $params = $request->get_params();
     $user_id = $request->get_param('id');
-    
+
     if (!$user_id) {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "Missing user ID"
-            ), 
+            ),
             400
         );
     }
-    
+
     global $wpdb;
     $users_table = $wpdb->prefix . 'im_users';
-    
+
     // Check if user exists
     $user = $wpdb->get_row(
         $wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $user_id)
     );
-    
+
     if (!$user) {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "User with ID {$user_id} not found"
-            ), 
+            ),
             404
         );
     }
-    
+
     // Validate user_type if provided
     if (!empty($params['user_type'])) {
         $valid_user_types = ['INDIVIDUAL', 'BUSINESS', 'PARTNER', 'SUPPLIER'];
@@ -269,87 +273,99 @@ function update_partner_api($request) {
                 array(
                     'success' => false,
                     'message' => "Invalid user_type - must be one of: " . implode(', ', $valid_user_types)
-                ), 
+                ),
                 400
             );
         }
     }
-    
+
     // Validate email if provided
     if (!empty($params['email']) && !is_email($params['email'])) {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "Invalid email format"
-            ), 
+            ),
             400
         );
     }
-    
+
     // Check if user_code is being updated and if it already exists
     if (!empty($params['user_code']) && $params['user_code'] !== $user->user_code) {
         $existing = $wpdb->get_var(
-            $wpdb->prepare("SELECT COUNT(*) FROM $users_table WHERE user_code = %s AND id != %d", 
-                $params['user_code'], $user_id)
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM $users_table WHERE user_code = %s AND id != %d",
+                $params['user_code'],
+                $user_id
+            )
         );
-        
+
         if ($existing > 0) {
             return new WP_REST_Response(
                 array(
                     'success' => false,
                     'message' => "User code '{$params['user_code']}' already exists"
-                ), 
+                ),
                 400
             );
         }
     }
-    
+
     // Prepare data for update
     $update_data = array();
-    
+
     // Only update fields that are provided
-    if (!empty($params['user_code'])) $update_data['user_code'] = sanitize_text_field($params['user_code']);
-    if (!empty($params['user_type'])) $update_data['user_type'] = sanitize_text_field($params['user_type']);
-    if (!empty($params['name'])) $update_data['name'] = sanitize_text_field($params['name']);
-    if (isset($params['email'])) $update_data['email'] = sanitize_email($params['email']);
-    if (isset($params['phone_number'])) $update_data['phone_number'] = sanitize_text_field($params['phone_number']);
-    if (isset($params['tax_code'])) $update_data['tax_code'] = sanitize_text_field($params['tax_code']);
-    if (isset($params['address'])) $update_data['address'] = sanitize_text_field($params['address']);
-    if (isset($params['notes'])) $update_data['notes'] = sanitize_text_field($params['notes']);
-    if (isset($params['status'])) $update_data['status'] = sanitize_text_field($params['status']);
-    
+    if (!empty($params['user_code']))
+        $update_data['user_code'] = sanitize_text_field($params['user_code']);
+    if (!empty($params['user_type']))
+        $update_data['user_type'] = sanitize_text_field($params['user_type']);
+    if (!empty($params['name']))
+        $update_data['name'] = sanitize_text_field($params['name']);
+    if (isset($params['email']))
+        $update_data['email'] = sanitize_email($params['email']);
+    if (isset($params['phone_number']))
+        $update_data['phone_number'] = sanitize_text_field($params['phone_number']);
+    if (isset($params['tax_code']))
+        $update_data['tax_code'] = sanitize_text_field($params['tax_code']);
+    if (isset($params['address']))
+        $update_data['address'] = sanitize_text_field($params['address']);
+    if (isset($params['notes']))
+        $update_data['notes'] = sanitize_text_field($params['notes']);
+    if (isset($params['status']))
+        $update_data['status'] = sanitize_text_field($params['status']);
+
     // If no data was provided to update
     if (empty($update_data)) {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "No data provided to update"
-            ), 
+            ),
             400
         );
     }
-    
+
     // Update the database
     $result = $wpdb->update(
         $users_table,
         $update_data,
         array('id' => $user_id)
     );
-    
+
     if ($result !== false) {
         // Get the updated user data
         $updated_user = $wpdb->get_row(
             $wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $user_id),
             ARRAY_A
         );
-        
+
         return new WP_REST_Response(
             array(
                 'success' => true,
                 'message' => "Partner updated successfully",
                 'user_id' => $user_id,
                 'user_data' => $updated_user
-            ), 
+            ),
             200
         );
     } else {
@@ -357,7 +373,7 @@ function update_partner_api($request) {
             array(
                 'success' => false,
                 'message' => "Database error while updating partner"
-            ), 
+            ),
             500
         );
     }
@@ -369,10 +385,11 @@ function update_partner_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function add_contact_api($request) {
+function add_contact_api($request)
+{
     // Get parameters from request
     $params = $request->get_params();
-    
+
     // Validate required fields
     $required_fields = ['user_id', 'full_name'];
     foreach ($required_fields as $field) {
@@ -381,55 +398,55 @@ function add_contact_api($request) {
                 array(
                     'success' => false,
                     'message' => "Missing required field: {$field}"
-                ), 
+                ),
                 400
             );
         }
     }
-    
+
     // Validate email if provided
     if (!empty($params['email']) && !is_email($params['email'])) {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "Invalid email format"
-            ), 
+            ),
             400
         );
     }
-    
+
     global $wpdb;
     $users_table = $wpdb->prefix . 'im_users';
     $contacts_table = $wpdb->prefix . 'im_contacts';
-    
+
     // Check if user exists and is a business
     $user = $wpdb->get_row(
         $wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $params['user_id'])
     );
-    
+
     if (!$user) {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "User with ID {$params['user_id']} not found"
-            ), 
+            ),
             404
         );
     }
-    
+
     if ($user->user_type !== 'BUSINESS') {
         return new WP_REST_Response(
             array(
                 'success' => false,
                 'message' => "Contacts can only be added to BUSINESS user types"
-            ), 
+            ),
             400
         );
     }
-    
+
     // Handle is_primary flag
     $is_primary = isset($params['is_primary']) && $params['is_primary'] ? 1 : 0;
-    
+
     // If this contact is marked as primary, update all other contacts to not be primary
     if ($is_primary) {
         $wpdb->query($wpdb->prepare(
@@ -437,7 +454,7 @@ function add_contact_api($request) {
             $params['user_id']
         ));
     }
-    
+
     // Prepare data for insertion
     $insert_data = array(
         'user_id' => intval($params['user_id']),
@@ -447,10 +464,10 @@ function add_contact_api($request) {
         'position' => !empty($params['position']) ? sanitize_text_field($params['position']) : '',
         'is_primary' => $is_primary
     );
-    
+
     // Insert into database
     $result = $wpdb->insert($contacts_table, $insert_data);
-    
+
     if ($result) {
         $contact_id = $wpdb->insert_id;
         return new WP_REST_Response(
@@ -459,7 +476,7 @@ function add_contact_api($request) {
                 'message' => "Contact added successfully",
                 'contact_id' => $contact_id,
                 'contact_data' => $insert_data
-            ), 
+            ),
             201
         );
     } else {
@@ -467,7 +484,7 @@ function add_contact_api($request) {
             array(
                 'success' => false,
                 'message' => "Database error while adding contact"
-            ), 
+            ),
             500
         );
     }
@@ -479,25 +496,26 @@ function add_contact_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function search_partners_api($request) {
+function search_partners_api($request)
+{
     // Get search parameters
     $keyword = $request->get_param('keyword');
     $user_type = $request->get_param('user_type');
     $status = $request->get_param('status');
     $page = $request->get_param('page') ? intval($request->get_param('page')) : 1;
     $per_page = $request->get_param('per_page') ? intval($request->get_param('per_page')) : 10;
-    
+
     // Calculate offset for pagination
     $offset = ($page - 1) * $per_page;
-    
+
     global $wpdb;
     $users_table = $wpdb->prefix . 'im_users';
-    
+
     // Start building the query
     $search_query = "SELECT * FROM $users_table WHERE 1=1";
     $count_query = "SELECT COUNT(*) FROM $users_table WHERE 1=1";
     $query_params = array();
-    
+
     // Add keyword search - search across multiple columns
     if (!empty($keyword)) {
         $search_term = '%' . $wpdb->esc_like($keyword) . '%';
@@ -505,7 +523,7 @@ function search_partners_api($request) {
         $count_query .= " AND (name LIKE %s OR user_code LIKE %s OR email LIKE %s OR phone_number LIKE %s OR tax_code LIKE %s OR address LIKE %s)";
         array_push($query_params, $search_term, $search_term, $search_term, $search_term, $search_term, $search_term);
     }
-    
+
     // Filter by user_type if provided
     if (!empty($user_type)) {
         $valid_user_types = ['INDIVIDUAL', 'BUSINESS', 'PARTNER', 'SUPPLIER'];
@@ -514,16 +532,16 @@ function search_partners_api($request) {
                 array(
                     'success' => false,
                     'message' => "Invalid user_type - must be one of: " . implode(', ', $valid_user_types)
-                ), 
+                ),
                 400
             );
         }
-        
+
         $search_query .= " AND user_type = %s";
         $count_query .= " AND user_type = %s";
         $query_params[] = $user_type;
     }
-    
+
     // Filter by status if provided
     if (!empty($status)) {
         $valid_statuses = ['ACTIVE', 'INACTIVE', 'DELETED'];
@@ -532,16 +550,16 @@ function search_partners_api($request) {
                 array(
                     'success' => false,
                     'message' => "Invalid status - must be one of: " . implode(', ', $valid_statuses)
-                ), 
+                ),
                 400
             );
         }
-        
+
         $search_query .= " AND status = %s";
         $count_query .= " AND status = %s";
         $query_params[] = $status;
     }
-    
+
     // Get total results count
     $total_results = 0;
     if (!empty($query_params)) {
@@ -549,12 +567,12 @@ function search_partners_api($request) {
     } else {
         $total_results = $wpdb->get_var($count_query);
     }
-    
+
     // Add ordering and pagination
     $search_query .= " ORDER BY name ASC LIMIT %d OFFSET %d";
     $query_params[] = $per_page;
     $query_params[] = $offset;
-    
+
     // Execute search
     $results = array();
     if (!empty($query_params)) {
@@ -562,15 +580,15 @@ function search_partners_api($request) {
     } else {
         $results = $wpdb->get_results($search_query, ARRAY_A);
     }
-    
+
     // Calculate pagination metadata
     $total_pages = ceil($total_results / $per_page);
-    
+
     // Check if we have business users and need to include their contacts
     $include_contacts = $request->get_param('include_contacts');
     if ($include_contacts && !empty($results)) {
         $contacts_table = $wpdb->prefix . 'im_contacts';
-        
+
         // Get business user IDs
         $business_ids = array();
         foreach ($results as $user) {
@@ -578,13 +596,13 @@ function search_partners_api($request) {
                 $business_ids[] = $user['id'];
             }
         }
-        
+
         // Fetch contacts for business users
         if (!empty($business_ids)) {
             $placeholders = implode(',', array_fill(0, count($business_ids), '%d'));
             $contacts_query = "SELECT * FROM $contacts_table WHERE user_id IN ($placeholders)";
             $contacts = $wpdb->get_results($wpdb->prepare($contacts_query, $business_ids), ARRAY_A);
-            
+
             // Organize contacts by user_id
             $contacts_by_user = array();
             foreach ($contacts as $contact) {
@@ -594,7 +612,7 @@ function search_partners_api($request) {
                 }
                 $contacts_by_user[$user_id][] = $contact;
             }
-            
+
             // Add contacts to results
             foreach ($results as &$user) {
                 if ($user['user_type'] === 'BUSINESS' && isset($contacts_by_user[$user['id']])) {
@@ -603,7 +621,7 @@ function search_partners_api($request) {
             }
         }
     }
-    
+
     return new WP_REST_Response(
         array(
             'success' => true,
@@ -612,7 +630,7 @@ function search_partners_api($request) {
             'current_page' => $page,
             'per_page' => $per_page,
             'results' => $results
-        ), 
+        ),
         200
     );
 }
@@ -622,7 +640,8 @@ function search_partners_api($request) {
  * 
  * @return string The generated API key
  */
-function generate_bookorder_api_key() {
+function generate_bookorder_api_key()
+{
     $api_key = wp_generate_password(32, false);
     update_option('bookorder_api_key', $api_key);
     return $api_key;
@@ -641,7 +660,8 @@ function generate_bookorder_api_key() {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function get_website_id_api($request) {
+function get_website_id_api($request)
+{
     global $wpdb;
 
     // Get domain parameter
@@ -705,7 +725,8 @@ function get_website_id_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function update_website_status_api($request) {
+function update_website_status_api($request)
+{
     global $wpdb;
 
     // Get website_id parameter
@@ -781,12 +802,13 @@ function update_website_status_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function get_services_expiring_api($request) {
+function get_services_expiring_api($request)
+{
     global $wpdb;
 
     // Get parameters
     $days_offset = isset($request['days']) ? intval($request['days']) : 0;  // +3 (3 days left), -30 (30 days overdue)
-    $owner_user_id = isset($request['owner_user_id']) ? intval($request['owner_user_id']) : 0;
+    $owner_user_ids_raw = isset($request['owner_user_id']) ? $request['owner_user_id'] : '';
     $service_type = isset($request['service_type']) ? sanitize_text_field($request['service_type']) : '';  // 'domain', 'hosting', 'maintenance', or '' for all
     $page = isset($request['page']) ? max(1, intval($request['page'])) : 1;
     $per_page = isset($request['per_page']) ? intval($request['per_page']) : 20;
@@ -795,10 +817,31 @@ function get_services_expiring_api($request) {
         $per_page = 20;
     }
 
+    // Parse owner_user_id - hỗ trợ single ID, comma-separated string, hoặc JSON array
+    // Ví dụ: owner_user_id=5 | owner_user_id=5,19,22 | owner_user_id=[5,19,22]
+    $owner_user_id_array = array();
+    if (!empty($owner_user_ids_raw)) {
+        if (is_array($owner_user_ids_raw)) {
+            // Already an array (e.g. owner_user_id[]=5&owner_user_id[]=19)
+            $owner_user_id_array = array_map('intval', $owner_user_ids_raw);
+        } else {
+            // Try to parse as JSON array first (e.g. owner_user_id=[19,22])
+            $parsed = json_decode($owner_user_ids_raw, true);
+            if (is_array($parsed)) {
+                $owner_user_id_array = array_map('intval', $parsed);
+            } else {
+                // Parse as comma-separated string or single ID (e.g. owner_user_id=5,19,22)
+                $owner_user_id_array = array_map('intval', array_filter(array_map('trim', explode(',', $owner_user_ids_raw))));
+            }
+        }
+        // Filter out zeros/invalid
+        $owner_user_id_array = array_values(array_filter($owner_user_id_array));
+    }
+
     $offset = ($page - 1) * $per_page;
     $today = date('Y-m-d');
     $target_date = date('Y-m-d', strtotime("{$days_offset} days"));
-    
+
     // Determine date range for filtering
     // days >= 0: Expiring soon (today to future)
     // days < 0: Already expired within N days (past to today)
@@ -834,9 +877,10 @@ function get_services_expiring_api($request) {
 
         $query_params = array();
 
-        if ($owner_user_id > 0) {
-            $domain_query .= " AND d.owner_user_id = %d";
-            $query_params[] = $owner_user_id;
+        if (!empty($owner_user_id_array)) {
+            $placeholders = implode(',', array_fill(0, count($owner_user_id_array), '%d'));
+            $domain_query .= " AND d.owner_user_id IN ({$placeholders})";
+            $query_params = array_merge($query_params, $owner_user_id_array);
         }
 
         // Filter by date range (start_date to end_date)
@@ -844,11 +888,7 @@ function get_services_expiring_api($request) {
         $query_params[] = $start_date;
         $query_params[] = $end_date;
 
-        if (!empty($query_params)) {
-            $domain_results = $wpdb->get_results($wpdb->prepare($domain_query, $query_params), ARRAY_A);
-        } else {
-            $domain_results = $wpdb->get_results($domain_query, ARRAY_A);
-        }
+        $domain_results = $wpdb->get_results($wpdb->prepare($domain_query, $query_params), ARRAY_A);
 
         $results = array_merge($results, $domain_results ? $domain_results : array());
     }
@@ -874,9 +914,10 @@ function get_services_expiring_api($request) {
 
         $query_params = array();
 
-        if ($owner_user_id > 0) {
-            $hosting_query .= " AND h.owner_user_id = %d";
-            $query_params[] = $owner_user_id;
+        if (!empty($owner_user_id_array)) {
+            $placeholders = implode(',', array_fill(0, count($owner_user_id_array), '%d'));
+            $hosting_query .= " AND h.owner_user_id IN ({$placeholders})";
+            $query_params = array_merge($query_params, $owner_user_id_array);
         }
 
         // Filter by date range (start_date to end_date)
@@ -884,11 +925,7 @@ function get_services_expiring_api($request) {
         $query_params[] = $start_date;
         $query_params[] = $end_date;
 
-        if (!empty($query_params)) {
-            $hosting_results = $wpdb->get_results($wpdb->prepare($hosting_query, $query_params), ARRAY_A);
-        } else {
-            $hosting_results = $wpdb->get_results($hosting_query, ARRAY_A);
-        }
+        $hosting_results = $wpdb->get_results($wpdb->prepare($hosting_query, $query_params), ARRAY_A);
 
         $results = array_merge($results, $hosting_results ? $hosting_results : array());
     }
@@ -914,9 +951,10 @@ function get_services_expiring_api($request) {
 
         $query_params = array();
 
-        if ($owner_user_id > 0) {
-            $maintenance_query .= " AND m.owner_user_id = %d";
-            $query_params[] = $owner_user_id;
+        if (!empty($owner_user_id_array)) {
+            $placeholders = implode(',', array_fill(0, count($owner_user_id_array), '%d'));
+            $maintenance_query .= " AND m.owner_user_id IN ({$placeholders})";
+            $query_params = array_merge($query_params, $owner_user_id_array);
         }
 
         // Filter by date range (start_date to end_date)
@@ -924,11 +962,7 @@ function get_services_expiring_api($request) {
         $query_params[] = $start_date;
         $query_params[] = $end_date;
 
-        if (!empty($query_params)) {
-            $maintenance_results = $wpdb->get_results($wpdb->prepare($maintenance_query, $query_params), ARRAY_A);
-        } else {
-            $maintenance_results = $wpdb->get_results($maintenance_query, ARRAY_A);
-        }
+        $maintenance_results = $wpdb->get_results($wpdb->prepare($maintenance_query, $query_params), ARRAY_A);
 
         $results = array_merge($results, $maintenance_results ? $maintenance_results : array());
     }
@@ -961,7 +995,8 @@ function get_services_expiring_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function get_pending_invoices_api($request) {
+function get_pending_invoices_api($request)
+{
     global $wpdb;
 
     $invoices_table = $wpdb->prefix . 'im_invoices';
@@ -1050,7 +1085,7 @@ function get_pending_invoices_api($request) {
 
     // Get invoice items for each invoice
     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
-    
+
     foreach ($invoices as &$invoice) {
         $items_query = "
             SELECT
@@ -1070,7 +1105,7 @@ function get_pending_invoices_api($request) {
             WHERE invoice_id = %d
             ORDER BY id
         ";
-        
+
         $invoice['items'] = $wpdb->get_results($wpdb->prepare($items_query, $invoice['id']), ARRAY_A);
     }
 
@@ -1117,7 +1152,8 @@ function get_pending_invoices_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function update_invoice_status_api($request) {
+function update_invoice_status_api($request)
+{
     global $wpdb;
 
     $invoices_table = $wpdb->prefix . 'im_invoices';
@@ -1249,7 +1285,8 @@ function update_invoice_status_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function get_domain_management_info_api($request) {
+function get_domain_management_info_api($request)
+{
     global $wpdb;
 
     $domains_table = $wpdb->prefix . 'im_domains';
@@ -1312,7 +1349,8 @@ function get_domain_management_info_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function get_website_management_info_api($request) {
+function get_website_management_info_api($request)
+{
     global $wpdb;
 
     $websites_table = $wpdb->prefix . 'im_websites';
@@ -1367,7 +1405,8 @@ function get_website_management_info_api($request) {
  * @param WP_REST_Request $request The request object
  * @return WP_REST_Response The response
  */
-function get_partner_managed_users_api($request) {
+function get_partner_managed_users_api($request)
+{
     global $wpdb;
 
     $users_table = $wpdb->prefix . 'im_users';

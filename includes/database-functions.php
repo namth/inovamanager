@@ -1071,9 +1071,19 @@ function generate_invoice_code($user_id)
         "SELECT COUNT(*) FROM $invoices_table WHERE user_id = %d",
         $user_id
     ));
-    $sequence_part = str_pad($count + 1, 3, '0', STR_PAD_LEFT); // Pad to 3 digits, e.g., 001, 002
+    
+    $next = $count + 1;
+    $sequence_part = str_pad($next, 3, '0', STR_PAD_LEFT);
+    $invoice_code = strtoupper($user_code) . $date_part . $sequence_part;
 
-    return strtoupper($user_code) . $date_part . $sequence_part;
+    // 4. Ensure the code is unique, especially if an invoice has been deleted before
+    while ($wpdb->get_var($wpdb->prepare("SELECT invoice_code FROM $invoices_table WHERE invoice_code = %s", $invoice_code))) {
+        $next++;
+        $sequence_part = str_pad($next, 3, '0', STR_PAD_LEFT);
+        $invoice_code = strtoupper($user_code) . $date_part . $sequence_part;
+    }
+
+    return $invoice_code;
 }
 
 function get_expiring_services($days_threshold = 30, $service_types = ['domain', 'hosting', 'maintenance'])
