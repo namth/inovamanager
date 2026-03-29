@@ -103,6 +103,123 @@ function add_to_cart_ajax()
     exit;
 }
 
+function add_website_to_cart_ajax()
+{
+    if (!isset($_POST['website_id'])) {
+        echo json_encode(array(
+            'status' => false,
+            'message' => 'Thiếu ID website'
+        ));
+        exit;
+    }
+
+    $website_id = intval($_POST['website_id']);
+    global $wpdb;
+
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $domains_table = $wpdb->prefix . 'im_domains';
+    $cart_table = $wpdb->prefix . 'im_cart';
+
+    // Get website info with its linked service IDs
+    $website = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, owner_user_id, domain_id, hosting_id, maintenance_package_id 
+         FROM $websites_table WHERE id = %d",
+        $website_id
+    ));
+
+    if (!$website) {
+        echo json_encode(array(
+            'status' => false,
+            'message' => 'Website không tồn tại'
+        ));
+        exit;
+    }
+
+    $items_to_add = [];
+
+    // 1. Domain - Only if managed by INOVA
+    if ($website->domain_id) {
+        $managed_by_inova = $wpdb->get_var($wpdb->prepare(
+            "SELECT managed_by_inova FROM $domains_table WHERE id = %d",
+            $website->domain_id
+        ));
+        if ($managed_by_inova) {
+            $items_to_add[] = [
+                'type' => 'domain',
+                'id' => $website->domain_id,
+                'user_id' => $website->owner_user_id
+            ];
+        }
+    }
+
+    // 2. Hosting
+    if ($website->hosting_id) {
+        $items_to_add[] = [
+            'type' => 'hosting',
+            'id' => $website->hosting_id,
+            'user_id' => $website->owner_user_id
+        ];
+    }
+
+    // 3. Maintenance
+    if ($website->maintenance_package_id) {
+        $items_to_add[] = [
+            'type' => 'maintenance',
+            'id' => $website->maintenance_package_id,
+            'user_id' => $website->owner_user_id
+        ];
+    }
+
+    if (empty($items_to_add)) {
+        echo json_encode(array(
+            'status' => false,
+            'message' => 'Website này không có dịch vụ nào cần gia hạn hoặc domain không do INOVA quản lý.'
+        ));
+        exit;
+    }
+
+    $services_added = 0;
+    foreach ($items_to_add as $item) {
+        // Check if item already in cart
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT id FROM $cart_table WHERE user_id = %d AND service_type = %s AND service_id = %d",
+            $item['user_id'],
+            $item['type'],
+            $item['id']
+        ));
+
+        if (!$existing) {
+            $result = $wpdb->insert($cart_table, array(
+                'user_id' => $item['user_id'],
+                'service_type' => $item['type'],
+                'service_id' => $item['id'],
+                'quantity' => 1
+            ));
+            if ($result) {
+                $services_added++;
+            }
+        }
+    }
+
+    // Get total cart count
+    $cart_count = $wpdb->get_var("SELECT COUNT(*) FROM $cart_table");
+
+    if ($services_added > 0) {
+        echo json_encode(array(
+            'status' => true,
+            'message' => "Đã thêm $services_added dịch vụ vào giỏ hàng",
+            'cart_count' => $cart_count
+        ));
+    } else {
+        echo json_encode(array(
+            'status' => false,
+            'message' => 'Các dịch vụ của website này đã có sẵn trong giỏ hàng',
+            'cart_count' => $cart_count
+        ));
+    }
+    exit;
+}
+
 function add_website_service_to_cart_ajax()
 {
     global $wpdb;
@@ -2115,6 +2232,9 @@ add_action('wp_ajax_nopriv_add_to_cart', 'add_to_cart_ajax');
 
 add_action('wp_ajax_add_website_service_to_cart', 'add_website_service_to_cart_ajax');
 add_action('wp_ajax_nopriv_add_website_service_to_cart', 'add_website_service_to_cart_ajax');
+
+add_action('wp_ajax_add_website_to_cart', 'add_website_to_cart_ajax');
+add_action('wp_ajax_nopriv_add_website_to_cart', 'add_website_to_cart_ajax');
 
 add_action('wp_ajax_delete_website_service', 'delete_website_service_ajax');
 add_action('wp_ajax_nopriv_delete_website_service', 'delete_website_service_ajax');

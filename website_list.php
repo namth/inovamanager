@@ -191,10 +191,6 @@ get_header();
 
                             <?php if (is_inova_admin()): ?>
                             <!-- Bulk actions - ADMIN ONLY -->
-                            <button id="bulk-renew-btn" class="btn btn-secondary btn-icon-text" style="display: none;" onclick="handleBulkRenewal('websites', 'website', '<?php echo home_url('/them-moi-hoa-don/'); ?>')">
-                                <i class="ph ph-arrow-clockwise btn-icon-prepend"></i>
-                                <span>Gia hạn nhiều website</span>
-                            </button>
                             <a href="<?php echo home_url('/addnew-website/'); ?>" class="fixed-bottom-right nav-link" title="Thêm mới website" data-bs-toggle="tooltip" data-bs-placement="left">
                                 <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
                             </a>
@@ -528,9 +524,11 @@ get_header();
                                                          <i class="ph ph-wrench btn-icon-prepend fa-150p"></i>
                                                      </a>
 
-                                                     <a href="<?php echo home_url('/them-moi-hoa-don/?website_id=' . $website->id); ?>" class="nav-link text-warning me-2" title="Tạo hóa đơn">
-                                                         <i class="ph ph-receipt btn-icon-prepend fa-150p"></i>
-                                                     </a>
+                                                     <button type="button" class="btn btn-sm btn-icon p-0 me-2 add-website-to-cart-btn"
+                                                         data-website-id="<?php echo $website->id; ?>"
+                                                         title="Thêm vào giỏ hàng">
+                                                         <i class="ph ph-shopping-cart text-info fa-150p"></i>
+                                                     </button>
 
                                                      <a href="<?php echo home_url('/xoa-website/?id=' . $website->id); ?>" class="nav-link text-danger" title="Xóa website" onclick="return confirm('Bạn có chắc chắn muốn xóa website này?');">
                                                          <i class="ph ph-trash btn-icon-prepend fa-150p"></i>

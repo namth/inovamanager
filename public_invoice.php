@@ -533,246 +533,254 @@ get_header('nologin');
             </div>
 
             <!-- Invoice Items -->
-            <?php
-            // Always group items by product_type
-            $grouped_items = array();
-            $product_type_labels = array(
-                'domain' => 'Tên miền',
-                'hosting' => 'Hosting',
-                'maintenance' => 'Gói bảo trì',
-                'website_service' => 'Dịch vụ website'
-            );
+            <?php if ($invoice->status === 'canceled'): ?>
+                <div class="alert alert-danger text-center my-5">
+                    <i class="ph ph-warning-circle me-2" style="font-size: 24px; vertical-align: middle;"></i>
+                    Hóa đơn này đã được hủy và không còn chi tiết dịch vụ.
+                </div>
+            <?php else: ?>
+                <?php
+                // Always group items by product_type
+                $grouped_items = array();
+                $product_type_labels = array(
+                    'domain' => 'Tên miền',
+                    'hosting' => 'Hosting',
+                    'maintenance' => 'Gói bảo trì',
+                    'website_service' => 'Dịch vụ website'
+                );
 
-            foreach ($invoice_items as $item) {
-                $type = $item->service_type;
-                if (!isset($grouped_items[$type])) {
-                    $grouped_items[$type] = array();
+                foreach ($invoice_items as $item) {
+                    $type = $item->service_type;
+                    if (!isset($grouped_items[$type])) {
+                        $grouped_items[$type] = array();
+                    }
+                    $grouped_items[$type][] = $item;
                 }
-                $grouped_items[$type][] = $item;
-            }
 
-            // Display each group with header
-            foreach ($grouped_items as $product_type => $items):
-                // Get VAT rate from first item (all items in group should have same rate)
-                $group_vat_rate = 0;
-                if ($invoice->requires_vat_invoice && !empty($items)) {
-                    $group_vat_rate = isset($items[0]->vat_rate) ? floatval($items[0]->vat_rate) : 0;
-                }
-                ?>
-                <div class="items-section">
-                    <h3 class="text-muted"><i class="ph ph-list me-2"></i>Danh sách
-                        <?php echo $product_type_labels[$product_type] ?? $product_type; ?>
-                    </h3>
-                    <table class="items-table">
-                        <thead>
-                            <tr>
-                                <th>Tên sản phẩm/dịch vụ</th>
-                                <?php if ($product_type !== 'website_service'): ?>
-                                    <th class="text-center">Ngày hết hạn</th>
-                                    <th class="text-center">Gia hạn đến</th>
-                                <?php endif; ?>
-                                <th class="text-end">Thành tiền</th>
-                                <?php if ($invoice->requires_vat_invoice): ?>
-                                    <th class="text-end">VAT
-                                        <?php echo $group_vat_rate > 0 ? '(' . intval($group_vat_rate) . '%)' : ''; ?>
-                                    </th>
-                                    <th class="text-end">Tổng</th>
-                                <?php endif; ?>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($items as $item): ?>
+                // Display each group with header
+                foreach ($grouped_items as $product_type => $items):
+                    // Get VAT rate from first item (all items in group should have same rate)
+                    $group_vat_rate = 0;
+                    if ($invoice->requires_vat_invoice && !empty($items)) {
+                        $group_vat_rate = isset($items[0]->vat_rate) ? floatval($items[0]->vat_rate) : 0;
+                    }
+                    ?>
+                    <div class="items-section">
+                        <h3 class="text-muted"><i class="ph ph-list me-2"></i>Danh sách
+                            <?php echo $product_type_labels[$product_type] ?? $product_type; ?>
+                        </h3>
+                        <table class="items-table">
+                            <thead>
                                 <tr>
-                                    <td>
-                                        <div class="service-name text-dark">
-                                            <?php echo esc_html($item->service_title ?: $item->description); ?>
-                                        </div>
-                                        <?php if ($item->service_reference): ?>
-                                            <div class="service-desc text-muted"><?php echo esc_html($item->service_reference); ?>
-                                            </div>
-                                        <?php endif; ?>
-                                        <?php if (!empty($item->website_names)): ?>
-                                            <div class="service-desc text-muted">
-                                                <i class="ph ph-globe-hemisphere-west"></i>
-                                                (<?php echo implode(', ', array_map('esc_html', $item->website_names)); ?>)
-                                            </div>
-                                        <?php endif; ?>
-                                    </td>
+                                    <th>Tên sản phẩm/dịch vụ</th>
                                     <?php if ($product_type !== 'website_service'): ?>
-                                        <td class="text-center">
-                                            <?php
-                                            if ($item->expiry_date):
-                                                echo date('d/m/Y', strtotime($item->expiry_date));
-                                            else:
-                                                echo '<span class="text-muted">-</span>';
-                                            endif;
-                                            ?>
-                                        </td>
-                                        <td class="text-center">
-                                            <?php
-                                            if ($item->expiry_date && $item->billing_cycle_months):
-                                                // Calculate renewal date
-                                                $renewal_date = date('d/m/Y', strtotime($item->expiry_date . ' + ' . $item->billing_cycle_months . ' months'));
-                                                echo $renewal_date;
-                                            elseif ($item->expiry_date && $product_type === 'domain'):
-                                                // For domain, add 1 year
-                                                $renewal_date = date('d/m/Y', strtotime($item->expiry_date . ' + 1 year'));
-                                                echo $renewal_date;
-                                            else:
-                                                echo '<span class="text-muted">-</span>';
-                                            endif;
-                                            ?>
-                                        </td>
+                                        <th class="text-center">Ngày hết hạn</th>
+                                        <th class="text-center">Gia hạn đến</th>
                                     <?php endif; ?>
-                                    <td class="text-end"><?php echo number_format($item->item_total); ?>đ</td>
+                                    <th class="text-end">Thành tiền</th>
                                     <?php if ($invoice->requires_vat_invoice): ?>
-                                        <td class="text-end">
-                                            <?php
-                                            $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
-                                            $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
-
-                                            if ($item_vat_calculated > 0):
-                                                echo number_format($item_vat_calculated) . 'đ';
-                                            else:
-                                                echo '<span class="text-muted">-</span>';
-                                            endif;
-                                            ?>
-                                        </td>
-                                        <td class="text-end">
-                                            <?php
-                                            $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
-                                            $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
-                                            $item_total_final = $item->item_total + $item_vat - $item_commission;
-                                            echo '<strong>' . number_format($item_total_final) . 'đ</strong>';
-                                            ?>
-                                        </td>
+                                        <th class="text-end">VAT
+                                            <?php echo $group_vat_rate > 0 ? '(' . intval($group_vat_rate) . '%)' : ''; ?>
+                                        </th>
+                                        <th class="text-end">Tổng</th>
                                     <?php endif; ?>
                                 </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endforeach; ?>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($items as $item): ?>
+                                    <tr>
+                                        <td>
+                                            <div class="service-name text-dark">
+                                                <?php echo esc_html($item->service_title ?: $item->description); ?>
+                                            </div>
+                                            <?php if ($item->service_reference): ?>
+                                                <div class="service-desc text-muted"><?php echo esc_html($item->service_reference); ?>
+                                                </div>
+                                            <?php endif; ?>
+                                            <?php if (!empty($item->website_names)): ?>
+                                                <div class="service-desc text-muted">
+                                                    <i class="ph ph-globe-hemisphere-west"></i>
+                                                    (<?php echo implode(', ', array_map('esc_html', $item->website_names)); ?>)
+                                                </div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <?php if ($product_type !== 'website_service'): ?>
+                                            <td class="text-center">
+                                                <?php
+                                                if ($item->expiry_date):
+                                                    echo date('d/m/Y', strtotime($item->expiry_date));
+                                                else:
+                                                    echo '<span class="text-muted">-</span>';
+                                                endif;
+                                                ?>
+                                            </td>
+                                            <td class="text-center">
+                                                <?php
+                                                if ($item->expiry_date && $item->billing_cycle_months):
+                                                    // Calculate renewal date
+                                                    $renewal_date = date('d/m/Y', strtotime($item->expiry_date . ' + ' . $item->billing_cycle_months . ' months'));
+                                                    echo $renewal_date;
+                                                elseif ($item->expiry_date && $product_type === 'domain'):
+                                                    // For domain, add 1 year
+                                                    $renewal_date = date('d/m/Y', strtotime($item->expiry_date . ' + 1 year'));
+                                                    echo $renewal_date;
+                                                else:
+                                                    echo '<span class="text-muted">-</span>';
+                                                endif;
+                                                ?>
+                                            </td>
+                                        <?php endif; ?>
+                                        <td class="text-end"><?php echo number_format($item->item_total); ?>đ</td>
+                                        <?php if ($invoice->requires_vat_invoice): ?>
+                                            <td class="text-end">
+                                                <?php
+                                                $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
+                                                $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
 
-            <!-- Totals and QR Code -->
-            <div class="totals-section">
-                <div></div>
-                <div>
-                    <table class="totals-table">
-                        <?php if ($invoice->requires_vat_invoice): ?>
-                            <tr>
-                                <td>Tạm tính:</td>
-                                <td><?php echo number_format($invoice->sub_total); ?> VNĐ</td>
-                            </tr>
-                        <?php endif; ?>
-                        <?php if ($invoice->discount_total > 0): ?>
-                            <tr>
-                                <td>Giảm giá:</td>
-                                <td><span class="text-danger">-<?php echo number_format($invoice->discount_total); ?>
-                                        VNĐ</span></td>
-                            </tr>
-                        <?php endif; ?>
-                        <?php if ($invoice->requires_vat_invoice && $invoice->tax_amount > 0): ?>
-                            <tr>
-                                <td>Thuế:</td>
-                                <td><?php echo number_format($invoice->tax_amount); ?> VNĐ</td>
-                            </tr>
-                        <?php endif; ?>
-                        <tr class="total-row bg-light-success">
-                            <td>Tổng cộng:</td>
-                            <td><?php
-                            // Calculate final total based on requires_vat_invoice
-                            if ($invoice->requires_vat_invoice) {
-                                $final_total = $invoice->total_amount;
-                            } else {
-                                $final_total = $invoice->sub_total - $invoice->discount_total;
-                            }
-                            echo number_format($final_total);
-                            ?> VNĐ</td>
-                        </tr>
-                        <?php if ($invoice->paid_amount > 0): ?>
-                            <tr class="paid-row bg-success">
-                                <td>Đã thanh toán:</td>
-                                <td><?php echo number_format($invoice->paid_amount); ?> VNĐ</td>
-                            </tr>
-                            <tr>
-                                <td>Còn lại:</td>
+                                                if ($item_vat_calculated > 0):
+                                                    echo number_format($item_vat_calculated) . 'đ';
+                                                else:
+                                                    echo '<span class="text-muted">-</span>';
+                                                endif;
+                                                ?>
+                                            </td>
+                                            <td class="text-end">
+                                                <?php
+                                                $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
+                                                $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
+                                                $item_total_final = $item->item_total + $item_vat - $item_commission;
+                                                echo '<strong>' . number_format($item_total_final) . 'đ</strong>';
+                                                ?>
+                                            </td>
+                                        <?php endif; ?>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endforeach; ?>
+
+                <!-- Totals and QR Code -->
+                <div class="totals-section">
+                    <div></div>
+                    <div>
+                        <table class="totals-table">
+                            <?php if ($invoice->requires_vat_invoice): ?>
+                                <tr>
+                                    <td>Tạm tính:</td>
+                                    <td><?php echo number_format($invoice->sub_total); ?> VNĐ</td>
+                                </tr>
+                            <?php endif; ?>
+                            <?php if ($invoice->discount_total > 0): ?>
+                                <tr>
+                                    <td>Giảm giá:</td>
+                                    <td><span class="text-danger">-<?php echo number_format($invoice->discount_total); ?>
+                                            VNĐ</span></td>
+                                </tr>
+                            <?php endif; ?>
+                            <?php if ($invoice->requires_vat_invoice && $invoice->tax_amount > 0): ?>
+                                <tr>
+                                    <td>Thuế:</td>
+                                    <td><?php echo number_format($invoice->tax_amount); ?> VNĐ</td>
+                                </tr>
+                            <?php endif; ?>
+                            <tr class="total-row bg-light-success">
+                                <td>Tổng cộng:</td>
                                 <td><?php
-                                // Calculate remaining based on final total
-                                $remaining = $final_total - $invoice->paid_amount;
-                                echo number_format(max(0, $remaining));
+                                // Calculate final total based on requires_vat_invoice
+                                if ($invoice->requires_vat_invoice) {
+                                    $final_total = $invoice->total_amount;
+                                } else {
+                                    $final_total = $invoice->sub_total - $invoice->discount_total;
+                                }
+                                echo number_format($final_total);
                                 ?> VNĐ</td>
                             </tr>
-                        <?php endif; ?>
-                    </table>
-                </div>
-            </div>
-
-            <!-- QR Code Section -->
-            <?php
-            $has_qr_settings = (
-                (get_option('payment_bank_code_no_vat') && get_option('payment_account_number_no_vat')) ||
-                (get_option('payment_bank_code_with_vat') && get_option('payment_account_number_with_vat')) ||
-                (get_option('payment_bank_code') && get_option('payment_account_number'))
-            );
-
-            if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
-                // Calculate remaining amount based on requires_vat_invoice
-                if ($invoice->requires_vat_invoice) {
-                    $invoice_total = $invoice->total_amount;
-                } else {
-                    $invoice_total = $invoice->sub_total - $invoice->discount_total;
-                }
-                $remaining_amount = $invoice_total - $invoice->paid_amount;
-                $qr_add_info = 'HD ' . $invoice->invoice_code;
-                $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
-                $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
-
-                if ($qr_code_url):
-                    ?>
-                    <div class="qr-section" id="qr-section">
-                        <h4 class="text-muted">Thông tin thanh toán</h4>
-                        <img src="<?php echo esc_url($qr_code_url); ?>" alt="Payment QR Code" class="qr-code-img">
-                        <div class="qr-info">
-                            <div class="qr-info-row">
-                                <span class="qr-info-label">Số tài khoản:</span>
-                                <span class="qr-info-value">
-                                    <?php
-                                    // Nếu là doanh nghiệp có lấy hóa đơn đỏ (VAT) thì hiển thị số tài khoản với VAT
-                                    if ($invoice->requires_vat_invoice && get_option('payment_account_number_with_vat')) {
-                                        echo get_option('payment_account_number_with_vat');
-                                    } else {
-                                        echo get_option('payment_account_number');
-                                    }
-                                    ?>
-                                </span>
-                            </div>
-                            <div class="qr-info-row">
-                                <span class="qr-info-label">Nội dung CK:</span>
-                                <span class="qr-info-value"><?php echo esc_html($qr_add_info); ?></span>
-                            </div>
-                            <div class="qr-info-row">
-                                <span class="qr-info-label">Số tiền:</span>
-                                <span class="qr-info-value"><?php echo number_format($remaining_amount); ?> VNĐ</span>
-                            </div>
-                        </div>
-                        <!-- Print Button & Hide QR Button -->
-                        <div class="d-flex align-items-center justify-content-center gap-3 mt-4 print-button">
-                            <button class="btn btn-danger" onclick="window.print()" title="In hóa đơn">
-                                <i class="ph ph-printer me-2"></i>In hóa đơn
-                            </button>
-                            <?php if (current_user_can('manage_options')): ?>
-                                <button class="btn bg-light-danger border-danger text-danger hide-qr-btn" id="hide-qr-btn"
-                                    title="Ẩn thông tin thanh toán">
-                                    <i class="ph ph-eye-slash"></i>
-                                </button>
+                            <?php if ($invoice->paid_amount > 0): ?>
+                                <tr class="paid-row bg-success">
+                                    <td>Đã thanh toán:</td>
+                                    <td><?php echo number_format($invoice->paid_amount); ?> VNĐ</td>
+                                </tr>
+                                <tr>
+                                    <td>Còn lại:</td>
+                                    <td><?php
+                                    // Calculate remaining based on final total
+                                    $remaining = $final_total - $invoice->paid_amount;
+                                    echo number_format(max(0, $remaining));
+                                    ?> VNĐ</td>
+                                </tr>
                             <?php endif; ?>
-                        </div>
+                        </table>
                     </div>
-                    <?php
+                </div>
+
+                <!-- QR Code Section -->
+                <?php
+                $has_qr_settings = (
+                    (get_option('payment_bank_code_no_vat') && get_option('payment_account_number_no_vat')) ||
+                    (get_option('payment_bank_code_with_vat') && get_option('payment_account_number_with_vat')) ||
+                    (get_option('payment_bank_code') && get_option('payment_account_number'))
+                );
+
+                if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
+                    // Calculate remaining amount based on requires_vat_invoice
+                    if ($invoice->requires_vat_invoice) {
+                        $invoice_total = $invoice->total_amount;
+                    } else {
+                        $invoice_total = $invoice->sub_total - $invoice->discount_total;
+                    }
+                    $remaining_amount = $invoice_total - $invoice->paid_amount;
+                    $qr_add_info = 'HD ' . $invoice->invoice_code;
+                    $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
+                    $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
+
+                    if ($qr_code_url):
+                        ?>
+                        <div class="qr-section" id="qr-section">
+                            <h4 class="text-muted">Thông tin thanh toán</h4>
+                            <img src="<?php echo esc_url($qr_code_url); ?>" alt="Payment QR Code" class="qr-code-img">
+                            <div class="qr-info">
+                                <div class="qr-info-row">
+                                    <span class="qr-info-label">Số tài khoản:</span>
+                                    <span class="qr-info-value">
+                                        <?php
+                                        // Nếu là doanh nghiệp có lấy hóa đơn đỏ (VAT) thì hiển thị số tài khoản với VAT
+                                        if ($invoice->requires_vat_invoice && get_option('payment_account_number_with_vat')) {
+                                            echo get_option('payment_account_number_with_vat');
+                                        } else {
+                                            echo get_option('payment_account_number');
+                                        }
+                                        ?>
+                                    </span>
+                                </div>
+                                <div class="qr-info-row">
+                                    <span class="qr-info-label">Nội dung CK:</span>
+                                    <span class="qr-info-value"><?php echo esc_html($qr_add_info); ?></span>
+                                </div>
+                                <div class="qr-info-row">
+                                    <span class="qr-info-label">Số tiền:</span>
+                                    <span class="qr-info-value"><?php echo number_format($remaining_amount); ?> VNĐ</span>
+                                </div>
+                            </div>
+                            <!-- Print Button & Hide QR Button -->
+                            <div class="d-flex align-items-center justify-content-center gap-3 mt-4 print-button">
+                                <button class="btn btn-danger" onclick="window.print()" title="In hóa đơn">
+                                    <i class="ph ph-printer me-2"></i>In hóa đơn
+                                </button>
+                                <?php if (current_user_can('manage_options')): ?>
+                                    <button class="btn bg-light-danger border-danger text-danger hide-qr-btn" id="hide-qr-btn"
+                                        title="Ẩn thông tin thanh toán">
+                                        <i class="ph ph-eye-slash"></i>
+                                    </button>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <?php
+                    endif;
                 endif;
-            endif;
-            ?>
+                ?>
+            <?php endif; // End of canceled check ?>
+
 
         </div>
     </div>

@@ -97,6 +97,13 @@ function register_bookorder_api_routes()
         'callback' => 'get_partner_managed_users_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for checking remote website status
+    register_rest_route('bookorder/v1', '/check-status', array(
+        'methods' => 'POST',
+        'callback' => 'check_website_status_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -793,6 +800,122 @@ function update_website_status_api($request)
         ),
         200
     );
+}
+
+/**
+ * API callback function for checking a remote website's status
+ * Call the remote website's API to see if it's active and update active_time if so
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function check_website_status_api($request)
+{
+    global $wpdb;
+
+    // Get website parameter (domain or name)
+    $website_input = isset($request['website']) ? sanitize_text_field($request['website']) : '';
+
+    if (empty($website_input)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Website name (domain) is required'
+            ),
+            400
+        );
+    }
+
+    // Clean domain (remove protocol, www., trailing slash)
+    $domain = preg_replace('#^https?://(www\.)?#', '', $website_input);
+    $domain = rtrim($domain, '/');
+
+    // Find website in database by name/domain
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $website = $wpdb->get_row($wpdb->prepare("
+        SELECT id, name
+        FROM {$websites_table}
+        WHERE name = %s
+        AND (status IS NULL OR status != 'DELETED')
+        LIMIT 1
+    ", $domain));
+
+    if (!$website) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Website not found for: ' . $domain
+            ),
+            404
+        );
+    }
+
+    // Call the satellite API (https preferred)
+    $api_url = "https://" . $domain . "/wp-json/inova/v1/status";
+    
+    // Timeout set to 15s to allow for Cloudflare-protected sites or slow responses
+    $response = wp_remote_get($api_url, array('timeout' => 15));
+
+    // If HTTPS fails, try HTTP (optional but safer for older systems)
+    if (is_wp_error($response)) {
+        $api_url = "http://" . $domain . "/wp-json/inova/v1/status";
+        $response = wp_remote_get($api_url, array('timeout' => 15));
+    }
+
+    if (is_wp_error($response)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Could not connect to website: ' . $response->get_error_message()
+            ),
+            500
+        );
+    }
+
+    $http_code = wp_remote_retrieve_response_code($response);
+    $body = wp_remote_retrieve_body($response);
+    $data = json_decode($body, true);
+
+    if ($http_code === 200 && !empty($data['status']) && $data['status'] === true) {
+        // Website is active! Update active_time using the same logic as update_website_status_api
+        $current_time = current_time('mysql');
+        $update_result = $wpdb->update(
+            $websites_table,
+            array('active_time' => $current_time),
+            array('id' => $website->id),
+            array('%s'),
+            array('%d')
+        );
+
+        if ($update_result === false) {
+            return new WP_REST_Response(
+                array(
+                    'success' => false,
+                    'message' => 'Website is active but failed to update database status'
+                ),
+                500
+            );
+        }
+
+        return new WP_REST_Response(
+            array(
+                'success' => true,
+                'active_time' => $current_time,
+                'message' => 'Website is active and status has been updated'
+            ),
+            200
+        );
+    } else {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Website responded negatively or returned an error',
+                'http_code' => $http_code,
+                'response_data' => $data
+            ),
+            200 // Success call, but status false
+        );
+    }
 }
 
 /**

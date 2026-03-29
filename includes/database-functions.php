@@ -707,9 +707,8 @@ function auto_create_renewal_invoices_callback()
     // Calculate date ranges
     $today = date('Y-m-d');
     $date_30_days = date('Y-m-d', strtotime('+30 days'));
-    $date_51_days = date('Y-m-d', strtotime('+51 days'));
 
-    // Find all services expiring between 30-51 days from now
+    // Find all services expiring between 0-30 days from now
     // Get websites table for joining
     $websites_table = $wpdb->prefix . 'im_websites';
 
@@ -722,7 +721,7 @@ function auto_create_renewal_invoices_callback()
         WHERE d.managed_by_inova = 1
         AND d.status = 'ACTIVE'
         AND d.expiry_date BETWEEN %s AND %s
-    ", $date_30_days, $date_51_days));
+    ", $today, $date_30_days));
 
     // 2. Get all hostings with website names
     $expiring_hostings = $wpdb->get_results($wpdb->prepare("
@@ -735,7 +734,7 @@ function auto_create_renewal_invoices_callback()
         WHERE h.status = 'ACTIVE'
         AND h.expiry_date BETWEEN %s AND %s
         GROUP BY h.id
-    ", $date_30_days, $date_51_days));
+    ", $today, $date_30_days));
 
     // 3. Get all maintenance packages with website names
     $expiring_maintenance = $wpdb->get_results($wpdb->prepare("
@@ -747,7 +746,7 @@ function auto_create_renewal_invoices_callback()
         WHERE m.status = 'ACTIVE'
         AND m.expiry_date BETWEEN %s AND %s
         GROUP BY m.id
-    ", $date_30_days, $date_51_days));
+    ", $today, $date_30_days));
 
     // Group services by owner_user_id
     $services_by_user = array();
@@ -921,6 +920,14 @@ function auto_create_renewal_invoices_callback()
             );
         }
 
+        // Determine the earliest expiry date to use as the invoice due date
+        $all_expiry_dates = array();
+        foreach ($user_services['domains'] as $d) $all_expiry_dates[] = $d->expiry_date;
+        foreach ($user_services['hostings'] as $h) $all_expiry_dates[] = $h->expiry_date;
+        foreach ($user_services['maintenances'] as $m) $all_expiry_dates[] = $m->expiry_date;
+        
+        $due_date = !empty($all_expiry_dates) ? min($all_expiry_dates) : '';
+
         // Create invoice using unified function
         $invoice_id = create_invoice_with_items(
             $user_id,
@@ -928,7 +935,9 @@ function auto_create_renewal_invoices_callback()
             'Hóa đơn gia hạn dịch vụ tự động',
             'pending',
             0,
-            'system'
+            'system',
+            '', // current date
+            $due_date
         );
 
         // Send webhook notification if invoice created successfully

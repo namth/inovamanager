@@ -997,4 +997,58 @@ jQuery(document).ready(function($) {
             }
         });
     });
+
+    /**
+     * Add Website and its services to Cart functionality
+     * logic: find all services of this website (domain, hosting, maintenance) and add them to cart
+     */
+    $(document).on('click', '.add-website-to-cart-btn', function(e) {
+        e.preventDefault();
+
+        var $btn = $(this);
+        var websiteId = $btn.data('website-id');
+        var originalIcon = $btn.find('i').attr('class');
+
+        // Disable button and show loading
+        $btn.prop('disabled', true);
+        $btn.find('i').attr('class', 'ph ph-circle-notch ph-spin text-info fa-150p');
+
+        $.ajax({
+            url: AJAX.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'add_website_to_cart',
+                website_id: websiteId
+            },
+            success: function(response) {
+                var data = JSON.parse(response);
+
+                if (data.status) {
+                    // Show success message
+                    showToast(data.message, 'success');
+
+                    // Update cart count badge
+                    updateCartCount(data.cart_count);
+
+                    // Change icon to checkmark temporarily
+                    $btn.find('i').attr('class', 'ph ph-check-circle text-success fa-150p');
+
+                    // Restore original icon after 2 seconds
+                    setTimeout(function() {
+                        $btn.find('i').attr('class', originalIcon);
+                        $btn.prop('disabled', false);
+                    }, 2000);
+                } else {
+                    showToast(data.message, 'error');
+                    $btn.find('i').attr('class', originalIcon);
+                    $btn.prop('disabled', false);
+                }
+            },
+            error: function() {
+                showToast('Có lỗi xảy ra khi thêm vào giỏ hàng', 'error');
+                $btn.find('i').attr('class', originalIcon);
+                $btn.prop('disabled', false);
+            }
+        });
+    });
 });
