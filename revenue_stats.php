@@ -116,20 +116,17 @@ foreach ($commission_monthly as $stat) {
 }
 
 // Get paid amount by service type for the year
-// Calculate proportional paid amount based on item_total ratio
+// Just simple sum of item total for paid invoices
 $service_type_stats = $wpdb->get_results("
     SELECT 
         ii.service_type,
-        SUM(ii.item_total) AS total_item_amount,
-        SUM(i.paid_amount) AS total_paid_for_invoice,
-        SUM(ii.item_total * i.paid_amount / i.total_amount) AS service_paid_amount
+        SUM(ii.item_total) AS service_paid_amount
     FROM {$invoices_table} i
     LEFT JOIN {$invoice_items_table} ii ON i.id = ii.invoice_id
     LEFT JOIN {$users_table} u ON i.user_id = u.id
     WHERE YEAR(i.payment_date) = {$selected_year}
     AND i.status = 'PAID'
     AND i.payment_date IS NOT NULL
-    AND i.total_amount > 0
     {$permission_where}
     " . ($partner_filter > 0 ? $wpdb->prepare("AND i.partner_id = %d", $partner_filter) : "") . "
     GROUP BY ii.service_type
@@ -140,7 +137,8 @@ $service_type_stats = $wpdb->get_results("
 $total_stats = $wpdb->get_row("
     SELECT 
         COUNT(i.id) AS total_invoices,
-        SUM(i.total_amount) AS total_year_revenue,
+        SUM(i.paid_amount) AS total_year_revenue,
+        SUM(i.discount_total) AS total_discount,
         AVG(i.total_amount) AS avg_invoice_amount,
         COUNT(DISTINCT i.user_id) AS unique_customers
     FROM {$invoices_table} i
@@ -159,6 +157,19 @@ $outstanding_stats = $wpdb->get_row("
     AND i.status != 'PAID'
     {$permission_where}
 ");
+
+// Calculate average revenue per month
+$current_year_real = date('Y');
+$current_month_real = date('n');
+
+if ($selected_year < $current_year_real) {
+    $num_months = 12;
+} elseif ($selected_year == $current_year_real) {
+    $num_months = $current_month_real;
+} else {
+    $num_months = 1;
+}
+$avg_monthly_revenue = ($total_stats->total_year_revenue ?? 0) / $num_months;
 
 // Get unique service types and prepare service type map
 $service_type_map = array(
@@ -291,22 +302,32 @@ get_header();
 
             <!-- Additional Stats -->
             <div class="row mt-3">
-                <div class="col-md-6">
+                <div class="col-md-4">
                     <div class="card">
                         <div class="card-body">
-                            <div class="text-muted">Trung Bình/HĐ</div>
+                            <div class="text-muted">Trung Bình/Tháng</div>
                             <div class="fs-5 fw-bold">
-                                <?php echo number_format(intval($total_stats->avg_invoice_amount ?? 0)); ?> ₫
+                                <?php echo number_format(intval($avg_monthly_revenue)); ?> ₫
                             </div>
                         </div>
                     </div>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-4">
                     <div class="card">
                         <div class="card-body">
                             <div class="text-muted">Khách Hàng Duy Nhất</div>
                             <div class="fs-5 fw-bold">
                                 <?php echo intval($total_stats->unique_customers ?? 0); ?>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="text-muted">Tổng Chiết Khấu</div>
+                            <div class="fs-5 fw-bold text-danger">
+                                <?php echo number_format(intval($total_stats->total_discount ?? 0)); ?> ₫
                             </div>
                         </div>
                     </div>
@@ -441,14 +462,13 @@ $monthly_service_type_query = "
     SELECT 
         MONTH(i.payment_date) AS month_num,
         ii.service_type,
-        SUM(ii.item_total * i.paid_amount / i.total_amount) AS service_paid_amount
+        SUM(ii.item_total) AS service_paid_amount
     FROM {$invoices_table} i
     LEFT JOIN {$invoice_items_table} ii ON i.id = ii.invoice_id
     LEFT JOIN {$users_table} u ON i.user_id = u.id
     WHERE YEAR(i.payment_date) = {$selected_year}
     AND i.status = 'PAID'
     AND i.payment_date IS NOT NULL
-    AND i.total_amount > 0
     {$permission_where}
     " . ($partner_filter > 0 ? $wpdb->prepare("AND i.partner_id = %d", $partner_filter) : "") . "
     GROUP BY MONTH(i.payment_date), ii.service_type

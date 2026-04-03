@@ -177,13 +177,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <?php if ($is_admin): ?>
                                 <div class="form-group">
                                     <div class="form-check form-switch">
-                                        <input class="form-check-input" 
-                                               type="checkbox" 
-                                               id="requires_vat_invoice" 
-                                               name="requires_vat_invoice" 
-                                               value="1"
-                                               <?php echo ($user->requires_vat_invoice) ? 'checked' : ''; ?>>
                                         <label class="form-check-label fw-bold" for="requires_vat_invoice">
+                                            <input class="form-check-input" 
+                                                   type="checkbox" 
+                                                   id="requires_vat_invoice" 
+                                                   name="requires_vat_invoice" 
+                                                   value="1"
+                                                   <?php echo ($user->requires_vat_invoice) ? 'checked' : ''; ?>>
                                             Nhận hóa đơn đỏ
                                         </label>
                                     </div>

@@ -40,7 +40,7 @@ $partner_id = null;
 if (!$is_admin) {
     // Check if user is a partner - get_inova_user returns object with id and user_type
     $inova_user = get_inova_user($current_user->ID);
-    
+
     if ($inova_user && isset($inova_user->id) && $inova_user->user_type === 'PARTNER' && $inova_user->status === 'ACTIVE') {
         $partner_id = $inova_user->id;
         $is_partner = true;
@@ -64,104 +64,107 @@ get_header();
                 <div class="card-body">
                     <!-- Summary Cards (Admin Only) -->
                     <?php if ($is_admin): ?>
-                    <div class="row mb-4">
-                        <div class="col-md-3">
-                            <div class="card bg-light-warning border-0">
-                                <div class="card-body text-center">
-                                    <h6 class="text-muted mb-2">Chưa thanh toán</h6>
-                                    <h3 id="total-pending" class="text-warning mb-0">0 VNĐ</h3>
+                        <div class="row mb-4">
+                            <div class="col-md-3">
+                                <div class="card bg-light-warning border-0">
+                                    <div class="card-body text-center">
+                                        <h6 class="text-muted mb-2">Chưa thanh toán</h6>
+                                        <h3 id="total-pending" class="text-warning mb-0">0 VNĐ</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-light-success border-0">
+                                    <div class="card-body text-center">
+                                        <h6 class="text-muted mb-2">Đã thanh toán</h6>
+                                        <h3 id="total-paid" class="text-success mb-0">0 VNĐ</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-light-info border-0">
+                                    <div class="card-body text-center">
+                                        <h6 class="text-muted mb-2">Đã rút tiền</h6>
+                                        <h3 id="total-withdrawn" class="text-info mb-0">0 VNĐ</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card bg-light-primary border-0">
+                                    <div class="card-body text-center">
+                                        <h6 class="text-muted mb-2">Tổng cộng</h6>
+                                        <h3 id="total-all" class="text-primary mb-0">0 VNĐ</h3>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light-success border-0">
-                                <div class="card-body text-center">
-                                    <h6 class="text-muted mb-2">Đã thanh toán</h6>
-                                    <h3 id="total-paid" class="text-success mb-0">0 VNĐ</h3>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light-info border-0">
-                                <div class="card-body text-center">
-                                    <h6 class="text-muted mb-2">Đã rút tiền</h6>
-                                    <h3 id="total-withdrawn" class="text-info mb-0">0 VNĐ</h3>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="card bg-light-primary border-0">
-                                <div class="card-body text-center">
-                                    <h6 class="text-muted mb-2">Tổng cộng</h6>
-                                    <h3 id="total-all" class="text-primary mb-0">0 VNĐ</h3>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                     <?php endif; ?>
 
                     <!-- Filter Section (Admin Only) -->
                     <?php if ($is_admin): ?>
-                    <div class="row mb-4 g-3">
-                        <div class="col-md-3">
-                            <label for="partner-filter" class="form-label">Lọc theo đối tác</label>
-                            <select id="partner-filter" class="form-select">
-                                <option value="">-- Tất cả đối tác --</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label for="service-type-filter" class="form-label">Loại dịch vụ</label>
-                            <select id="service-type-filter" class="form-select">
-                                <option value="">-- Tất cả --</option>
-                                <?php foreach ($service_types as $key => $label): ?>
-                                    <option value="<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label for="status-filter" class="form-label">Trạng thái</label>
-                            <select id="status-filter" class="form-select">
-                                <option value="">-- Tất cả --</option>
-                                <?php foreach ($statuses as $key => $label): ?>
-                                    <option value="<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label for="from-date" class="form-label">Từ ngày</label>
-                            <input type="date" id="from-date" class="form-control">
-                        </div>
-                        <div class="col-md-2">
-                            <label for="to-date" class="form-label">Đến ngày</label>
-                            <input type="date" id="to-date" class="form-control">
-                        </div>
-                        <div class="col-md-1 d-flex align-items-end">
-                            <button class="btn btn-secondary btn-sm w-100" id="reset-filters-btn">
-                                <i class="ph ph-funnel-x"></i>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Bulk Actions (Admin Only) -->
-                    <div class="row mb-3">
-                        <div class="col-12">
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-warning d-none" id="bulk-actions-container">
-                                    <input type="checkbox" id="select-all-checkbox" class="form-check-input me-2" title="Chọn tất cả">
-                                    <span id="selected-count">0 được chọn</span>
-                                </button>
-                                <select id="bulk-status-action" class="form-select form-select-sm" style="width: 200px;">
-                                    <option value="">-- Cập nhật trạng thái --</option>
+                        <div class="row mb-4 g-3">
+                            <div class="col-md-3">
+                                <label for="partner-filter" class="form-label">Lọc theo đối tác</label>
+                                <select id="partner-filter" class="form-select">
+                                    <option value="">-- Tất cả đối tác --</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label for="service-type-filter" class="form-label">Loại dịch vụ</label>
+                                <select id="service-type-filter" class="form-select">
+                                    <option value="">-- Tất cả --</option>
+                                    <?php foreach ($service_types as $key => $label): ?>
+                                        <option value="<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label for="status-filter" class="form-label">Trạng thái</label>
+                                <select id="status-filter" class="form-select">
+                                    <option value="">-- Tất cả --</option>
                                     <?php foreach ($statuses as $key => $label): ?>
                                         <option value="<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?></option>
                                     <?php endforeach; ?>
                                 </select>
-                                <button class="btn btn-sm btn-primary" id="bulk-update-btn">
-                                    <i class="ph ph-arrow-circle-right me-1"></i>Cập nhật
+                            </div>
+                            <div class="col-md-2">
+                                <label for="from-date" class="form-label">Từ ngày</label>
+                                <input type="date" id="from-date" class="form-control">
+                            </div>
+                            <div class="col-md-2">
+                                <label for="to-date" class="form-label">Đến ngày</label>
+                                <input type="date" id="to-date" class="form-control">
+                            </div>
+                            <div class="col-md-1 d-flex align-items-end">
+                                <button class="btn btn-secondary btn-sm w-100" id="reset-filters-btn">
+                                    <i class="ph ph-funnel-x"></i>
                                 </button>
                             </div>
                         </div>
-                    </div>
+
+                        <!-- Bulk Actions (Admin Only) -->
+                        <div class="row mb-3">
+                            <div class="col-12">
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-warning d-none" id="bulk-actions-container">
+                                        <input type="checkbox" id="select-all-checkbox" class="form-check-input me-2"
+                                            title="Chọn tất cả">
+                                        <span id="selected-count">0 được chọn</span>
+                                    </button>
+                                    <select id="bulk-status-action" class="form-select form-select-sm"
+                                        style="width: 200px;">
+                                        <option value="">-- Cập nhật trạng thái --</option>
+                                        <?php foreach ($statuses as $key => $label): ?>
+                                            <option value="<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button class="btn btn-sm btn-primary" id="bulk-update-btn">
+                                        <i class="ph ph-arrow-circle-right me-1"></i>Cập nhật
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     <?php endif; ?>
 
                     <!-- Commissions Table -->
@@ -170,13 +173,13 @@ get_header();
                             <thead class="table-light">
                                 <tr>
                                     <?php if ($is_admin): ?>
-                                    <th style="width: 3%">
-                                        <input type="checkbox" class="form-check-input" id="header-checkbox">
-                                    </th>
+                                        <th style="width: 3%">
+                                            <input type="checkbox" class="form-check-input" id="header-checkbox">
+                                        </th>
                                     <?php endif; ?>
                                     <th style="width: 10%">Ngày</th>
                                     <?php if ($is_admin): ?>
-                                    <th style="width: 12%">Đối tác</th>
+                                        <th style="width: 12%">Đối tác</th>
                                     <?php endif; ?>
                                     <th style="width: 10%">Loại DV</th>
                                     <th style="width: 10%">Tỷ lệ (%)</th>
@@ -222,107 +225,119 @@ get_header();
 
 <!-- Update Status Modal (Admin Only) -->
 <?php if ($is_admin): ?>
-<div class="modal fade" id="updateStatusModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Cập nhật Trạng thái Hoa hồng</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label for="status-select" class="form-label">Trạng thái mới</label>
-                    <select id="status-select" class="form-select">
-                        <option value="">-- Chọn trạng thái --</option>
-                        <?php foreach ($statuses as $key => $label): ?>
-                            <option value="<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?></option>
-                        <?php endforeach; ?>
-                    </select>
+    <div class="modal fade" id="updateStatusModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cập nhật Trạng thái Hoa hồng</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                <button type="button" class="btn btn-primary" id="confirm-status-btn">
-                    <i class="ph ph-check me-1"></i>Cập nhật
-                </button>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="status-select" class="form-label">Trạng thái mới</label>
+                        <select id="status-select" class="form-select">
+                            <option value="">-- Chọn trạng thái --</option>
+                            <?php foreach ($statuses as $key => $label): ?>
+                                <option value="<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3" id="commission-rate-container" style="display: none;">
+                        <label for="commission-rate-input" class="form-label">Tỷ lệ hoa hồng (%)</label>
+                        <div class="input-group">
+                            <input type="number" id="commission-rate-input" class="form-control" step="0.01" min="0"
+                                max="100">
+                            <span class="input-group-text">%</span>
+                        </div>
+                        <div class="form-text">Bạn chỉ có thể điều chỉnh tỷ lệ này khi hoa hồng ở trạng thái "Chưa thanh
+                            toán".</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-primary" id="confirm-status-btn">
+                        <i class="ph ph-check me-1"></i>Cập nhật
+                    </button>
+                </div>
             </div>
         </div>
     </div>
-</div>
 <?php endif; ?>
 
 <script>
-jQuery(document).ready(function($) {
-    const AJAX_URL = '<?php echo admin_url('admin-ajax.php'); ?>';
-    const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
-    const PARTNER_ID = <?php echo $partner_id ? $partner_id : 'null'; ?>;
-    let commissionToUpdate = null;
+    jQuery(document).ready(function ($) {
+        const AJAX_URL = '<?php echo admin_url('admin-ajax.php'); ?>';
+        const IS_ADMIN = <?php echo $is_admin ? 'true' : 'false'; ?>;
+        const PARTNER_ID = <?php echo $partner_id ? $partner_id : 'null'; ?>;
+        let commissionToUpdate = null;
+        let currentCommissions = []; // Store loaded commissions for reference
 
-    /**
-     * Load commissions
-     */
-    function loadCommissions(filters = {}) {
-        const data = {
-            action: 'get_partner_commissions',
-            partner_id: IS_ADMIN ? (filters.partner_id || $('#partner-filter').val() || '') : PARTNER_ID,
-            service_type: filters.service_type || $('#service-type-filter').val() || '',
-            status: filters.status || $('#status-filter').val() || '',
-            from_date: filters.from_date || $('#from-date').val() || '',
-            to_date: filters.to_date || $('#to-date').val() || ''
-        };
+        /**
+         * Load commissions
+         */
+        function loadCommissions(filters = {}) {
+            const data = {
+                action: 'get_partner_commissions',
+                partner_id: IS_ADMIN ? (filters.partner_id || $('#partner-filter').val() || '') : PARTNER_ID,
+                service_type: filters.service_type || $('#service-type-filter').val() || '',
+                status: filters.status || $('#status-filter').val() || '',
+                from_date: filters.from_date || $('#from-date').val() || '',
+                to_date: filters.to_date || $('#to-date').val() || ''
+            };
 
-        $.ajax({
-            url: AJAX_URL,
-            type: 'POST',
-            dataType: 'json',
-            data: data,
-            success: function(response) {
-                if (response.success) {
-                    displayCommissions(response.data);
-                    if (IS_ADMIN) {
-                        updateSummaryCards(response.data);
+            $.ajax({
+                url: AJAX_URL,
+                type: 'POST',
+                dataType: 'json',
+                data: data,
+                success: function (response) {
+                    if (response.success) {
+                        currentCommissions = response.data;
+                        displayCommissions(response.data);
+                        if (IS_ADMIN) {
+                            updateSummaryCards(response.data);
+                        }
+                    } else {
+                        $('#commissions-tbody').html('<tr><td colspan="9" class="text-center text-danger">Lỗi: ' + response.data.message + '</td></tr>');
                     }
-                } else {
-                    $('#commissions-tbody').html('<tr><td colspan="9" class="text-center text-danger">Lỗi: ' + response.data.message + '</td></tr>');
+                },
+                error: function () {
+                    $('#commissions-tbody').html('<tr><td colspan="9" class="text-center text-danger">Lỗi kết nối!</td></tr>');
                 }
-            },
-            error: function() {
-                $('#commissions-tbody').html('<tr><td colspan="9" class="text-center text-danger">Lỗi kết nối!</td></tr>');
-            }
-        });
-    }
-
-    /**
-     * Display commissions in table
-     */
-    function displayCommissions(commissions) {
-        const tbody = $('#commissions-tbody');
-        tbody.empty();
-
-        if (commissions.length === 0) {
-            $('#no-commissions-message').removeClass('d-none');
-            return;
+            });
         }
 
-        $('#no-commissions-message').addClass('d-none');
+        /**
+         * Display commissions in table
+         */
+        function displayCommissions(commissions) {
+            const tbody = $('#commissions-tbody');
+            tbody.empty();
 
-        commissions.forEach(function(commission) {
-            let row = '<tr>';
-
-            if (IS_ADMIN) {
-                row += `<td><input type="checkbox" class="form-check-input commission-checkbox" data-id="${commission.id}"></td>`;
+            if (commissions.length === 0) {
+                $('#no-commissions-message').removeClass('d-none');
+                return;
             }
 
-            row += `
+            $('#no-commissions-message').addClass('d-none');
+
+            commissions.forEach(function (commission) {
+                let row = '<tr>';
+
+                if (IS_ADMIN) {
+                    row += `<td><input type="checkbox" class="form-check-input commission-checkbox" data-id="${commission.id}"></td>`;
+                }
+
+                row += `
                 <td>${commission.calculation_date}</td>
             `;
 
-            if (IS_ADMIN) {
-                row += `<td><strong>${escapeHtml(commission.partner_name)}</strong></td>`;
-            }
+                if (IS_ADMIN) {
+                    row += `<td><strong>${escapeHtml(commission.partner_name)}</strong></td>`;
+                }
 
-            const statusClass = getStatusClass(commission.status);
-            row += `
+                const statusClass = getStatusClass(commission.status);
+                row += `
                 <td>${escapeHtml(getServiceTypeLabel(commission.service_type))}</td>
                 <td>${parseFloat(commission.discount_rate).toFixed(2)}%</td>
                 <td>${formatMoney(commission.service_amount)}</td>
@@ -334,135 +349,135 @@ jQuery(document).ready(function($) {
                     </button>
             `;
 
-            if (IS_ADMIN) {
-                row += `
+                if (IS_ADMIN) {
+                    row += `
                     <button class="btn btn-sm btn-warning update-status-btn" data-id="${commission.id}" title="Cập nhật trạng thái">
                         <i class="ph ph-pencil"></i>
                     </button>
                 `;
-            }
+                }
 
-            row += `
+                row += `
                 </td>
             </tr>
             `;
 
-            tbody.append(row);
-        });
-    }
-
-    /**
-     * Update summary cards
-     */
-    function updateSummaryCards(commissions) {
-        let pending = 0, paid = 0, withdrawn = 0, total = 0;
-
-        commissions.forEach(function(c) {
-            const amount = parseInt(c.commission_amount);
-            if (c.status === 'PENDING') pending += amount;
-            if (c.status === 'PAID') paid += amount;
-            if (c.status === 'WITHDRAWN') withdrawn += amount;
-            total += amount;
-        });
-
-        $('#total-pending').text(formatMoney(pending));
-        $('#total-paid').text(formatMoney(paid));
-        $('#total-withdrawn').text(formatMoney(withdrawn));
-        $('#total-all').text(formatMoney(total));
-    }
-
-    /**
-     * Load partners for select dropdown (Admin only)
-     */
-    function loadPartners() {
-        if (!IS_ADMIN) return;
-
-        $.ajax({
-            url: AJAX_URL,
-            type: 'POST',
-            dataType: 'json',
-            data: {
-                action: 'get_all_partners'
-            },
-            success: function(response) {
-                if (response.success) {
-                    const filterSelect = $('#partner-filter');
-                    filterSelect.find('option:not(:first)').remove();
-
-                    response.data.forEach(function(partner) {
-                        filterSelect.append(`<option value="${partner.id}">${escapeHtml(partner.name)} (${escapeHtml(partner.user_code)})</option>`);
-                    });
-                }
-            }
-        });
-    }
-
-    /**
-     * Format money
-     */
-    function formatMoney(value) {
-        return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value);
-    }
-
-    /**
-     * Get service type label
-     */
-    function getServiceTypeLabel(typeKey) {
-        const types = <?php echo json_encode($service_types); ?>;
-        return types[typeKey] || typeKey;
-    }
-
-    /**
-     * Get status label
-     */
-    function getStatusLabel(status) {
-        const statuses = <?php echo json_encode($statuses); ?>;
-        return statuses[status] || status;
-    }
-
-    /**
-     * Get status badge class
-     */
-    function getStatusClass(status) {
-        switch(status) {
-            case 'PENDING': return 'warning';
-            case 'PAID': return 'success';
-            case 'WITHDRAWN': return 'info';
-            case 'CANCELLED': return 'danger';
-            default: return 'secondary';
+                tbody.append(row);
+            });
         }
-    }
 
-    /**
-     * Escape HTML
-     */
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
+        /**
+         * Update summary cards
+         */
+        function updateSummaryCards(commissions) {
+            let pending = 0, paid = 0, withdrawn = 0, total = 0;
 
-    /**
-     * View commission detail
-     */
-    $(document).on('click', '.view-commission-btn', function() {
-        const commissionId = $(this).data('id');
+            commissions.forEach(function (c) {
+                const amount = parseInt(c.commission_amount);
+                if (c.status === 'PENDING') pending += amount;
+                if (c.status === 'PAID') paid += amount;
+                if (c.status === 'WITHDRAWN') withdrawn += amount;
+                total += amount;
+            });
 
-        $.ajax({
-            url: AJAX_URL,
-            type: 'POST',
-            dataType: 'json',
-            data: {
-                action: 'get_commission_detail',
-                commission_id: commissionId
-            },
-            success: function(response) {
-                if (response.success) {
-                    const detail = response.data;
-                    const statusLabel = getStatusLabel(detail.status);
-                    const serviceLabel = getServiceTypeLabel(detail.service_type);
+            $('#total-pending').text(formatMoney(pending));
+            $('#total-paid').text(formatMoney(paid));
+            $('#total-withdrawn').text(formatMoney(withdrawn));
+            $('#total-all').text(formatMoney(total));
+        }
 
-                    let html = `
+        /**
+         * Load partners for select dropdown (Admin only)
+         */
+        function loadPartners() {
+            if (!IS_ADMIN) return;
+
+            $.ajax({
+                url: AJAX_URL,
+                type: 'POST',
+                dataType: 'json',
+                data: {
+                    action: 'get_all_partners'
+                },
+                success: function (response) {
+                    if (response.success) {
+                        const filterSelect = $('#partner-filter');
+                        filterSelect.find('option:not(:first)').remove();
+
+                        response.data.forEach(function (partner) {
+                            filterSelect.append(`<option value="${partner.id}">${escapeHtml(partner.name)} (${escapeHtml(partner.user_code)})</option>`);
+                        });
+                    }
+                }
+            });
+        }
+
+        /**
+         * Format money
+         */
+        function formatMoney(value) {
+            return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value);
+        }
+
+        /**
+         * Get service type label
+         */
+        function getServiceTypeLabel(typeKey) {
+            const types = <?php echo json_encode($service_types); ?>;
+            return types[typeKey] || typeKey;
+        }
+
+        /**
+         * Get status label
+         */
+        function getStatusLabel(status) {
+            const statuses = <?php echo json_encode($statuses); ?>;
+            return statuses[status] || status;
+        }
+
+        /**
+         * Get status badge class
+         */
+        function getStatusClass(status) {
+            switch (status) {
+                case 'PENDING': return 'warning';
+                case 'PAID': return 'success';
+                case 'WITHDRAWN': return 'info';
+                case 'CANCELLED': return 'danger';
+                default: return 'secondary';
+            }
+        }
+
+        /**
+         * Escape HTML
+         */
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        /**
+         * View commission detail
+         */
+        $(document).on('click', '.view-commission-btn', function () {
+            const commissionId = $(this).data('id');
+
+            $.ajax({
+                url: AJAX_URL,
+                type: 'POST',
+                dataType: 'json',
+                data: {
+                    action: 'get_commission_detail',
+                    commission_id: commissionId
+                },
+                success: function (response) {
+                    if (response.success) {
+                        const detail = response.data;
+                        const statusLabel = getStatusLabel(detail.status);
+                        const serviceLabel = getServiceTypeLabel(detail.service_type);
+
+                        let html = `
                         <div class="row mb-3">
                             <div class="col-md-6">
                                 <p><strong>Đối tác:</strong> ${escapeHtml(detail.partner_name)}</p>
@@ -490,155 +505,166 @@ jQuery(document).ready(function($) {
                         ${detail.notes ? `<p><strong>Ghi chú:</strong> ${escapeHtml(detail.notes)}</p>` : ''}
                     `;
 
-                    $('#commission-detail-body').html(html);
-                    // Use vanilla Bootstrap modal
-                    const detailModal = new bootstrap.Modal(document.getElementById('commissionDetailModal'));
-                    detailModal.show();
+                        $('#commission-detail-body').html(html);
+                        // Use vanilla Bootstrap modal
+                        const detailModal = new bootstrap.Modal(document.getElementById('commissionDetailModal'));
+                        detailModal.show();
+                    } else {
+                        alert('Lỗi: ' + response.data.message);
+                    }
+                }
+            });
+        });
+
+        // Admin-only events
+        <?php if ($is_admin): ?>
+
+            /**
+             * Update status - single
+             */
+            $(document).on('click', '.update-status-btn', function () {
+                commissionToUpdate = $(this).data('id');
+                const commission = currentCommissions.find(c => c.id == commissionToUpdate);
+
+                $('#status-select').val(commission ? commission.status : '');
+
+                if (commission && commission.status === 'PENDING') {
+                    $('#commission-rate-container').show();
+                    $('#commission-rate-input').val(parseFloat(commission.discount_rate).toFixed(2));
                 } else {
-                    alert('Lỗi: ' + response.data.message);
+                    $('#commission-rate-container').hide();
+                }
+
+                // Use vanilla Bootstrap modal
+                const statusModal = new bootstrap.Modal(document.getElementById('updateStatusModal'));
+                statusModal.show();
+            });
+
+            $('#confirm-status-btn').on('click', function () {
+                const newStatus = $('#status-select').val();
+                if (!newStatus) {
+                    alert('Vui lòng chọn trạng thái!');
+                    return;
+                }
+
+                $.ajax({
+                    url: AJAX_URL,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'update_commission_status',
+                        commission_id: commissionToUpdate,
+                        status: newStatus,
+                        discount_rate: $('#commission-rate-container').is(':visible') ? $('#commission-rate-input').val() : null
+                    },
+                    success: function (response) {
+                        if (response.success) {
+                            // Hide status modal
+                            const statusModal = bootstrap.Modal.getInstance(document.getElementById('updateStatusModal'));
+                            if (statusModal) statusModal.hide();
+                            loadCommissions();
+                            // alert(response.data.message);
+                        } else {
+                            alert('Lỗi: ' + response.data.message);
+                        }
+                    }
+                });
+            });
+
+            /**
+             * Checkbox handling
+             */
+            $('#header-checkbox').on('change', function () {
+                const isChecked = $(this).prop('checked');
+                $('.commission-checkbox').prop('checked', isChecked);
+                updateSelectedCount();
+            });
+
+            $(document).on('change', '.commission-checkbox', function () {
+                updateSelectedCount();
+            });
+
+            function updateSelectedCount() {
+                const count = $('.commission-checkbox:checked').length;
+                $('#selected-count').text(count + ' được chọn');
+
+                if (count > 0) {
+                    $('#bulk-actions-container').removeClass('d-none');
+                } else {
+                    $('#bulk-actions-container').addClass('d-none');
                 }
             }
-        });
-    });
 
-    // Admin-only events
-    <?php if ($is_admin): ?>
-
-    /**
-     * Update status - single
-     */
-    $(document).on('click', '.update-status-btn', function() {
-        commissionToUpdate = $(this).data('id');
-        $('#status-select').val('');
-        // Use vanilla Bootstrap modal
-        const statusModal = new bootstrap.Modal(document.getElementById('updateStatusModal'));
-        statusModal.show();
-    });
-
-    $('#confirm-status-btn').on('click', function() {
-        const newStatus = $('#status-select').val();
-        if (!newStatus) {
-            alert('Vui lòng chọn trạng thái!');
-            return;
-        }
-
-        $.ajax({
-            url: AJAX_URL,
-            type: 'POST',
-            dataType: 'json',
-            data: {
-                action: 'update_commission_status',
-                commission_id: commissionToUpdate,
-                status: newStatus
-            },
-            success: function(response) {
-                if (response.success) {
-                    // Hide status modal
-                    const statusModal = bootstrap.Modal.getInstance(document.getElementById('updateStatusModal'));
-                    if (statusModal) statusModal.hide();
-                    loadCommissions();
-                    alert(response.data.message);
-                } else {
-                    alert('Lỗi: ' + response.data.message);
+            /**
+             * Bulk update status
+             */
+            $('#bulk-update-btn').on('click', function () {
+                const newStatus = $('#bulk-status-action').val();
+                if (!newStatus) {
+                    alert('Vui lòng chọn trạng thái!');
+                    return;
                 }
-            }
-        });
-    });
 
-    /**
-     * Checkbox handling
-     */
-    $('#header-checkbox').on('change', function() {
-        const isChecked = $(this).prop('checked');
-        $('.commission-checkbox').prop('checked', isChecked);
-        updateSelectedCount();
-    });
+                const commissionIds = [];
+                $('.commission-checkbox:checked').each(function () {
+                    commissionIds.push($(this).data('id'));
+                });
 
-    $(document).on('change', '.commission-checkbox', function() {
-        updateSelectedCount();
-    });
-
-    function updateSelectedCount() {
-        const count = $('.commission-checkbox:checked').length;
-        $('#selected-count').text(count + ' được chọn');
-        
-        if (count > 0) {
-            $('#bulk-actions-container').removeClass('d-none');
-        } else {
-            $('#bulk-actions-container').addClass('d-none');
-        }
-    }
-
-    /**
-     * Bulk update status
-     */
-    $('#bulk-update-btn').on('click', function() {
-        const newStatus = $('#bulk-status-action').val();
-        if (!newStatus) {
-            alert('Vui lòng chọn trạng thái!');
-            return;
-        }
-
-        const commissionIds = [];
-        $('.commission-checkbox:checked').each(function() {
-            commissionIds.push($(this).data('id'));
-        });
-
-        if (commissionIds.length === 0) {
-            alert('Vui lòng chọn ít nhất một hoa hồng!');
-            return;
-        }
-
-        if (!confirm(`Bạn có chắc chắn muốn cập nhật ${commissionIds.length} hoa hồng không?`)) {
-            return;
-        }
-
-        $.ajax({
-            url: AJAX_URL,
-            type: 'POST',
-            dataType: 'json',
-            data: {
-                action: 'bulk_update_commission_status',
-                commission_ids: commissionIds,
-                status: newStatus
-            },
-            success: function(response) {
-                if (response.success) {
-                    loadCommissions();
-                    $('#bulk-status-action').val('');
-                    $('#header-checkbox').prop('checked', false);
-                    alert(response.data.message);
-                } else {
-                    alert('Lỗi: ' + response.data.message);
+                if (commissionIds.length === 0) {
+                    alert('Vui lòng chọn ít nhất một hoa hồng!');
+                    return;
                 }
-            }
-        });
-    });
 
-    /**
-     * Filter and reset
-     */
-    $('#partner-filter, #service-type-filter, #status-filter, #from-date, #to-date').on('change', function() {
+                if (!confirm(`Bạn có chắc chắn muốn cập nhật ${commissionIds.length} hoa hồng không?`)) {
+                    return;
+                }
+
+                $.ajax({
+                    url: AJAX_URL,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'bulk_update_commission_status',
+                        commission_ids: commissionIds,
+                        status: newStatus
+                    },
+                    success: function (response) {
+                        if (response.success) {
+                            loadCommissions();
+                            $('#bulk-status-action').val('');
+                            $('#header-checkbox').prop('checked', false);
+                            alert(response.data.message);
+                        } else {
+                            alert('Lỗi: ' + response.data.message);
+                        }
+                    }
+                });
+            });
+
+            /**
+             * Filter and reset
+             */
+            $('#partner-filter, #service-type-filter, #status-filter, #from-date, #to-date').on('change', function () {
+                loadCommissions();
+            });
+
+            $('#reset-filters-btn').on('click', function () {
+                $('#partner-filter').val('');
+                $('#service-type-filter').val('');
+                $('#status-filter').val('');
+                $('#from-date').val('');
+                $('#to-date').val('');
+                loadCommissions();
+            });
+
+        <?php endif; ?>
+
+        // Initial load
+        <?php if ($is_admin): ?>
+            loadPartners();
+        <?php endif; ?>
         loadCommissions();
     });
-
-    $('#reset-filters-btn').on('click', function() {
-        $('#partner-filter').val('');
-        $('#service-type-filter').val('');
-        $('#status-filter').val('');
-        $('#from-date').val('');
-        $('#to-date').val('');
-        loadCommissions();
-    });
-
-    <?php endif; ?>
-
-    // Initial load
-    <?php if ($is_admin): ?>
-    loadPartners();
-    <?php endif; ?>
-    loadCommissions();
-});
 </script>
 
 <?php get_footer(); ?>

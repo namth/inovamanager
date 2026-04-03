@@ -1588,6 +1588,7 @@ function update_commission_status_callback()
 
     $commission_id = !empty($_POST['commission_id']) ? intval($_POST['commission_id']) : 0;
     $new_status = !empty($_POST['status']) ? sanitize_text_field($_POST['status']) : '';
+    $new_discount_rate = isset($_POST['discount_rate']) && $_POST['discount_rate'] !== null ? floatval($_POST['discount_rate']) : null;
 
     if (!$commission_id || !$new_status) {
         wp_send_json_error(['message' => 'Thiếu dữ liệu']);
@@ -1616,17 +1617,31 @@ function update_commission_status_callback()
 
     // Prepare update data
     $update_data = ['status' => $new_status];
+    $format = ['%s'];
+
+    // Update discount rate and recalculate commission amount only if currently PENDING
+    if ($commission->status === 'PENDING' && $new_discount_rate !== null) {
+        $update_data['discount_rate'] = $new_discount_rate;
+        $format[] = '%f';
+        
+        // Recalculate commission amount
+        $service_amount = floatval($commission->service_amount);
+        $new_commission_amount = ($service_amount * $new_discount_rate) / 100;
+        $update_data['commission_amount'] = $new_commission_amount;
+        $format[] = '%f';
+    }
 
     // Set withdrawal_date when status is WITHDRAWN
     if ($new_status === 'WITHDRAWN') {
         $update_data['withdrawal_date'] = current_time('Y-m-d');
+        $format[] = '%s';
     }
 
     $result = $wpdb->update(
         $commissions_table,
         $update_data,
         ['id' => $commission_id],
-        ['%s', '%s'],
+        $format,
         ['%d']
     );
 
