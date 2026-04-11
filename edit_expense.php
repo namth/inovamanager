@@ -19,7 +19,6 @@ $expense_id = isset($_GET['expense_id']) ? intval($_GET['expense_id']) : 0;
 $redirect_url = '';
 if (!empty($_SERVER['HTTP_REFERER'])) {
     $referer = esc_url($_SERVER['HTTP_REFERER']);
-    // Validate that referer is from same domain
     if (strpos($referer, home_url()) === 0) {
         $redirect_url = $referer;
     }
@@ -42,26 +41,32 @@ if (!$expense) {
 
 // Category mapping
 $categories = array(
-    'ELECTRICITY' => 'Tiền điện',
-    'WATER' => 'Tiền nước',
-    'SOFTWARE' => 'Phần mềm',
-    'HOSTING' => 'VPS/Hosting',
-    'DOMAIN' => 'Tên miền',
-    'AI' => 'Chi phí AI',
-    'CONTRACT' => 'Hợp đồng dịch vụ',
-    'RENTAL' => 'Tiền thuê',
-    'INSURANCE' => 'Bảo hiểm',
-    'MAINTENANCE' => 'Bảo trì / Sửa chữa',
+    'ELECTRICITY'  => 'Tiền điện',
+    'WATER'        => 'Tiền nước',
+    'SOFTWARE'     => 'Phần mềm',
+    'HOSTING'      => 'VPS/Hosting',
+    'DOMAIN'       => 'Tên miền',
+    'AI'           => 'Chi phí AI',
+    'CONTRACT'     => 'Hợp đồng dịch vụ',
+    'RENTAL'       => 'Tiền thuê',
+    'INSURANCE'    => 'Bảo hiểm',
+    'MAINTENANCE'  => 'Bảo trì / Sửa chữa',
     'SUBSCRIPTION' => 'Đăng ký hàng tháng',
-    'OTHER' => 'Khác'
+    'OTHER'        => 'Khác'
+);
+
+$billing_cycles = array(
+    'MONTHLY'       => 'Hàng tháng',
+    'SEMI_ANNUALLY' => '6 tháng / lần',
+    'QUARTERLY'     => 'Hàng quý',
+    'YEARLY'        => 'Hàng năm',
+    'OTHER'         => 'Khác',
 );
 
 // Error messages mapping
 $error_messages = array(
-    'name' => 'Vui lòng nhập tên chi tiêu',
+    'name'   => 'Vui lòng nhập tên chi tiêu',
     'amount' => 'Số tiền phải lớn hơn 0',
-    'date' => 'Ngày kết thúc phải >= ngày bắt đầu',
-    'start_date' => 'Bạn chưa chọn ngày bắt đầu',
     'update' => 'Cập nhật thất bại hoặc không có thay đổi'
 );
 
@@ -94,7 +99,6 @@ get_header();
                     <?php
                     if (!empty($notification) && $notification_type === 'success') {
                         echo $notification;
-                        // add more button to back to list page
                         echo '<div class="d-flex mt-3">';
                         echo '<a href="' . home_url('/danh-sach-chi-tieu/') . '" class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
                                 <i class="ph ph-list btn-icon-prepend fa-150p"></i>
@@ -156,13 +160,14 @@ get_header();
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="form-group mb-3">
-                                                    <label for="start_date" class="fw-bold">Ngày bắt đầu <span class="text-danger">*</span></label>
-                                                    <div class="input-group date datepicker">
-                                                        <input type="text" class="form-control" id="start_date" name="start_date" value="<?php echo date('d/m/Y', strtotime($expense->start_date)); ?>" required>
-                                                        <span class="input-group-text bg-secondary text-white">
-                                                            <i class="ph ph-calendar"></i>
-                                                        </span>
-                                                    </div>
+                                                    <label for="billing_cycle" class="fw-bold">Chu kỳ <span class="text-danger">*</span></label>
+                                                    <select class="form-control" id="billing_cycle" name="billing_cycle" required>
+                                                        <?php foreach ($billing_cycles as $key => $label): ?>
+                                                            <option value="<?php echo $key; ?>" <?php echo (($expense->billing_cycle ?? 'MONTHLY') === $key) ? 'selected' : ''; ?>>
+                                                                <?php echo $label; ?>
+                                                            </option>
+                                                        <?php endforeach; ?>
+                                                    </select>
                                                 </div>
                                             </div>
                                             <div class="col-md-6">

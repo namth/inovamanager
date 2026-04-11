@@ -136,6 +136,12 @@ $user_type = get_inova_user_type();
                 <span class="menu-title">Quản lý Chi tiêu</span>
             </a>
         </li>
+        <li class="nav-item">
+            <a class="nav-link" href="<?php echo home_url('/ke-khai-chi-phi/'); ?>">
+                <i class="menu-icon ph ph-currency-circle-dollar"></i>
+                <span class="menu-title">Kê khai Chi phí</span>
+            </a>
+        </li>
         <?php endif; ?>
 
 

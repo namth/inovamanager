@@ -2489,71 +2489,62 @@ function edit_expense_post_callback() {
         global $wpdb;
         $table = $wpdb->prefix . 'im_recurring_expenses';
 
-        $expense_id = intval($_POST['expense_id']);
-        $name = sanitize_text_field($_POST['name']);
-        $category = sanitize_text_field($_POST['category']);
-        $vendor = sanitize_text_field($_POST['vendor']);
-        $amount = intval($_POST['amount']);
-        $status = sanitize_text_field($_POST['status']);
-        $note = sanitize_textarea_field($_POST['note']);
+        $expense_id    = intval($_POST['expense_id']);
+        $name          = sanitize_text_field($_POST['name']);
+        $category      = sanitize_text_field($_POST['category']);
+        $vendor        = sanitize_text_field($_POST['vendor']);
+        $amount        = intval($_POST['amount']);
+        $billing_cycle = sanitize_text_field($_POST['billing_cycle'] ?? 'MONTHLY');
+        $status        = sanitize_text_field($_POST['status']);
+        $note          = sanitize_textarea_field($_POST['note']);
 
         // Validation
         if (empty($name)) {
-            wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=name'));
+            wp_redirect(home_url('/sua-chi-tieu/?expense_id=' . $expense_id . '&error=name'));
             exit;
         } elseif ($amount <= 0) {
-            wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=amount'));
+            wp_redirect(home_url('/sua-chi-tieu/?expense_id=' . $expense_id . '&error=amount'));
             exit;
         }
 
-        // Start date handling
-        if (isset($_POST['start_date']) && !empty($_POST['start_date'])) {
-            // Convert from dd/mm/yyyy to yyyy-mm-dd
-            $start_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['start_date'])));
-            
-            // End date handling (optional)
-            $end_date = null;
-            if (isset($_POST['end_date']) && !empty($_POST['end_date'])) {
-                $end_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['end_date'])));
-            }
+        // End date handling (optional)
+        $end_date = null;
+        if (isset($_POST['end_date']) && !empty($_POST['end_date'])) {
+            $end_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['end_date'])));
+        }
 
-            if (!empty($end_date) && strtotime($end_date) < strtotime($start_date)) {
-                wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=date'));
-                exit;
-            }
+        $valid_cycles = array('MONTHLY', 'SEMI_ANNUALLY', 'QUARTERLY', 'YEARLY', 'OTHER');
+        if (!in_array($billing_cycle, $valid_cycles)) {
+            $billing_cycle = 'MONTHLY';
+        }
 
-            $data = array(
-                'name' => $name,
-                'category' => $category,
-                'vendor' => $vendor,
-                'amount' => $amount,
-                'start_date' => $start_date,
-                'end_date' => $end_date,
-                'status' => $status,
-                'note' => $note
-            );
-            
-            $update = $wpdb->update(
-                $table,
-                $data,
-                array('id' => $expense_id),
-                array('%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s'),
-                array('%d')
-            );
+        $data = array(
+            'name'          => $name,
+            'category'      => $category,
+            'vendor'        => $vendor,
+            'amount'        => $amount,
+            'billing_cycle' => $billing_cycle,
+            'end_date'      => $end_date,
+            'status'        => $status,
+            'note'          => $note
+        );
 
-            if ($update !== false) {
-                // Redirect to previous page or expense list
-                $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
-                    ? esc_url($_POST['redirect_url']) 
-                    : home_url('/danh-sach-chi-tieu/');
-                wp_redirect($redirect_url);
-                exit;
-            } else {
-                wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=update'));
-                exit;
-            }
+        $update = $wpdb->update(
+            $table,
+            $data,
+            array('id' => $expense_id),
+            array('%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s'),
+            array('%d')
+        );
+
+        if ($update !== false) {
+            $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url'])
+                ? esc_url($_POST['redirect_url'])
+                : home_url('/danh-sach-chi-tieu/');
+            wp_redirect($redirect_url);
+            exit;
         } else {
-            wp_redirect(home_url('/edit-expense/?expense_id=' . $expense_id . '&error=start_date'));
+            wp_redirect(home_url('/sua-chi-tieu/?expense_id=' . $expense_id . '&error=update'));
             exit;
         }
     }
@@ -2562,10 +2553,244 @@ function edit_expense_post_callback() {
     exit;
 }
 
+/**
+ * Add new expense declaration - POST handler
+ */
+function add_expense_declaration_post_callback() {
+    if (!is_inova_admin()) {
+        wp_redirect(home_url('/'));
+        exit;
+    }
+
+    if (isset($_POST['post_declaration_field']) && wp_verify_nonce($_POST['post_declaration_field'], 'post_declaration')) {
+        global $wpdb;
+        $table = $wpdb->prefix . 'im_expense_declarations';
+
+        $expense_date         = '';
+        $name                 = sanitize_text_field($_POST['name']);
+        $category             = sanitize_text_field($_POST['category']);
+        $recurring_expense_id = intval($_POST['recurring_expense_id'] ?? 0) ?: null;
+        $amount               = intval($_POST['amount']);
+        $note                 = sanitize_textarea_field($_POST['note']);
+
+        if (isset($_POST['expense_date']) && !empty($_POST['expense_date'])) {
+            $expense_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['expense_date'])));
+        }
+
+        if (empty($expense_date)) {
+            wp_redirect(home_url('/them-ke-khai-chi-phi/?error=date'));
+            exit;
+        }
+        if (empty($name)) {
+            wp_redirect(home_url('/them-ke-khai-chi-phi/?error=name'));
+            exit;
+        }
+        if ($amount <= 0) {
+            wp_redirect(home_url('/them-ke-khai-chi-phi/?error=amount'));
+            exit;
+        }
+
+        $result = $wpdb->insert(
+            $table,
+            array(
+                'expense_date'         => $expense_date,
+                'name'                 => $name,
+                'category'             => $category,
+                'recurring_expense_id' => $recurring_expense_id,
+                'amount'               => $amount,
+                'note'                 => $note,
+            ),
+            array('%s', '%s', '%s', '%d', '%d', '%s')
+        );
+
+        if ($result) {
+            // ---- Update end_date of linked recurring expense ----
+            if (!empty($recurring_expense_id)) {
+                $rec_table   = $wpdb->prefix . 'im_recurring_expenses';
+                $rec_expense = $wpdb->get_row($wpdb->prepare(
+                    "SELECT id, billing_cycle, end_date FROM $rec_table WHERE id = %d",
+                    $recurring_expense_id
+                ));
+
+                if ($rec_expense) {
+                    $cycle   = $rec_expense->billing_cycle ?? 'MONTHLY';
+                    $cur_end = $rec_expense->end_date; // may be null
+
+                    $new_end_date = null;
+
+                    if ($cycle === 'MONTHLY') {
+                        if (!empty($cur_end)) {
+                            // Cộng thêm 1 tháng vào ngày kết thúc hiện có
+                            $new_end_date = date('Y-m-d', strtotime($cur_end . ' +1 month'));
+                        } else {
+                            // Không có end_date → mùng 1 của tháng tiếp theo
+                            $new_end_date = date('Y-m-01', strtotime('first day of next month'));
+                        }
+                    } elseif ($cycle === 'SEMI_ANNUALLY') {
+                        if (!empty($cur_end)) {
+                            // Cộng thêm 6 tháng vào ngày kết thúc hiện có
+                            $new_end_date = date('Y-m-d', strtotime($cur_end . ' +6 months'));
+                        } else {
+                            // Không có end_date → mùng 1 của tháng, cách hiện tại 6 tháng
+                            $new_end_date = date('Y-m-01', strtotime('+6 months'));
+                        }
+                    } elseif ($cycle === 'QUARTERLY') {
+                        if (!empty($cur_end)) {
+                            $new_end_date = date('Y-m-d', strtotime($cur_end . ' +3 months'));
+                        } else {
+                            // Mùng 1 sau 3 tháng
+                            $new_end_date = date('Y-m-01', strtotime('+3 months'));
+                        }
+                    } elseif ($cycle === 'YEARLY') {
+                        if (!empty($cur_end)) {
+                            // Cộng thêm 1 năm vào ngày kết thúc hiện có
+                            $new_end_date = date('Y-m-d', strtotime($cur_end . ' +1 year'));
+                        } else {
+                            // Không có end_date → mùng 1/1 của năm tiếp theo
+                            $next_year    = intval(date('Y')) + 1;
+                            $new_end_date = $next_year . '-01-01';
+                        }
+                    }
+                    // Với chu kỳ OTHER: không tự động cập nhật
+
+                    if ($new_end_date) {
+                        $wpdb->update(
+                            $rec_table,
+                            array('end_date' => $new_end_date),
+                            array('id'       => $recurring_expense_id),
+                            array('%s'),
+                            array('%d')
+                        );
+                    }
+                }
+            }
+            // ---- End update recurring expense ----
+
+            $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url'])
+                ? esc_url($_POST['redirect_url'])
+                : home_url('/ke-khai-chi-phi/');
+            wp_redirect($redirect_url);
+            exit;
+        } else {
+            wp_redirect(home_url('/them-ke-khai-chi-phi/?error=insert'));
+            exit;
+        }
+    }
+
+    wp_redirect(home_url('/ke-khai-chi-phi/'));
+    exit;
+}
+
+/**
+ * Edit expense declaration - POST handler
+ */
+function edit_expense_declaration_post_callback() {
+    if (!is_inova_admin()) {
+        wp_redirect(home_url('/'));
+        exit;
+    }
+
+    if (isset($_POST['post_declaration_field']) && wp_verify_nonce($_POST['post_declaration_field'], 'post_declaration')) {
+        global $wpdb;
+        $table = $wpdb->prefix . 'im_expense_declarations';
+
+        $declaration_id       = intval($_POST['declaration_id']);
+        $name                 = sanitize_text_field($_POST['name']);
+        $category             = sanitize_text_field($_POST['category']);
+        $recurring_expense_id = intval($_POST['recurring_expense_id'] ?? 0) ?: null;
+        $amount               = intval($_POST['amount']);
+        $note                 = sanitize_textarea_field($_POST['note']);
+        $expense_date         = '';
+
+        if (isset($_POST['expense_date']) && !empty($_POST['expense_date'])) {
+            $expense_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['expense_date'])));
+        }
+
+        if (empty($expense_date)) {
+            wp_redirect(home_url('/sua-ke-khai-chi-phi/?declaration_id=' . $declaration_id . '&error=date'));
+            exit;
+        }
+        if (empty($name)) {
+            wp_redirect(home_url('/sua-ke-khai-chi-phi/?declaration_id=' . $declaration_id . '&error=name'));
+            exit;
+        }
+        if ($amount <= 0) {
+            wp_redirect(home_url('/sua-ke-khai-chi-phi/?declaration_id=' . $declaration_id . '&error=amount'));
+            exit;
+        }
+
+        $update = $wpdb->update(
+            $table,
+            array(
+                'expense_date'         => $expense_date,
+                'name'                 => $name,
+                'category'             => $category,
+                'recurring_expense_id' => $recurring_expense_id,
+                'amount'               => $amount,
+                'note'                 => $note,
+            ),
+            array('id' => $declaration_id),
+            array('%s', '%s', '%s', '%d', '%d', '%s'),
+            array('%d')
+        );
+
+        if ($update !== false) {
+            $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url'])
+                ? esc_url($_POST['redirect_url'])
+                : home_url('/ke-khai-chi-phi/');
+            wp_redirect($redirect_url);
+            exit;
+        } else {
+            wp_redirect(home_url('/sua-ke-khai-chi-phi/?declaration_id=' . $declaration_id . '&error=update'));
+            exit;
+        }
+    }
+
+    wp_redirect(home_url('/ke-khai-chi-phi/'));
+    exit;
+}
+
+/**
+ * Delete expense declaration - AJAX handler
+ */
+function delete_expense_declaration_callback() {
+    check_ajax_referer('delete_declaration_nonce', 'nonce');
+
+    if (!is_inova_admin()) {
+        wp_send_json_error(array('message' => 'Không có quyền truy cập.'));
+    }
+
+    $declaration_id = intval($_POST['declaration_id']);
+
+    if (empty($declaration_id)) {
+        wp_send_json_error(array('message' => 'ID không hợp lệ.'));
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'im_expense_declarations';
+
+    $deleted = $wpdb->delete(
+        $table,
+        array('id' => $declaration_id),
+        array('%d')
+    );
+
+    if ($deleted) {
+        wp_send_json_success(array('message' => 'Xóa kê khai thành công.'));
+    } else {
+        wp_send_json_error(array('message' => 'Có lỗi xảy ra khi xóa.'));
+    }
+}
+
 // Expense management
 add_action('wp_ajax_delete_expense', 'delete_expense_callback');
 add_action('wp_ajax_update_expense_status', 'update_expense_status_callback');
 add_action('admin_post_edit_expense_post', 'edit_expense_post_callback');
+
+// Expense declarations
+add_action('admin_post_add_expense_declaration_post', 'add_expense_declaration_post_callback');
+add_action('admin_post_edit_expense_declaration_post', 'edit_expense_declaration_post_callback');
+add_action('wp_ajax_delete_expense_declaration', 'delete_expense_declaration_callback');
 
 // Revenue Statistics
 add_action('wp_ajax_get_monthly_invoice_details', 'get_monthly_invoice_details_callback');

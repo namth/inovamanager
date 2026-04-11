@@ -64,11 +64,11 @@ $query = "
     SELECT *
     FROM $table
     {$where_clause}
-    ORDER BY start_date DESC
+    ORDER BY created_at DESC
 ";
 
 // Pagination settings
-$items_per_page = 10;
+$items_per_page = 50;
 $current_page = max(1, intval(get_query_var('paged')));
 
 // Get total count
@@ -86,13 +86,32 @@ $expenses = $wpdb->get_results($query);
 $categories = array(
     'ELECTRICITY' => 'Tiền điện',
     'WATER' => 'Tiền nước',
-    'SOFTWARE' => 'Phần mềm / Dịch vụ',
+    'SOFTWARE' => 'Phần mềm',
+    'HOSTING' => 'VPS/Hosting',
+    'DOMAIN' => 'Tên miền',
+    'AI' => 'Chi phí AI',
     'CONTRACT' => 'Hợp đồng dịch vụ',
     'RENTAL' => 'Tiền thuê',
     'INSURANCE' => 'Bảo hiểm',
     'MAINTENANCE' => 'Bảo trì / Sửa chữa',
     'SUBSCRIPTION' => 'Đăng ký hàng tháng',
     'OTHER' => 'Khác'
+);
+
+// Billing cycle mapping
+$billing_cycles = array(
+    'MONTHLY' => 'Hàng tháng',
+    'SEMI_ANNUALLY' => '6 tháng / lần',
+    'QUARTERLY' => 'Hàng quý',
+    'YEARLY' => 'Hàng năm',
+    'OTHER' => 'Khác',
+);
+$cycle_colors = array(
+    'MONTHLY' => 'bg-light-primary text-primary',
+    'SEMI_ANNUALLY' => 'bg-light-info text-info',
+    'QUARTERLY' => 'bg-light-warning text-warning',
+    'YEARLY' => 'bg-light-success text-success',
+    'OTHER' => 'bg-light text-secondary',
 );
 
 // Status color mapping
@@ -110,13 +129,28 @@ $status_labels = array(
     'SUSPENDED' => 'Tạm ngưng'
 );
 
-// Calculate monthly total
-$monthly_total = 0;
-if (!empty($expenses)) {
-    foreach ($expenses as $expense) {
-        if ($expense->status === 'ACTIVE' && strtotime($expense->start_date) <= time() && (empty($expense->end_date) || strtotime($expense->end_date) >= time())) {
-            $monthly_total += $expense->amount;
-        }
+// Calculate estimated annual total for active expenses
+$all_active_expenses = $wpdb->get_results("SELECT amount, billing_cycle FROM $table WHERE status = 'ACTIVE'");
+$estimated_annual_total = 0;
+foreach ($all_active_expenses as $exp) {
+    $amount = (int) $exp->amount;
+    $cycle = $exp->billing_cycle ?? 'MONTHLY';
+
+    switch ($cycle) {
+        case 'MONTHLY':
+            $estimated_annual_total += $amount * 12;
+            break;
+        case 'SEMI_ANNUALLY':
+            $estimated_annual_total += $amount * 2;
+            break;
+        case 'QUARTERLY':
+            $estimated_annual_total += $amount * 4;
+            break;
+        case 'YEARLY':
+        case 'OTHER':
+        default:
+            $estimated_annual_total += $amount;
+            break;
     }
 }
 
@@ -128,28 +162,28 @@ get_header();
             <div class="card">
                 <div class="card-body">
                     <?php if (!empty($message)): ?>
-                    <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
-                        <?php if ($message_type === 'success'): ?>
-                            <i class="ph ph-check-circle me-2"></i>
-                        <?php elseif ($message_type === 'warning'): ?>
-                            <i class="ph ph-warning me-2"></i>
-                        <?php else: ?>
-                            <i class="ph ph-x-circle me-2"></i>
-                        <?php endif; ?>
-                        <?php echo $message; ?>
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                    </div>
+                        <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
+                            <?php if ($message_type === 'success'): ?>
+                                <i class="ph ph-check-circle me-2"></i>
+                            <?php elseif ($message_type === 'warning'): ?>
+                                <i class="ph ph-warning me-2"></i>
+                            <?php else: ?>
+                                <i class="ph ph-x-circle me-2"></i>
+                            <?php endif; ?>
+                            <?php echo $message; ?>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
                     <?php endif; ?>
 
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <div>
                             <h4 class="card-title">Danh sách Chi tiêu Theo Chu kỳ</h4>
-                            <?php if (!empty($expenses) && $monthly_total > 0): ?>
-                            <p class="text-muted mb-0">
-                                Tổng chi tiêu hiện tại: <strong class="text-primary">
-                                    <?php echo number_format($monthly_total, 0, '.', ','); ?> VNĐ
-                                </strong>
-                            </p>
+                            <?php if ($estimated_annual_total > 0): ?>
+                                <p class="text-muted mb-0">
+                                    Tổng chi tiêu ước tính trong 1 năm: <strong class="text-primary">
+                                        <?php echo number_format($estimated_annual_total, 0, '.', ','); ?> VNĐ
+                                    </strong>
+                                </p>
                             <?php endif; ?>
                         </div>
                         <div class="d-flex gap-2 align-items-center">
@@ -158,139 +192,160 @@ get_header();
                                 <i class="ph ph-magnifying-glass text-muted me-2 fa-150p"></i>
                                 <form method="GET" class="d-flex">
                                     <input type="text" name="search" class="form-control form-control-sm"
-                                           placeholder="Tìm kiếm tên, danh mục..."
-                                           value="<?php echo esc_attr($search_query); ?>" style="width: 300px;">
+                                        placeholder="Tìm kiếm tên, danh mục..."
+                                        value="<?php echo esc_attr($search_query); ?>" style="width: 300px;">
                                     <?php if (!empty($search_query)): ?>
-                                    <a href="<?php echo home_url('/danh-sach-chi-tieu/'); ?>" class="btn btn-sm btn-danger ms-1 d-flex align-items-center" title="Xóa bộ lọc">
-                                        <i class="ph ph-x"></i>
-                                    </a>
+                                        <a href="<?php echo home_url('/danh-sach-chi-tieu/'); ?>"
+                                            class="btn btn-sm btn-danger ms-1 d-flex align-items-center" title="Xóa bộ lọc">
+                                            <i class="ph ph-x"></i>
+                                        </a>
                                     <?php endif; ?>
                                 </form>
                             </div>
 
                             <!-- Add new expense button -->
-                            <a href="<?php echo home_url('/them-chi-tieu/'); ?>" class="fixed-bottom-right nav-link" title="Thêm mới chi tiêu" data-bs-toggle="tooltip" data-bs-placement="left">
+                            <a href="<?php echo home_url('/them-chi-tieu/'); ?>" class="fixed-bottom-right nav-link"
+                                title="Thêm mới chi tiêu" data-bs-toggle="tooltip" data-bs-placement="left">
                                 <i class="ph ph-plus btn-icon-prepend fa-150p"></i>
                             </a>
                         </div>
                     </div>
 
                     <?php if (empty($expenses)): ?>
-                    <div class="text-center py-5">
-                        <?php if (!empty($search_query)): ?>
-                            <i class="ph ph-magnifying-glass icon-lg text-muted mb-3" style="font-size: 48px;"></i>
-                            <h4>Không tìm thấy chi tiêu nào</h4>
-                            <p class="text-muted">
-                                Không có kết quả cho từ khóa "<strong><?php echo esc_html($search_query); ?></strong>"
-                            </p>
-                            <a href="<?php echo home_url('/danh-sach-chi-tieu/'); ?>" class="btn btn-secondary me-2 d-flex align-items-center">
-                                <i class="ph ph-arrow-clockwise me-2"></i>Xóa bộ lọc
-                            </a>
-                        <?php else: ?>
-                            <i class="ph ph-receipt icon-lg text-muted mb-3" style="font-size: 48px;"></i>
-                            <h4>Chưa có chi tiêu nào</h4>
-                            <p class="text-muted">Bắt đầu bằng cách thêm chi tiêu đầu tiên</p>
-                            <a href="<?php echo home_url('/them-chi-tieu/'); ?>" class="btn btn-primary">
-                                <i class="ph ph-plus-circle me-2"></i> Thêm mới Chi tiêu
-                            </a>
-                        <?php endif; ?>
-                    </div>
+                        <div class="text-center py-5">
+                            <?php if (!empty($search_query)): ?>
+                                <i class="ph ph-magnifying-glass icon-lg text-muted mb-3" style="font-size: 48px;"></i>
+                                <h4>Không tìm thấy chi tiêu nào</h4>
+                                <p class="text-muted">
+                                    Không có kết quả cho từ khóa "<strong><?php echo esc_html($search_query); ?></strong>"
+                                </p>
+                                <a href="<?php echo home_url('/danh-sach-chi-tieu/'); ?>"
+                                    class="btn btn-secondary me-2 d-flex align-items-center">
+                                    <i class="ph ph-arrow-clockwise me-2"></i>Xóa bộ lọc
+                                </a>
+                            <?php else: ?>
+                                <i class="ph ph-receipt icon-lg text-muted mb-3" style="font-size: 48px;"></i>
+                                <h4>Chưa có chi tiêu nào</h4>
+                                <p class="text-muted">Bắt đầu bằng cách thêm chi tiêu đầu tiên</p>
+                                <a href="<?php echo home_url('/them-chi-tieu/'); ?>" class="btn btn-primary">
+                                    <i class="ph ph-plus-circle me-2"></i> Thêm mới Chi tiêu
+                                </a>
+                            <?php endif; ?>
+                        </div>
                     <?php else: ?>
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr class="bg-light">
-                                    <th>STT</th>
-                                    <th>Tên chi tiêu</th>
-                                    <th>Danh mục</th>
-                                    <th>Nhà cung cấp</th>
-                                    <th>Số tiền</th>
-                                    <th>Ngày bắt đầu</th>
-                                    <th>Ngày kết thúc</th>
-                                    <th>Trạng thái</th>
-                                    <th>Thao tác</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($expenses as $index => $expense): ?>
-                                <tr>
-                                    <td class="text-center fw-bold text-muted"><?php echo $index + 1 + ($offset); ?></td>
-                                    <td>
-                                        <strong><?php echo esc_html($expense->name); ?></strong>
-                                        <?php if (!empty($expense->note)): ?>
-                                        <br><small class="text-muted"><?php echo esc_html(mb_substr($expense->note, 0, 50)); ?></small>
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr class="bg-light">
+                                        <th>STT</th>
+                                        <th>Tên chi tiêu</th>
+                                        <th>Danh mục</th>
+                                        <th>Nhà cung cấp</th>
+                                        <th>Số tiền</th>
+                                        <th>Chu kỳ</th>
+                                        <th>Ngày kết thúc</th>
+                                        <th>Trạng thái</th>
+                                        <th>Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($expenses as $index => $expense): ?>
+                                        <tr>
+                                            <td class="text-center fw-bold text-muted"><?php echo $index + 1 + ($offset); ?>
+                                            </td>
+                                            <td>
+                                                <strong><?php echo esc_html($expense->name); ?></strong>
+                                                <?php if (!empty($expense->note)): ?>
+                                                    <br><small
+                                                        class="text-muted"><?php echo esc_html(mb_substr($expense->note, 0, 50)); ?></small>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <span class="badge border-radius-9 bg-light-primary text-primary">
+                                                    <?php echo esc_html($categories[$expense->category] ?? $expense->category); ?>
+                                                </span>
+                                            </td>
+                                            <td><?php echo esc_html($expense->vendor ?? '-'); ?></td>
+                                            <td>
+                                                <strong><?php echo number_format($expense->amount); ?> VNĐ</strong>
+                                            </td>
+                                            <td>
+                                                <?php
+                                                $cycle = $expense->billing_cycle ?? 'MONTHLY';
+                                                $cycleClass = $cycle_colors[$cycle] ?? 'bg-light text-secondary';
+                                                ?>
+                                                <span class="badge border-radius-9 <?php echo $cycleClass; ?>">
+                                                    <?php echo $billing_cycles[$cycle] ?? $cycle; ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <?php
+                                                if (empty($expense->end_date)) {
+                                                    echo '<span class="text-success">Vô hạn</span>';
+                                                } else {
+                                                    echo date('d/m/Y', strtotime($expense->end_date));
+                                                }
+                                                ?>
+                                            </td>
+                                            <td>
+                                                <span
+                                                    class="badge border-radius-9 bg-<?php echo $status_colors[$expense->status] ?? 'secondary'; ?>">
+                                                    <?php echo $status_labels[$expense->status] ?? $expense->status; ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <a href="<?php echo home_url('/sua-chi-tieu/?expense_id=' . $expense->id); ?>"
+                                                    class="btn btn-sm btn-info d-inline-flex align-items-center" title="Sửa">
+                                                    <i class="ph ph-pencil"></i>
+                                                </a>
+                                                <button type="button"
+                                                    class="btn btn-sm btn-danger d-inline-flex align-items-center delete-expense-btn"
+                                                    onclick="confirmDeleteExpense(<?php echo $expense->id; ?>, '<?php echo esc_attr($expense->name); ?>')"
+                                                    title="Xóa">
+                                                    <i class="ph ph-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Pagination -->
+                        <?php if ($total_pages > 1): ?>
+                            <div class="mt-4 d-flex justify-content-center">
+                                <nav aria-label="Page navigation">
+                                    <ul class="pagination">
+                                        <?php if ($current_page > 1): ?>
+                                            <li class="page-item">
+                                                <a class="page-link"
+                                                    href="?paged=1<?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                                    <i class="ph ph-caret-left"></i>
+                                                </a>
+                                            </li>
                                         <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <span class="badge border-radius-9 bg-light-primary text-primary">
-                                            <?php echo esc_html($categories[$expense->category] ?? $expense->category); ?>
-                                        </span>
-                                    </td>
-                                    <td><?php echo esc_html($expense->vendor ?? '-'); ?></td>
-                                    <td>
-                                        <strong><?php echo number_format($expense->amount); ?> VNĐ</strong>
-                                    </td>
-                                    <td><?php echo date('d/m/Y', strtotime($expense->start_date)); ?></td>
-                                    <td>
-                                        <?php 
-                                            if (empty($expense->end_date)) {
-                                                echo '<span class="text-success">Vô hạn</span>';
-                                            } else {
-                                                echo date('d/m/Y', strtotime($expense->end_date));
-                                            }
-                                        ?>
-                                    </td>
-                                    <td>
-                                        <span class="badge border-radius-9 bg-<?php echo $status_colors[$expense->status] ?? 'secondary'; ?>">
-                                            <?php echo $status_labels[$expense->status] ?? $expense->status; ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <a href="<?php echo home_url('/sua-chi-tieu/?expense_id=' . $expense->id); ?>" class="btn btn-sm btn-info d-inline-flex align-items-center" title="Sửa">
-                                            <i class="ph ph-pencil"></i>
-                                        </a>
-                                        <button type="button" class="btn btn-sm btn-danger d-inline-flex align-items-center delete-expense-btn" onclick="confirmDeleteExpense(<?php echo $expense->id; ?>, '<?php echo esc_attr($expense->name); ?>')" title="Xóa">
-                                            <i class="ph ph-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
 
-                    <!-- Pagination -->
-                    <?php if ($total_pages > 1): ?>
-                    <div class="mt-4 d-flex justify-content-center">
-                        <nav aria-label="Page navigation">
-                            <ul class="pagination">
-                                <?php if ($current_page > 1): ?>
-                                <li class="page-item">
-                                    <a class="page-link" href="?paged=1<?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
-                                        <i class="ph ph-caret-left"></i>
-                                    </a>
-                                </li>
-                                <?php endif; ?>
+                                        <?php for ($page = max(1, $current_page - 2); $page <= min($total_pages, $current_page + 2); $page++): ?>
+                                            <li class="page-item <?php echo ($page === $current_page) ? 'active' : ''; ?>">
+                                                <a class="page-link"
+                                                    href="?paged=<?php echo $page; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                                    <?php echo $page; ?>
+                                                </a>
+                                            </li>
+                                        <?php endfor; ?>
 
-                                <?php for ($page = max(1, $current_page - 2); $page <= min($total_pages, $current_page + 2); $page++): ?>
-                                <li class="page-item <?php echo ($page === $current_page) ? 'active' : ''; ?>">
-                                    <a class="page-link" href="?paged=<?php echo $page; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
-                                        <?php echo $page; ?>
-                                    </a>
-                                </li>
-                                <?php endfor; ?>
-
-                                <?php if ($current_page < $total_pages): ?>
-                                <li class="page-item">
-                                    <a class="page-link" href="?paged=<?php echo $current_page + 1; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
-                                        <i class="ph ph-caret-right"></i>
-                                    </a>
-                                </li>
-                                <?php endif; ?>
-                            </ul>
-                        </nav>
-                    </div>
-                    <?php endif; ?>
+                                        <?php if ($current_page < $total_pages): ?>
+                                            <li class="page-item">
+                                                <a class="page-link"
+                                                    href="?paged=<?php echo $current_page + 1; ?><?php echo !empty($search_query) ? '&search=' . urlencode($search_query) : ''; ?>">
+                                                    <i class="ph ph-caret-right"></i>
+                                                </a>
+                                            </li>
+                                        <?php endif; ?>
+                                    </ul>
+                                </nav>
+                            </div>
+                        <?php endif; ?>
                     <?php endif; ?>
                 </div>
             </div>
@@ -304,7 +359,8 @@ get_header();
 </form>
 
 <!-- Delete Confirmation Modal -->
-<div class="modal fade" id="deleteExpenseModal" tabindex="-1" aria-labelledby="deleteExpenseModalLabel" aria-hidden="true">
+<div class="modal fade" id="deleteExpenseModal" tabindex="-1" aria-labelledby="deleteExpenseModalLabel"
+    aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
@@ -312,7 +368,8 @@ get_header();
                     <i class="ph ph-warning-diamond me-2"></i>
                     Xác nhận xóa chi tiêu
                 </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="alert alert-warning" role="alert">
@@ -335,17 +392,17 @@ get_header();
 </div>
 
 <script>
-function confirmDeleteExpense(expenseId, expenseName) {
-    document.getElementById('delete_expense_id').value = expenseId;
-    document.getElementById('expenseNameToDelete').textContent = expenseName;
+    function confirmDeleteExpense(expenseId, expenseName) {
+        document.getElementById('delete_expense_id').value = expenseId;
+        document.getElementById('expenseNameToDelete').textContent = expenseName;
 
-    const deleteModal = new bootstrap.Modal(document.getElementById('deleteExpenseModal'));
-    deleteModal.show();
-}
+        const deleteModal = new bootstrap.Modal(document.getElementById('deleteExpenseModal'));
+        deleteModal.show();
+    }
 
-document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
-    document.getElementById('deleteExpenseForm').submit();
-});
+    document.getElementById('confirmDeleteBtn').addEventListener('click', function () {
+        document.getElementById('deleteExpenseForm').submit();
+    });
 </script>
 
 <?php

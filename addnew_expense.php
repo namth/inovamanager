@@ -16,7 +16,6 @@ if (!is_inova_admin()) {
 $redirect_url = '';
 if (!empty($_SERVER['HTTP_REFERER'])) {
     $referer = esc_url($_SERVER['HTTP_REFERER']);
-    // Validate that referer is from same domain
     if (strpos($referer, home_url()) === 0) {
         $redirect_url = $referer;
     }
@@ -24,18 +23,26 @@ if (!empty($_SERVER['HTTP_REFERER'])) {
 
 // Category mapping
 $categories = array(
-    'ELECTRICITY' => 'Tiền điện',
-    'WATER' => 'Tiền nước',
-    'SOFTWARE' => 'Phần mềm',
-    'HOSTING' => 'VPS/Hosting',
-    'DOMAIN' => 'Tên miền',
-    'AI' => 'Chi phí AI',
-    'CONTRACT' => 'Hợp đồng dịch vụ',
-    'RENTAL' => 'Tiền thuê',
-    'INSURANCE' => 'Bảo hiểm',
-    'MAINTENANCE' => 'Bảo trì / Sửa chữa',
+    'ELECTRICITY'  => 'Tiền điện',
+    'WATER'        => 'Tiền nước',
+    'SOFTWARE'     => 'Phần mềm',
+    'HOSTING'      => 'VPS/Hosting',
+    'DOMAIN'       => 'Tên miền',
+    'AI'           => 'Chi phí AI',
+    'CONTRACT'     => 'Hợp đồng dịch vụ',
+    'RENTAL'       => 'Tiền thuê',
+    'INSURANCE'    => 'Bảo hiểm',
+    'MAINTENANCE'  => 'Bảo trì / Sửa chữa',
     'SUBSCRIPTION' => 'Đăng ký hàng tháng',
-    'OTHER' => 'Khác'
+    'OTHER'        => 'Khác'
+);
+
+$billing_cycles = array(
+    'MONTHLY'       => 'Hàng tháng',
+    'SEMI_ANNUALLY' => '6 tháng / lần',
+    'QUARTERLY'     => 'Hàng quý',
+    'YEARLY'        => 'Hàng năm',
+    'OTHER'         => 'Khác',
 );
 
 /*
@@ -43,64 +50,59 @@ $categories = array(
  */
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (isset($_POST['post_expense_field']) && wp_verify_nonce($_POST['post_expense_field'], 'post_expense')) {
-        $name = sanitize_text_field($_POST['name']);
-        $category = sanitize_text_field($_POST['category']);
-        $vendor = sanitize_text_field($_POST['vendor']);
-        $amount = intval($_POST['amount']);
-        $status = sanitize_text_field($_POST['status']);
-        $note = sanitize_textarea_field($_POST['note']);
+        $name          = sanitize_text_field($_POST['name']);
+        $category      = sanitize_text_field($_POST['category']);
+        $vendor        = sanitize_text_field($_POST['vendor']);
+        $amount        = intval($_POST['amount']);
+        $billing_cycle = sanitize_text_field($_POST['billing_cycle'] ?? 'MONTHLY');
+        $status        = sanitize_text_field($_POST['status']);
+        $note          = sanitize_textarea_field($_POST['note']);
 
-        // Start date handling
-        if (isset($_POST['start_date']) && !empty($_POST['start_date'])) {
-            // Convert from dd/mm/yyyy to yyyy-mm-dd
-            $start_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['start_date'])));
-            
-            // End date handling (optional)
-            $end_date = null;
-            if (isset($_POST['end_date']) && !empty($_POST['end_date'])) {
-                $end_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['end_date'])));
-            }
+        // End date handling (optional)
+        $end_date = null;
+        if (isset($_POST['end_date']) && !empty($_POST['end_date'])) {
+            $end_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['end_date'])));
+        }
 
-            // Validation
-            if (empty($name)) {
-                $notification = '<div class="alert alert-warning" role="alert">Vui lòng nhập tên chi tiêu</div>';
-            } elseif ($amount <= 0) {
-                $notification = '<div class="alert alert-warning" role="alert">Số tiền phải lớn hơn 0</div>';
-            } elseif (!empty($end_date) && strtotime($end_date) < strtotime($start_date)) {
-                $notification = '<div class="alert alert-warning" role="alert">Ngày kết thúc phải >= ngày bắt đầu</div>';
-            } else {
-                $data = array(
-                    'name' => $name,
-                    'category' => $category,
-                    'vendor' => $vendor,
-                    'amount' => $amount,
-                    'start_date' => $start_date,
-                    'end_date' => $end_date,
-                    'status' => $status,
-                    'note' => $note
-                );
-                
-                $insert = $wpdb->insert(
-                    $table,
-                    $data,
-                    array('%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s')
-                );
+        $valid_cycles = array('MONTHLY', 'YEARLY', 'QUARTERLY', 'OTHER');
+        if (!in_array($billing_cycle, $valid_cycles)) {
+            $billing_cycle = 'MONTHLY';
+        }
 
-                if ($insert) {
-                    $notification = '<div class="alert alert-success" role="alert">Thêm chi tiêu mới thành công!</div>';
-                    
-                    // Redirect to previous page or expense list immediately
-                    $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url']) 
-                        ? esc_url($_POST['redirect_url']) 
-                        : home_url('/danh-sach-chi-tieu/');
-                    wp_redirect($redirect_url);
-                    exit;
-                } else {
-                    $notification = '<div class="alert alert-danger" role="alert">Đã xảy ra lỗi khi thêm chi tiêu. Vui lòng thử lại sau.</div>';
-                }
-            }
+        // Validation
+        if (empty($name)) {
+            $notification = '<div class="alert alert-warning" role="alert">Vui lòng nhập tên chi tiêu</div>';
+        } elseif ($amount <= 0) {
+            $notification = '<div class="alert alert-warning" role="alert">Số tiền phải lớn hơn 0</div>';
         } else {
-            $notification = '<div class="alert alert-warning" role="alert">Bạn chưa chọn ngày bắt đầu</div>';
+            $data = array(
+                'name'          => $name,
+                'category'      => $category,
+                'vendor'        => $vendor,
+                'amount'        => $amount,
+                'billing_cycle' => $billing_cycle,
+                'end_date'      => $end_date,
+                'status'        => $status,
+                'note'          => $note
+            );
+
+            $insert = $wpdb->insert(
+                $table,
+                $data,
+                array('%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s')
+            );
+
+            if ($insert) {
+                $notification = '<div class="alert alert-success" role="alert">Thêm chi tiêu mới thành công!</div>';
+
+                $redirect_url = isset($_POST['redirect_url']) && !empty($_POST['redirect_url'])
+                    ? esc_url($_POST['redirect_url'])
+                    : home_url('/danh-sach-chi-tieu/');
+                wp_redirect($redirect_url);
+                exit;
+            } else {
+                $notification = '<div class="alert alert-danger" role="alert">Đã xảy ra lỗi khi thêm chi tiêu. Vui lòng thử lại sau.</div>';
+            }
         }
     }
 }
@@ -125,7 +127,6 @@ get_header();
                     <?php
                     if (isset($notification)) {
                         echo $notification;
-                        // add more button to back to list page
                         echo '<div class="d-flex mt-3">';
                         echo '<a href="' . home_url('/danh-sach-chi-tieu/') . '" class="btn btn-primary btn-icon-text me-2 d-flex align-items-center border-radius-9">
                                 <i class="ph ph-list btn-icon-prepend fa-150p"></i>
@@ -178,13 +179,12 @@ get_header();
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="form-group mb-3">
-                                                    <label for="start_date" class="fw-bold">Ngày bắt đầu <span class="text-danger">*</span></label>
-                                                    <div class="input-group date datepicker">
-                                                        <input type="text" class="form-control" id="start_date" name="start_date" placeholder="dd/mm/yyyy" required>
-                                                        <span class="input-group-text bg-secondary text-white">
-                                                            <i class="ph ph-calendar"></i>
-                                                        </span>
-                                                    </div>
+                                                    <label for="billing_cycle" class="fw-bold">Chu kỳ <span class="text-danger">*</span></label>
+                                                    <select class="form-control" id="billing_cycle" name="billing_cycle" required>
+                                                        <?php foreach ($billing_cycles as $key => $label): ?>
+                                                            <option value="<?php echo $key; ?>" <?php echo ($key === 'MONTHLY') ? 'selected' : ''; ?>><?php echo $label; ?></option>
+                                                        <?php endforeach; ?>
+                                                    </select>
                                                 </div>
                                             </div>
                                             <div class="col-md-6">

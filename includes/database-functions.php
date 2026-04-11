@@ -289,7 +289,7 @@ function CreateDatabaseBookOrder()
         `category` varchar(100) NOT NULL COMMENT 'Danh mục',
         `vendor` varchar(255) COMMENT 'Nhà cung cấp',
         `amount` bigint(20) NOT NULL COMMENT 'Số tiền (VNĐ)',
-        `start_date` date NOT NULL COMMENT 'Ngày bắt đầu',
+        `billing_cycle` enum('MONTHLY','SEMI_ANNUALLY','QUARTERLY','YEARLY','OTHER') DEFAULT 'MONTHLY' COMMENT 'Chu kỳ thanh toán',
         `end_date` date COMMENT 'Ngày kết thúc',
         `status` enum('ACTIVE','INACTIVE','EXPIRED','SUSPENDED') DEFAULT 'ACTIVE',
         `note` text COMMENT 'Ghi chú',
@@ -298,8 +298,39 @@ function CreateDatabaseBookOrder()
         PRIMARY KEY (`id`),
         KEY `status` (`status`),
         KEY `category` (`category`),
-        KEY `start_date` (`start_date`),
+        KEY `billing_cycle` (`billing_cycle`),
         KEY `end_date` (`end_date`)
+    ) {$charsetCollate};";
+    dbDelta($createTable);
+
+    // Migrate existing installations: remove start_date, add billing_cycle if not exists
+    $columns = $wpdb->get_col("SHOW COLUMNS FROM `{$recurring_expenses_table}`", 0);
+    if (in_array('start_date', $columns)) {
+        $wpdb->query("ALTER TABLE `{$recurring_expenses_table}` DROP COLUMN `start_date`");
+    }
+    if (!in_array('billing_cycle', $columns)) {
+        $wpdb->query("ALTER TABLE `{$recurring_expenses_table}` ADD COLUMN `billing_cycle` enum('MONTHLY','SEMI_ANNUALLY','QUARTERLY','YEARLY','OTHER') DEFAULT 'MONTHLY' COMMENT 'Chu kỳ thanh toán' AFTER `amount`");
+    } else {
+        // Ensure SEMI_ANNUALLY is in the ENUM (for older installs)
+        $wpdb->query("ALTER TABLE `{$recurring_expenses_table}` MODIFY COLUMN `billing_cycle` enum('MONTHLY','SEMI_ANNUALLY','QUARTERLY','YEARLY','OTHER') DEFAULT 'MONTHLY' COMMENT 'Chu kỳ thanh toán'");
+    }
+
+    # 13b. expense_declarations table - Kê khai chi phí thực tế
+    $expense_declarations_table = $wpdb->prefix . 'im_expense_declarations';
+    $createTable = "CREATE TABLE `{$expense_declarations_table}` (
+        `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        `expense_date` date NOT NULL COMMENT 'Ngày phát sinh chi phí',
+        `name` varchar(255) NOT NULL COMMENT 'Tên khoản chi',
+        `category` varchar(100) NOT NULL COMMENT 'Danh mục',
+        `recurring_expense_id` bigint(20) UNSIGNED NULL COMMENT 'FK tới im_recurring_expenses (nullable)',
+        `amount` bigint(20) NOT NULL COMMENT 'Số tiền (VNĐ)',
+        `note` text COMMENT 'Ghi chú',
+        `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`),
+        KEY `expense_date` (`expense_date`),
+        KEY `category` (`category`),
+        KEY `recurring_expense_id` (`recurring_expense_id`)
     ) {$charsetCollate};";
     dbDelta($createTable);
 
