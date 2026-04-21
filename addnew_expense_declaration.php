@@ -257,14 +257,19 @@ function filterRecurringExpenses() {
 
 categorySelect.addEventListener('change', filterRecurringExpenses);
 
-// Auto-fill name/amount when picking a recurring expense
+// Auto-fill name/amount/category when picking a recurring expense
 recurringSelect.addEventListener('change', function() {
     const opt = this.options[this.selectedIndex];
     const name     = opt.dataset.name     || '';
     const amount   = opt.dataset.amount   || '';
+    const category = opt.dataset.category || '';
 
-    if (name)   document.getElementById('name').value = name;
-    if (amount) document.getElementById('amount').value = amount;
+    if (name)     document.getElementById('name').value = name;
+    if (amount)   document.getElementById('amount').value = amount;
+    if (category) {
+        categorySelect.value = category;
+        // No need to call filterRecurringExpenses() because the item already matched
+    }
 });
 
 // Run filter once on load

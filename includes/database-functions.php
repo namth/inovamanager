@@ -2381,6 +2381,19 @@ function get_invoice_item_website_names($item)
         if ($ws_info && !empty($ws_info->name)) {
             $website_names[] = $ws_info->name;
         }
+    } elseif ($item->service_type === 'domain') {
+        // Get websites linked to this domain
+        $website_infos = $wpdb->get_results($wpdb->prepare("
+            SELECT name FROM $websites_table 
+            WHERE domain_id = %d
+            ORDER BY name ASC
+        ", $item->service_id));
+
+        if (!empty($website_infos)) {
+            foreach ($website_infos as $website_info) {
+                $website_names[] = $website_info->name;
+            }
+        }
     }
 
     return $website_names;

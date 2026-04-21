@@ -104,6 +104,20 @@ function register_bookorder_api_routes()
         'callback' => 'check_website_status_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for updating domain management info
+    register_rest_route('bookorder/v1', '/update-domain-management-info', array(
+        'methods' => 'POST',
+        'callback' => 'update_domain_management_info_api',
+        'permission_callback' => 'validate_api_key'
+    ));
+
+    // Register route for updating website management info
+    register_rest_route('bookorder/v1', '/update-website-management-info', array(
+        'methods' => 'POST',
+        'callback' => 'update_website_management_info_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -977,12 +991,12 @@ function get_services_expiring_api($request)
     }
 
     $results = array();
-    $total = 0;
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $users_table = $wpdb->prefix . 'im_users';
 
     // Query domains
     if (empty($service_type) || $service_type === 'domain') {
         $domains_table = $wpdb->prefix . 'im_domains';
-        $users_table = $wpdb->prefix . 'im_users';
 
         $domain_query = "
             SELECT
@@ -992,9 +1006,11 @@ function get_services_expiring_api($request)
                 d.expiry_date,
                 u.name AS owner_name,
                 d.status,
-                'domain' AS service_type
+                'domain' AS service_type,
+                w.name AS website_name
             FROM {$domains_table} d
             LEFT JOIN {$users_table} u ON d.owner_user_id = u.id
+            LEFT JOIN {$websites_table} w ON w.domain_id = d.id
             WHERE d.status NOT IN ('DELETED')
         ";
 
@@ -1019,7 +1035,6 @@ function get_services_expiring_api($request)
     // Query hostings
     if (empty($service_type) || $service_type === 'hosting') {
         $hostings_table = $wpdb->prefix . 'im_hostings';
-        $users_table = $wpdb->prefix . 'im_users';
 
         $hosting_query = "
             SELECT
@@ -1029,9 +1044,11 @@ function get_services_expiring_api($request)
                 h.expiry_date,
                 u.name AS owner_name,
                 h.status,
-                'hosting' AS service_type
+                'hosting' AS service_type,
+                w.name AS website_name
             FROM {$hostings_table} h
             LEFT JOIN {$users_table} u ON h.owner_user_id = u.id
+            LEFT JOIN {$websites_table} w ON w.hosting_id = h.id
             WHERE h.status NOT IN ('DELETED')
         ";
 
@@ -1056,7 +1073,6 @@ function get_services_expiring_api($request)
     // Query maintenance packages
     if (empty($service_type) || $service_type === 'maintenance') {
         $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
-        $users_table = $wpdb->prefix . 'im_users';
 
         $maintenance_query = "
             SELECT
@@ -1066,9 +1082,11 @@ function get_services_expiring_api($request)
                 m.expiry_date,
                 u.name AS owner_name,
                 m.status,
-                'maintenance' AS service_type
+                'maintenance' AS service_type,
+                w.name AS website_name
             FROM {$maintenance_table} m
             LEFT JOIN {$users_table} u ON m.owner_user_id = u.id
+            LEFT JOIN {$websites_table} w ON w.maintenance_package_id = m.id
             WHERE m.status NOT IN ('DELETED')
         ";
 
@@ -1090,10 +1108,72 @@ function get_services_expiring_api($request)
         $results = array_merge($results, $maintenance_results ? $maintenance_results : array());
     }
 
-    $total = count($results);
+    // Process and Group results by website name
+    $grouped_results = array();
+    foreach ($results as $item) {
+        $website_name = !empty($item['website_name']) ? $item['website_name'] : '';
+        
+        // If no website linked, use domain name or service name as identifier
+        if (empty($website_name)) {
+            if ($item['service_type'] === 'domain') {
+                $website_name = $item['domain_name'];
+            } else {
+                $website_name = $item['name'] . ' (Unlinked)';
+            }
+        }
 
-    // Apply pagination to combined results
-    $paginated_results = array_slice($results, $offset, $per_page);
+        if (!isset($grouped_results[$website_name])) {
+            $grouped_results[$website_name] = array(
+                'website_name' => $website_name,
+                'owner_name' => !empty($item['owner_name']) ? $item['owner_name'] : 'N/A',
+                'services_list' => array(),
+                'expiry_dates' => array()
+            );
+        }
+
+        // Add service to list for markdown formatting
+        $service_label = '';
+        switch ($item['service_type']) {
+            case 'domain':
+                $service_label = 'Dịch vụ tên miền ' . $website_name;
+                break;
+            case 'hosting':
+                $service_label = 'Dịch vụ hosting ' . $website_name;
+                break;
+            case 'maintenance':
+                $service_label = 'Dịch vụ bảo trì ' . $website_name;
+                break;
+        }
+        $grouped_results[$website_name]['services_list'][] = $service_label;
+        $grouped_results[$website_name]['expiry_dates'][] = $item['expiry_date'];
+    }
+
+    // Finalize grouped objects
+    $final_results = array();
+    foreach ($grouped_results as $group) {
+        // Format services as markdown
+        $services_md = '';
+        if (!empty($group['services_list'])) {
+            $services_md = implode("\n", array_map(function($s) { return "- " . $s; }, $group['services_list']));
+        }
+
+        // Handle expiry_date (single or array)
+        $unique_dates = array_unique($group['expiry_dates']);
+        sort($unique_dates);
+        $expiry_date_val = count($unique_dates) === 1 ? reset($unique_dates) : array_values($unique_dates);
+
+        $final_results[] = array(
+            'website_name' => $group['website_name'],
+            'owner_name' => $group['owner_name'],
+            'services' => $services_md,
+            'expiry_date' => $expiry_date_val
+        );
+    }
+
+    $total = count($final_results);
+
+    // Apply pagination to grouped results
+    $paginated_results = array_slice($final_results, $offset, $per_page);
     $total_pages = ceil($total / $per_page);
 
     return new WP_REST_Response(
@@ -1174,6 +1254,7 @@ function get_pending_invoices_api($request)
             i.payment_method,
             i.status,
             i.notes,
+            i.created_at,
             u.name AS customer_name,
             u.email,
             IF(i.due_date >= %s, 0, DATEDIFF(%s, i.due_date)) AS days_overdue
@@ -1203,33 +1284,48 @@ function get_pending_invoices_api($request)
     $query_params[] = $per_page;
     $query_params[] = $offset;
 
-    // Get results
+    // Execute query
     $invoices = $wpdb->get_results($wpdb->prepare($query, $query_params), ARRAY_A);
 
     // Get invoice items for each invoice
     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+    $final_results = array();
 
-    foreach ($invoices as &$invoice) {
+    foreach ($invoices as $invoice) {
         $items_query = "
-            SELECT
-                id,
-                service_type,
-                service_id,
-                description,
-                renewal_period_description,
-                start_date,
-                end_date,
-                quantity,
-                unit_price,
-                item_total,
-                vat_rate,
-                vat_amount
+            SELECT description, service_type, service_id
             FROM {$invoice_items_table}
             WHERE invoice_id = %d
             ORDER BY id
         ";
 
-        $invoice['items'] = $wpdb->get_results($wpdb->prepare($items_query, $invoice['id']), ARRAY_A);
+        $items = $wpdb->get_results($wpdb->prepare($items_query, $invoice['id']), ARRAY_A);
+        
+        // Summarize items into markdown
+        $items_md = "";
+        if (!empty($items)) {
+            $items_md = implode("\n", array_map(function($item) {
+                // Get linked website names
+                $website_names = get_invoice_item_website_names((object)$item);
+                $description = $item['description'];
+                
+                if (!empty($website_names)) {
+                    $description .= " cho " . implode(', ', $website_names);
+                }
+                
+                return "- " . $description;
+            }, $items));
+        }
+
+        $final_results[] = array(
+            'invoice_code' => $invoice['invoice_code'],
+            'total_amount' => floatval($invoice['total_amount']),
+            'due_date' => $invoice['due_date'],
+            'customer_name' => $invoice['customer_name'],
+            'days_overdue' => intval($invoice['days_overdue']),
+            'items' => $items_md,
+            'link_invoice' => home_url('/public-invoice/?token=' . urlencode(base64_encode($invoice['id'] . '|' . $invoice['created_at'])))
+        );
     }
 
     // Get total count
@@ -1259,10 +1355,10 @@ function get_pending_invoices_api($request)
         array(
             'success' => true,
             'total_results' => intval($total),
-            'total_pages' => $total_pages,
+            'total_pages' => intval($total_pages),
             'current_page' => $page,
             'per_page' => $per_page,
-            'results' => $invoices
+            'results' => $final_results
         ),
         200
     );
@@ -1570,6 +1666,181 @@ function get_partner_managed_users_api($request)
             'total_users' => $total,
             'user_ids' => $user_ids,
             'users' => $users
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for updating domain management info
+ * Cập nhật thông tin quản lý domain (management_url, management_username, management_password)
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function update_domain_management_info_api($request)
+{
+    global $wpdb;
+
+    $domains_table = $wpdb->prefix . 'im_domains';
+
+    $domain_id = isset($request['domain_id']) ? intval($request['domain_id']) : 0;
+    $domain_name = isset($request['domain_name']) ? sanitize_text_field($request['domain_name']) : '';
+
+    // Validate - at least one parameter required to identify the domain
+    if ($domain_id <= 0 && empty($domain_name)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Either domain_id or domain_name is required'
+            ),
+            400
+        );
+    }
+
+    // Prepare update data
+    $update_data = array();
+    $update_formats = array();
+
+    if (isset($request['management_url'])) {
+        $update_data['management_url'] = sanitize_text_field($request['management_url']);
+        $update_formats[] = '%s';
+    }
+
+    if (isset($request['management_username'])) {
+        $update_data['management_username'] = sanitize_text_field($request['management_username']);
+        $update_formats[] = '%s';
+    }
+
+    if (isset($request['management_password'])) {
+        $update_data['management_password'] = im_encrypt_password($request['management_password']);
+        $update_formats[] = '%s';
+    }
+
+    // Check if there's anything to update
+    if (empty($update_data)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'No data provided to update'
+            ),
+            400
+        );
+    }
+
+    // Build WHERE clause
+    $where = array();
+    $where_format = array();
+
+    if ($domain_id > 0) {
+        $where['id'] = $domain_id;
+        $where_format[] = '%d';
+    } else {
+        $where['domain_name'] = $domain_name;
+        $where_format[] = '%s';
+    }
+
+    // Update database
+    $result = $wpdb->update($domains_table, $update_data, $where, $update_formats, $where_format);
+
+    if ($result === false) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Database error while updating domain info'
+            ),
+            500
+        );
+    }
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'message' => 'Domain management info updated successfully'
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for updating website management info
+ * Cập nhật thông tin quản lý website (admin_url, admin_username, admin_password)
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function update_website_management_info_api($request)
+{
+    global $wpdb;
+
+    $websites_table = $wpdb->prefix . 'im_websites';
+
+    $website_id = isset($request['website_id']) ? intval($request['website_id']) : 0;
+
+    // Validate
+    if ($website_id <= 0) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'website_id is required'
+            ),
+            400
+        );
+    }
+
+    // Prepare update data
+    $update_data = array();
+    $update_formats = array();
+
+    if (isset($request['admin_url'])) {
+        $update_data['admin_url'] = sanitize_text_field($request['admin_url']);
+        $update_formats[] = '%s';
+    }
+
+    if (isset($request['admin_username'])) {
+        $update_data['admin_username'] = sanitize_text_field($request['admin_username']);
+        $update_formats[] = '%s';
+    }
+
+    if (isset($request['admin_password'])) {
+        $update_data['admin_password'] = im_encrypt_password($request['admin_password']);
+        $update_formats[] = '%s';
+    }
+
+    // Check if there's anything to update
+    if (empty($update_data)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'No data provided to update'
+            ),
+            400
+        );
+    }
+
+    // Update database
+    $result = $wpdb->update(
+        $websites_table,
+        $update_data,
+        array('id' => $website_id),
+        $update_formats,
+        array('%d')
+    );
+
+    if ($result === false) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Database error while updating website info'
+            ),
+            500
+        );
+    }
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'message' => 'Website management info updated successfully'
         ),
         200
     );
