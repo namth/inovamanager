@@ -17,6 +17,32 @@ function im_encrypt_password($data)
     return base64_encode($iv . $encrypted);
 }
 
+/**
+ * Helper function to parse user ID parameters (owner_user_id, user_id) 
+ * Supports single ID, comma-separated string, or JSON array.
+ * 
+ * @param mixed $param The parameter value from request
+ * @return array Array of integers
+ */
+function im_parse_user_ids($param)
+{
+    if (empty($param)) {
+        return array();
+    }
+    $ids = array();
+    if (is_array($param)) {
+        $ids = array_map('intval', $param);
+    } else {
+        $parsed = json_decode($param, true);
+        if (is_array($parsed)) {
+            $ids = array_map('intval', $parsed);
+        } else {
+            $ids = array_map('intval', array_filter(array_map('trim', explode(',', (string)$param))));
+        }
+    }
+    return array_values(array_filter($ids));
+}
+
 function im_decrypt_password($data)
 {
     if (empty($data)) {

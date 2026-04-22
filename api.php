@@ -118,6 +118,20 @@ function register_bookorder_api_routes()
         'callback' => 'update_website_management_info_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for getting website expiry info (formatted as markdown)
+    register_rest_route('bookorder/v1', '/websites-expiry-info', array(
+        'methods' => array('GET', 'POST'),
+        'callback' => 'get_websites_expiry_info_api',
+        'permission_callback' => 'validate_api_key'
+    ));
+
+    // Register route for checking website permission
+    register_rest_route('bookorder/v1', '/check-website-permission', array(
+        'methods' => array('GET', 'POST'),
+        'callback' => 'check_website_permission_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -141,6 +155,7 @@ function validate_api_key($request)
 
     return $api_key === $valid_api_key;
 }
+
 
 /**
  * API callback function for importing a single partner
@@ -410,9 +425,13 @@ function add_contact_api($request)
 {
     // Get parameters from request
     $params = $request->get_params();
+    $required_fields = ['owner_user_id', 'full_name'];
 
-    // Validate required fields
-    $required_fields = ['user_id', 'full_name'];
+    // Handle backward compatibility for user_id -> owner_user_id
+    if (!isset($params['owner_user_id']) && isset($params['user_id'])) {
+        $params['owner_user_id'] = $params['user_id'];
+    }
+
     foreach ($required_fields as $field) {
         if (empty($params[$field])) {
             return new WP_REST_Response(
@@ -442,14 +461,14 @@ function add_contact_api($request)
 
     // Check if user exists and is a business
     $user = $wpdb->get_row(
-        $wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $params['user_id'])
+        $wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $params['owner_user_id'])
     );
 
     if (!$user) {
         return new WP_REST_Response(
             array(
                 'success' => false,
-                'message' => "User with ID {$params['user_id']} not found"
+                'message' => "User with ID {$params['owner_user_id']} not found"
             ),
             404
         );
@@ -472,13 +491,13 @@ function add_contact_api($request)
     if ($is_primary) {
         $wpdb->query($wpdb->prepare(
             "UPDATE $contacts_table SET is_primary = 0 WHERE user_id = %d",
-            $params['user_id']
+            $params['owner_user_id']
         ));
     }
 
     // Prepare data for insertion
     $insert_data = array(
-        'user_id' => intval($params['user_id']),
+        'user_id' => intval($params['owner_user_id']),
         'full_name' => sanitize_text_field($params['full_name']),
         'email' => !empty($params['email']) ? sanitize_email($params['email']) : '',
         'phone_number' => !empty($params['phone_number']) ? sanitize_text_field($params['phone_number']) : '',
@@ -945,34 +964,15 @@ function get_services_expiring_api($request)
 
     // Get parameters
     $days_offset = isset($request['days']) ? intval($request['days']) : 0;  // +3 (3 days left), -30 (30 days overdue)
-    $owner_user_ids_raw = isset($request['owner_user_id']) ? $request['owner_user_id'] : '';
     $service_type = isset($request['service_type']) ? sanitize_text_field($request['service_type']) : '';  // 'domain', 'hosting', 'maintenance', or '' for all
     $page = isset($request['page']) ? max(1, intval($request['page'])) : 1;
     $per_page = isset($request['per_page']) ? intval($request['per_page']) : 20;
+    
+    // Parse owner_user_id using helper (hỗ trợ mảng, CSV, JSON)
+    $owner_user_id_array = im_parse_user_ids($request->get_param('owner_user_id'));
 
     if ($per_page < 1 || $per_page > 100) {
         $per_page = 20;
-    }
-
-    // Parse owner_user_id - hỗ trợ single ID, comma-separated string, hoặc JSON array
-    // Ví dụ: owner_user_id=5 | owner_user_id=5,19,22 | owner_user_id=[5,19,22]
-    $owner_user_id_array = array();
-    if (!empty($owner_user_ids_raw)) {
-        if (is_array($owner_user_ids_raw)) {
-            // Already an array (e.g. owner_user_id[]=5&owner_user_id[]=19)
-            $owner_user_id_array = array_map('intval', $owner_user_ids_raw);
-        } else {
-            // Try to parse as JSON array first (e.g. owner_user_id=[19,22])
-            $parsed = json_decode($owner_user_ids_raw, true);
-            if (is_array($parsed)) {
-                $owner_user_id_array = array_map('intval', $parsed);
-            } else {
-                // Parse as comma-separated string or single ID (e.g. owner_user_id=5,19,22)
-                $owner_user_id_array = array_map('intval', array_filter(array_map('trim', explode(',', $owner_user_ids_raw))));
-            }
-        }
-        // Filter out zeros/invalid
-        $owner_user_id_array = array_values(array_filter($owner_user_id_array));
     }
 
     $offset = ($page - 1) * $per_page;
@@ -1207,7 +1207,12 @@ function get_pending_invoices_api($request)
 
     $page = isset($request['page']) ? max(1, intval($request['page'])) : 1;
     $per_page = isset($request['per_page']) ? intval($request['per_page']) : 20;
-    $user_ids = isset($request['user_id']) ? $request['user_id'] : '';
+    
+    $today = date('Y-m-d');
+    
+    // Parse user_ids using helper (hỗ trợ owner_user_id/user_id, mảng, CSV, JSON)
+    $user_id_array = im_parse_user_ids($request->get_param('owner_user_id') ?: $request->get_param('user_id'));
+    
     $overdue_days = isset($request['overdue_days']) ? intval($request['overdue_days']) : 0;
 
     if ($per_page < 1 || $per_page > 100) {
@@ -1215,27 +1220,6 @@ function get_pending_invoices_api($request)
     }
 
     $offset = ($page - 1) * $per_page;
-    $today = date('Y-m-d');
-
-    // Parse user_ids - can be single ID, comma-separated string, or JSON array
-    $user_id_array = array();
-    if (!empty($user_ids)) {
-        if (is_array($user_ids)) {
-            // Already an array
-            $user_id_array = array_map('intval', $user_ids);
-        } else {
-            // Try to parse as JSON array first
-            $parsed = json_decode($user_ids, true);
-            if (is_array($parsed)) {
-                $user_id_array = array_map('intval', $parsed);
-            } else {
-                // Parse as comma-separated string
-                $user_id_array = array_map('intval', array_filter(array_map('trim', explode(',', $user_ids))));
-            }
-        }
-        // Filter out zeros
-        $user_id_array = array_filter($user_id_array);
-    }
 
     // Build query
     $query = "
@@ -1575,29 +1559,67 @@ function get_website_management_info_api($request)
     $websites_table = $wpdb->prefix . 'im_websites';
 
     $website_id = isset($request['website_id']) ? intval($request['website_id']) : 0;
+    $website_name = isset($request['website_name']) ? sanitize_text_field($request['website_name']) : '';
+    $user_ids = im_parse_user_ids($request->get_param('owner_user_id'));
 
     // Validate
-    if ($website_id <= 0) {
+    if (empty($user_ids)) {
         return new WP_REST_Response(
             array(
                 'success' => false,
-                'message' => 'website_id is required'
+                'message' => 'owner_user_id is required for security verification'
             ),
             400
         );
     }
 
-    // Get website
+    if ($website_id <= 0 && empty($website_name)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'website_id or website_name is required'
+            ),
+            400
+        );
+    }
+
+    $hostings_table = $wpdb->prefix . 'im_hostings';
+    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+
+    // Build query based on provided parameter
+    if ($website_id > 0) {
+        $where_website = "w.id = %d";
+        $website_param = $website_id;
+    } else {
+        $where_website = "w.name = %s";
+        $website_param = $website_name;
+    }
+
+    // Build permission placeholders
+    $placeholders = implode(',', array_fill(0, count($user_ids), '%d'));
+
+    // Get website with permission check
     $website = $wpdb->get_row($wpdb->prepare(
-        "SELECT id, name, admin_url, admin_username, admin_password FROM {$websites_table} WHERE id = %d",
-        $website_id
+        "SELECT w.id, w.name, w.admin_url, w.admin_username, w.admin_password 
+         FROM {$websites_table} w
+         LEFT JOIN {$hostings_table} h ON w.hosting_id = h.id
+         LEFT JOIN {$maintenance_table} m ON w.maintenance_package_id = m.id
+         WHERE {$where_website} 
+         AND (w.status IS NULL OR w.status != 'DELETED')
+         AND (
+             w.owner_user_id IN ($placeholders)
+             OR h.partner_id IN ($placeholders)
+             OR m.partner_id IN ($placeholders)
+         )
+         LIMIT 1",
+        array_merge([$website_param], $user_ids, $user_ids, $user_ids)
     ), ARRAY_A);
 
     if (!$website) {
         return new WP_REST_Response(
             array(
                 'success' => false,
-                'message' => 'Website not found'
+                'message' => 'Website not found or you do not have permission to view it'
             ),
             404
         );
@@ -1841,6 +1863,211 @@ function update_website_management_info_api($request)
         array(
             'success' => true,
             'message' => 'Website management info updated successfully'
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for getting website services expiry info
+ * Lấy thông tin thời hạn các dịch vụ của website (trả về định dạng markdown)
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function get_websites_expiry_info_api($request)
+{
+    global $wpdb;
+
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $domains_table = $wpdb->prefix . 'im_domains';
+    $hostings_table = $wpdb->prefix . 'im_hostings';
+    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+
+    // Get parameters
+    $names_param = $request->get_param('website_names');
+    $user_ids = im_parse_user_ids($request->get_param('owner_user_id'));
+
+    if (empty($user_ids)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'owner_user_id is required for security verification'
+            ),
+            400
+        );
+    }
+
+    if (empty($names_param)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'website_names parameter is required'
+            ),
+            400
+        );
+    }
+
+    if (is_string($names_param)) {
+        $names = explode(',', $names_param);
+    } else {
+        $names = $names_param;
+    }
+
+    // Clean and filter names
+    $names = array_map('trim', (array)$names);
+    $names = array_filter($names);
+
+    if (empty($names)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'No valid website names provided'
+            ),
+            400
+        );
+    }
+
+    // Prepare SQL placeholders
+    $names_placeholders = implode(',', array_fill(0, count($names), '%s'));
+    $user_placeholders = implode(',', array_fill(0, count($user_ids), '%d'));
+
+    // Query databases with permission filter
+    $query = $wpdb->prepare("
+        SELECT 
+            w.id,
+            w.name as website_name,
+            d.domain_name, d.expiry_date as domain_expiry,
+            h.hosting_code, h.expiry_date as hosting_expiry,
+            m.order_code, m.expiry_date as maintenance_expiry
+        FROM {$websites_table} w
+        LEFT JOIN {$domains_table} d ON w.domain_id = d.id
+        LEFT JOIN {$hostings_table} h ON w.hosting_id = h.id
+        LEFT JOIN {$maintenance_table} m ON w.maintenance_package_id = m.id
+        WHERE w.name IN ($names_placeholders)
+        AND (w.status IS NULL OR w.status != 'DELETED')
+        AND (
+            w.owner_user_id IN ($user_placeholders)
+            OR h.partner_id IN ($user_placeholders)
+            OR m.partner_id IN ($user_placeholders)
+        )
+    ", array_merge($names, $user_ids, $user_ids, $user_ids));
+
+    $rows = $wpdb->get_results($query, ARRAY_A);
+
+    $results = array();
+    foreach ($rows as $row) {
+        $services_markdown = array();
+
+        // 1. Domain Service
+        if (!empty($row['domain_expiry'])) {
+            $services_markdown[] = "- Dịch vụ tên miền {$row['website_name']} hết hạn ngày {$row['domain_expiry']}";
+        }
+
+        // 2. Hosting Service
+        if (!empty($row['hosting_expiry'])) {
+            $services_markdown[] = "- Dịch vụ hosting {$row['website_name']} hết hạn ngày {$row['hosting_expiry']}";
+        }
+
+        // 3. Maintenance Service
+        if (!empty($row['maintenance_expiry'])) {
+            $services_markdown[] = "- Dịch vụ bảo trì {$row['website_name']} hết hạn ngày {$row['maintenance_expiry']}";
+        }
+
+        $results[] = array(
+            'website_name' => $row['website_name'],
+            'services' => implode("\n", $services_markdown)
+        );
+    }
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'data' => $results
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for checking website permission
+ * Kiểm tra xem website có thuộc quyền quản lý của một danh sách người dùng hay không
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function check_website_permission_api($request)
+{
+    global $wpdb;
+
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $hostings_table = $wpdb->prefix . 'im_hostings';
+    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+
+    $website_id = isset($request['website_id']) ? intval($request['website_id']) : 0;
+    $website_name = isset($request['website_name']) ? sanitize_text_field($request['website_name']) : '';
+    $user_ids = im_parse_user_ids($request->get_param('owner_user_id'));
+
+    // Validate parameters
+    if (empty($user_ids)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'owner_user_id parameter is required'
+            ),
+            400
+        );
+    }
+
+    if ($website_id <= 0 && empty($website_name)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'website_id or website_name is required'
+            ),
+            400
+        );
+    }
+
+    // Build the query to check ownership or management (via partner_id in hosting/maintenance)
+    $placeholders = implode(',', array_fill(0, count($user_ids), '%d'));
+    
+    if ($website_id > 0) {
+        $where_website = "w.id = %d";
+        $website_param = $website_id;
+    } else {
+        // Clean website name (remove protocol and trailing slash if mistakenly provided)
+        $website_name = preg_replace('#^https?://(www\.)?#', '', $website_name);
+        $website_name = rtrim($website_name, '/');
+        
+        $where_website = "w.name = %s";
+        $website_param = $website_name;
+    }
+
+    // Query to check matches
+    // A website is considered 'permitted' if:
+    // 1. Its owner_user_id is in the list
+    // 2. OR it is linked to a hosting/maintenance package where the partner_id is in the list
+    $query = $wpdb->prepare("
+        SELECT COUNT(*) 
+        FROM {$websites_table} w
+        LEFT JOIN {$hostings_table} h ON w.hosting_id = h.id
+        LEFT JOIN {$maintenance_table} m ON w.maintenance_package_id = m.id
+        WHERE ({$where_website})
+        AND (
+            w.owner_user_id IN ($placeholders)
+            OR h.partner_id IN ($placeholders)
+            OR m.partner_id IN ($placeholders)
+        )
+        AND (w.status IS NULL OR w.status != 'DELETED')
+    ", array_merge([$website_param], $user_ids, $user_ids, $user_ids));
+
+    $count = $wpdb->get_var($query);
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'access' => intval($count) > 0
         ),
         200
     );

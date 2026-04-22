@@ -34,7 +34,7 @@ function api_create_bulk_invoice($request)
 {
     global $wpdb;
 
-    $user_id = intval($request->get_param('user_id'));
+    $user_id = intval($request->get_param('owner_user_id') ?: $request->get_param('user_id'));
     $services = $request->get_param('services');
     $invoice_date = sanitize_text_field($request->get_param('invoice_date'));
     $due_date = sanitize_text_field($request->get_param('due_date'));
@@ -44,7 +44,7 @@ function api_create_bulk_invoice($request)
     if (!$user_id) {
         return new WP_REST_Response([
             'success' => false,
-            'message' => 'user_id is required'
+            'message' => 'owner_user_id is required'
         ], 400);
     }
 

@@ -64,7 +64,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $end_date = date('Y-m-d', strtotime(str_replace('/', '-', $_POST['end_date'])));
         }
 
-        $valid_cycles = array('MONTHLY', 'YEARLY', 'QUARTERLY', 'OTHER');
+        $valid_cycles = array('MONTHLY', 'SEMI_ANNUALLY', 'YEARLY', 'QUARTERLY', 'OTHER');
         if (!in_array($billing_cycle, $valid_cycles)) {
             $billing_cycle = 'MONTHLY';
         }
