@@ -132,6 +132,13 @@ function register_bookorder_api_routes()
         'callback' => 'check_website_permission_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for listing managed websites
+    register_rest_route('bookorder/v1', '/managed-websites', array(
+        'methods' => array('GET', 'POST'),
+        'callback' => 'get_managed_websites_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -1496,6 +1503,18 @@ function get_domain_management_info_api($request)
 
     $domain_id = isset($request['domain_id']) ? intval($request['domain_id']) : 0;
     $domain_name = isset($request['domain_name']) ? sanitize_text_field($request['domain_name']) : '';
+    $user_ids = im_parse_user_ids($request->get_param('owner_user_id'));
+
+    // Validate - owner_user_id is required for security verification
+    if (empty($user_ids)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'owner_user_id is required for security verification'
+            ),
+            400
+        );
+    }
 
     // Validate - at least one parameter required
     if ($domain_id <= 0 && empty($domain_name)) {
@@ -1508,24 +1527,43 @@ function get_domain_management_info_api($request)
         );
     }
 
-    // Build query
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $hostings_table = $wpdb->prefix . 'im_hostings';
+    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+    $placeholders = implode(',', array_fill(0, count($user_ids), '%d'));
+
+    // Build WHERE clause for identifying domain
     if ($domain_id > 0) {
-        $domain = $wpdb->get_row($wpdb->prepare(
-            "SELECT id, domain_name, management_url, management_username, management_password FROM {$domains_table} WHERE id = %d",
-            $domain_id
-        ), ARRAY_A);
+        $where_domain = "d.id = %d";
+        $domain_param = $domain_id;
     } else {
-        $domain = $wpdb->get_row($wpdb->prepare(
-            "SELECT id, domain_name, management_url, management_username, management_password FROM {$domains_table} WHERE domain_name = %s",
-            $domain_name
-        ), ARRAY_A);
+        $where_domain = "d.domain_name = %s";
+        $domain_param = $domain_name;
     }
+
+    // Get domain with permission check
+    $domain = $wpdb->get_row($wpdb->prepare(
+        "SELECT d.id, d.domain_name, d.management_url, d.management_username, d.management_password 
+         FROM {$domains_table} d
+         LEFT JOIN {$websites_table} w ON w.domain_id = d.id
+         LEFT JOIN {$hostings_table} h ON w.hosting_id = h.id
+         LEFT JOIN {$maintenance_table} m ON w.maintenance_package_id = m.id
+         WHERE ({$where_domain})
+         AND (
+             d.owner_user_id IN ($placeholders)
+             OR w.owner_user_id IN ($placeholders)
+             OR h.partner_id IN ($placeholders)
+             OR m.partner_id IN ($placeholders)
+         )
+         LIMIT 1",
+        array_merge([$domain_param], $user_ids, $user_ids, $user_ids, $user_ids)
+    ), ARRAY_A);
 
     if (!$domain) {
         return new WP_REST_Response(
             array(
                 'success' => false,
-                'message' => 'Domain not found'
+                'message' => 'Domain not found or you do not have permission to view it'
             ),
             404
         );
@@ -1708,6 +1746,18 @@ function update_domain_management_info_api($request)
 
     $domain_id = isset($request['domain_id']) ? intval($request['domain_id']) : 0;
     $domain_name = isset($request['domain_name']) ? sanitize_text_field($request['domain_name']) : '';
+    $user_ids = im_parse_user_ids($request->get_param('owner_user_id'));
+
+    // Validate - owner_user_id is required for security verification
+    if (empty($user_ids)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'owner_user_id is required for security verification'
+            ),
+            400
+        );
+    }
 
     // Validate - at least one parameter required to identify the domain
     if ($domain_id <= 0 && empty($domain_name)) {
@@ -1720,21 +1770,63 @@ function update_domain_management_info_api($request)
         );
     }
 
+    // Check permission - User must be the owner of the domain or be a partner managing the domain
+    $placeholders = implode(',', array_fill(0, count($user_ids), '%d'));
+    
+    // Determine where clause for identifying domain
+    if ($domain_id > 0) {
+        $where_domain = "d.id = %d";
+        $domain_param = $domain_id;
+    } else {
+        $where_domain = "d.domain_name = %s";
+        $domain_param = $domain_name;
+    }
+
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $hostings_table = $wpdb->prefix . 'im_hostings';
+    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+
+    $check_permission = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) 
+         FROM {$domains_table} d
+         LEFT JOIN {$websites_table} w ON w.domain_id = d.id
+         LEFT JOIN {$hostings_table} h ON w.hosting_id = h.id
+         LEFT JOIN {$maintenance_table} m ON w.maintenance_package_id = m.id
+         WHERE ({$where_domain})
+         AND (
+             d.owner_user_id IN ($placeholders)
+             OR w.owner_user_id IN ($placeholders)
+             OR h.partner_id IN ($placeholders)
+             OR m.partner_id IN ($placeholders)
+         )",
+        array_merge([$domain_param], $user_ids, $user_ids, $user_ids, $user_ids)
+    ));
+
+    if (!$check_permission) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Domain not found or you do not have permission to update it'
+            ),
+            404
+        );
+    }
+
     // Prepare update data
     $update_data = array();
     $update_formats = array();
 
-    if (isset($request['management_url'])) {
+    if (!empty($request['management_url'])) {
         $update_data['management_url'] = sanitize_text_field($request['management_url']);
         $update_formats[] = '%s';
     }
 
-    if (isset($request['management_username'])) {
+    if (!empty($request['management_username'])) {
         $update_data['management_username'] = sanitize_text_field($request['management_username']);
         $update_formats[] = '%s';
     }
 
-    if (isset($request['management_password'])) {
+    if (!empty($request['management_password'])) {
         $update_data['management_password'] = im_encrypt_password($request['management_password']);
         $update_formats[] = '%s';
     }
@@ -1750,7 +1842,7 @@ function update_domain_management_info_api($request)
         );
     }
 
-    // Build WHERE clause
+    // Build WHERE clause for update
     $where = array();
     $where_format = array();
 
@@ -1798,15 +1890,65 @@ function update_website_management_info_api($request)
     $websites_table = $wpdb->prefix . 'im_websites';
 
     $website_id = isset($request['website_id']) ? intval($request['website_id']) : 0;
+    $website_name = isset($request['website_name']) ? sanitize_text_field($request['website_name']) : '';
+    $user_ids = im_parse_user_ids($request->get_param('owner_user_id'));
 
     // Validate
-    if ($website_id <= 0) {
+    if (empty($user_ids)) {
         return new WP_REST_Response(
             array(
                 'success' => false,
-                'message' => 'website_id is required'
+                'message' => 'owner_user_id is required for security verification'
             ),
             400
+        );
+    }
+
+    if ($website_id <= 0 && empty($website_name)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'website_id or website_name is required'
+            ),
+            400
+        );
+    }
+
+    // Check permission - User must be the owner of the website or be a partner managing it
+    $hostings_table = $wpdb->prefix . 'im_hostings';
+    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+    $placeholders = implode(',', array_fill(0, count($user_ids), '%d'));
+
+    if ($website_id > 0) {
+        $where_website = "w.id = %d";
+        $website_param = $website_id;
+    } else {
+        $where_website = "w.name = %s";
+        $website_param = $website_name;
+    }
+
+    $check_permission = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) 
+         FROM {$websites_table} w
+         LEFT JOIN {$hostings_table} h ON w.hosting_id = h.id
+         LEFT JOIN {$maintenance_table} m ON w.maintenance_package_id = m.id
+         WHERE {$where_website}
+         AND (
+             w.owner_user_id IN ($placeholders)
+             OR h.partner_id IN ($placeholders)
+             OR m.partner_id IN ($placeholders)
+         )
+         AND (w.status IS NULL OR w.status != 'DELETED')",
+        array_merge([$website_param], $user_ids, $user_ids, $user_ids)
+    ));
+
+    if (!$check_permission) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Website not found or you do not have permission to update it'
+            ),
+            404
         );
     }
 
@@ -1814,17 +1956,17 @@ function update_website_management_info_api($request)
     $update_data = array();
     $update_formats = array();
 
-    if (isset($request['admin_url'])) {
+    if (!empty($request['admin_url'])) {
         $update_data['admin_url'] = sanitize_text_field($request['admin_url']);
         $update_formats[] = '%s';
     }
 
-    if (isset($request['admin_username'])) {
+    if (!empty($request['admin_username'])) {
         $update_data['admin_username'] = sanitize_text_field($request['admin_username']);
         $update_formats[] = '%s';
     }
 
-    if (isset($request['admin_password'])) {
+    if (!empty($request['admin_password'])) {
         $update_data['admin_password'] = im_encrypt_password($request['admin_password']);
         $update_formats[] = '%s';
     }
@@ -1840,14 +1982,20 @@ function update_website_management_info_api($request)
         );
     }
 
+    // Build WHERE clause for update
+    $where = array();
+    $where_format = array();
+
+    if ($website_id > 0) {
+        $where['id'] = $website_id;
+        $where_format[] = '%d';
+    } else {
+        $where['name'] = $website_name;
+        $where_format[] = '%s';
+    }
+
     // Update database
-    $result = $wpdb->update(
-        $websites_table,
-        $update_data,
-        array('id' => $website_id),
-        $update_formats,
-        array('%d')
-    );
+    $result = $wpdb->update($websites_table, $update_data, $where, $update_formats, $where_format);
 
     if ($result === false) {
         return new WP_REST_Response(
@@ -2063,11 +2211,61 @@ function check_website_permission_api($request)
     ", array_merge([$website_param], $user_ids, $user_ids, $user_ids));
 
     $count = $wpdb->get_var($query);
+}
+
+/**
+ * API callback function for listing websites managed by a list of users
+ * Trả về mảng tên các website mà user đó sở hữu hoặc quản lý (qua Hosting/Bảo trì)
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function get_managed_websites_api($request)
+{
+    global $wpdb;
+
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $hostings_table = $wpdb->prefix . 'im_hostings';
+    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+
+    $user_ids = im_parse_user_ids($request->get_param('owner_user_id'));
+
+    // Validate parameters
+    if (empty($user_ids)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'owner_user_id parameter is required'
+            ),
+            400
+        );
+    }
+
+    // Build the query to list websites
+    $placeholders = implode(',', array_fill(0, count($user_ids), '%d'));
+    
+    // Query to get website names
+    $query = $wpdb->prepare("
+        SELECT DISTINCT w.name
+        FROM {$websites_table} w
+        LEFT JOIN {$hostings_table} h ON w.hosting_id = h.id
+        LEFT JOIN {$maintenance_table} m ON w.maintenance_package_id = m.id
+        WHERE (
+            w.owner_user_id IN ($placeholders)
+            OR h.partner_id IN ($placeholders)
+            OR m.partner_id IN ($placeholders)
+        )
+        AND (w.status IS NULL OR w.status != 'DELETED')
+        ORDER BY w.name ASC
+    ", array_merge($user_ids, $user_ids, $user_ids));
+
+    $website_names = $wpdb->get_col($query);
 
     return new WP_REST_Response(
         array(
             'success' => true,
-            'access' => intval($count) > 0
+            'total' => count($website_names),
+            'websites' => $website_names
         ),
         200
     );
