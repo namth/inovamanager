@@ -88,7 +88,12 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
             WHEN ii.service_type = 'website_service' THEN ws.description
             ELSE ''
         END AS service_reference,
-        COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status IN ('WITHDRAWN', 'PAID')), 0) AS withdrawn_commission,
+        COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status = 'DIRECT_DISCOUNT'), 0) AS withdrawn_commission,
+        CASE
+            WHEN ii.service_type = 'hosting' THEN (SELECT discount_amount FROM $hostings_table WHERE id = ii.service_id)
+            WHEN ii.service_type = 'maintenance' THEN (SELECT discount_amount FROM $maintenance_table WHERE id = ii.service_id)
+            ELSE 0
+        END AS item_discount_amount,
         CASE
             WHEN ii.service_type = 'domain' THEN (SELECT expiry_date FROM $domains_table WHERE id = ii.service_id)
             WHEN ii.service_type = 'hosting' THEN (SELECT expiry_date FROM $hostings_table WHERE id = ii.service_id)
@@ -114,16 +119,37 @@ foreach ($invoice_items as $item) {
     $item->website_names = get_invoice_item_website_names($item);
 }
 
-// Calculate totals and check if has commissions
-$has_commission_deduction = false;
+// Calculate totals and check if has discounts/commissions to show
+$has_item_discount = false;
 $total_commission_deduction = 0;
 
 foreach ($invoice_items as $item) {
-    if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0) {
-        $has_commission_deduction = true;
-        $total_commission_deduction += $item->withdrawn_commission;
+    $item_commission = isset($item->withdrawn_commission) ? floatval($item->withdrawn_commission) : 0;
+    $item_discount = isset($item->item_discount_amount) ? floatval($item->item_discount_amount) : 0;
+
+    // Sum of commission for the bottom summary
+    if ($item_commission > 0) {
+        $total_commission_deduction += $item_commission;
+    }
+
+    // Flag to show "Giảm giá" and "Sau giảm" columns in items table
+    if ($item_commission > 0 || $item_discount > 0) {
+        $has_item_discount = true;
     }
 }
+$has_commission_deduction = $has_item_discount; // Rename for consistency in table header
+
+// Calculate final total once (used in both totals display and QR code)
+if ($invoice->requires_vat_invoice) {
+    // With VAT: total_amount already includes tax
+    $final_total = $invoice->total_amount;
+} else {
+    // Without VAT: total should be sub_total - discount
+    $final_total = $invoice->sub_total - $invoice->discount_total;
+}
+
+// Apply commission deduction (always apply regardless of status)
+$final_total -= $total_commission_deduction;
 
 // Get status options and colors
 $status_options = array(
@@ -559,6 +585,18 @@ get_header('nologin');
 
                 // Display each group with header
                 foreach ($grouped_items as $product_type => $items):
+                    // Check if this group has any discount/commission
+                    $group_has_discount = false;
+                    foreach ($items as $item) {
+                        if (
+                            (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0) ||
+                            (isset($item->item_discount_amount) && $item->item_discount_amount > 0)
+                        ) {
+                            $group_has_discount = true;
+                            break;
+                        }
+                    }
+
                     // Get VAT rate from first item (all items in group should have same rate)
                     $group_vat_rate = 0;
                     if ($invoice->requires_vat_invoice && !empty($items)) {
@@ -578,6 +616,10 @@ get_header('nologin');
                                         <th class="text-center">Gia hạn đến</th>
                                     <?php endif; ?>
                                     <th class="text-end">Thành tiền</th>
+                                    <?php if ($group_has_discount): ?>
+                                        <th class="text-end">Giảm giá</th>
+                                        <th class="text-end">Sau giảm</th>
+                                    <?php endif; ?>
                                     <?php if ($invoice->requires_vat_invoice): ?>
                                         <th class="text-end">VAT
                                             <?php echo $group_vat_rate > 0 ? '(' . intval($group_vat_rate) . '%)' : ''; ?>
@@ -630,27 +672,35 @@ get_header('nologin');
                                                 ?>
                                             </td>
                                         <?php endif; ?>
-                                        <td class="text-end"><?php echo number_format($item->item_total); ?>đ</td>
-                                        <?php if ($invoice->requires_vat_invoice): ?>
-                                            <td class="text-end">
-                                                <?php
-                                                $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
-                                                $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
+                                        <?php
+                                        $display_data = get_invoice_item_display_data($item, $invoice->requires_vat_invoice);
+                                        ?>
+                                        <td class="text-end"><?php echo number_format($display_data['subtotal']); ?>đ</td>
 
-                                                if ($item_vat_calculated > 0):
-                                                    echo number_format($item_vat_calculated) . 'đ';
-                                                else:
-                                                    echo '<span class="text-muted">-</span>';
-                                                endif;
-                                                ?>
+                                        <?php if ($group_has_discount): ?>
+                                            <td class="text-end">
+                                                <?php if ($display_data['total_discount'] > 0): ?>
+                                                    <span
+                                                        class="text-danger">-<?php echo number_format($display_data['total_discount']); ?>đ</span>
+                                                <?php else: ?>
+                                                    <span class="text-muted">-</span>
+                                                <?php endif; ?>
                                             </td>
                                             <td class="text-end">
-                                                <?php
-                                                $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
-                                                $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
-                                                $item_total_final = $item->item_total + $item_vat - $item_commission;
-                                                echo '<strong>' . number_format($item_total_final) . 'đ</strong>';
-                                                ?>
+                                                <?php echo number_format($display_data['total_after_discount']); ?>đ
+                                            </td>
+                                        <?php endif; ?>
+
+                                        <?php if ($invoice->requires_vat_invoice): ?>
+                                            <td class="text-end">
+                                                <?php if ($display_data['vat_amount'] > 0): ?>
+                                                    <?php echo number_format($display_data['vat_amount']); ?>đ
+                                                <?php else: ?>
+                                                    <span class="text-muted">-</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="text-end">
+                                                <strong><?php echo number_format($display_data['final_total']); ?>đ</strong>
                                             </td>
                                         <?php endif; ?>
                                     </tr>
@@ -684,17 +734,16 @@ get_header('nologin');
                                     <td><?php echo number_format($invoice->tax_amount); ?> VNĐ</td>
                                 </tr>
                             <?php endif; ?>
+                            <?php if ($total_commission_deduction > 0): ?>
+                                <tr>
+                                    <td>Chiết khấu:</td>
+                                    <td><span class="text-danger">-<?php echo number_format($total_commission_deduction); ?>
+                                            VNĐ</span></td>
+                                </tr>
+                            <?php endif; ?>
                             <tr class="total-row bg-light-success">
                                 <td>Tổng cộng:</td>
-                                <td><?php
-                                // Calculate final total based on requires_vat_invoice
-                                if ($invoice->requires_vat_invoice) {
-                                    $final_total = $invoice->total_amount;
-                                } else {
-                                    $final_total = $invoice->sub_total - $invoice->discount_total;
-                                }
-                                echo number_format($final_total);
-                                ?> VNĐ</td>
+                                <td><?php echo number_format($final_total); ?> VNĐ</td>
                             </tr>
                             <?php if ($invoice->paid_amount > 0): ?>
                                 <tr class="paid-row bg-success">
@@ -723,13 +772,8 @@ get_header('nologin');
                 );
 
                 if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
-                    // Calculate remaining amount based on requires_vat_invoice
-                    if ($invoice->requires_vat_invoice) {
-                        $invoice_total = $invoice->total_amount;
-                    } else {
-                        $invoice_total = $invoice->sub_total - $invoice->discount_total;
-                    }
-                    $remaining_amount = $invoice_total - $invoice->paid_amount;
+                    // QR code is generated based on $final_total which already includes deduction
+                    $remaining_amount = $final_total - $invoice->paid_amount;
                     $qr_add_info = 'HD ' . $invoice->invoice_code;
                     $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
                     $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);

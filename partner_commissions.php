@@ -28,6 +28,7 @@ $statuses = array(
     'PENDING' => 'Chưa thanh toán',
     'PAID' => 'Đã thanh toán',
     'WITHDRAWN' => 'Đã rút tiền',
+    'DIRECT_DISCOUNT' => 'Chiết khấu trực tiếp',
     'CANCELLED' => 'Bị hủy'
 );
 
@@ -376,7 +377,7 @@ get_header();
                 const amount = parseInt(c.commission_amount);
                 if (c.status === 'PENDING') pending += amount;
                 if (c.status === 'PAID') paid += amount;
-                if (c.status === 'WITHDRAWN') withdrawn += amount;
+                if (c.status === 'WITHDRAWN' || c.status === 'DIRECT_DISCOUNT') withdrawn += amount;
                 total += amount;
             });
 
@@ -443,6 +444,7 @@ get_header();
                 case 'PENDING': return 'warning';
                 case 'PAID': return 'success';
                 case 'WITHDRAWN': return 'info';
+                case 'DIRECT_DISCOUNT': return 'primary';
                 case 'CANCELLED': return 'danger';
                 default: return 'secondary';
             }

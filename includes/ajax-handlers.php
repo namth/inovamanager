@@ -1596,7 +1596,7 @@ function update_commission_status_callback()
     }
 
     // Validate status
-    $valid_statuses = ['PENDING', 'PAID', 'WITHDRAWN', 'CANCELLED'];
+    $valid_statuses = ['PENDING', 'PAID', 'WITHDRAWN', 'CANCELLED', 'DIRECT_DISCOUNT'];
     if (!in_array($new_status, $valid_statuses)) {
         wp_send_json_error(['message' => 'Trạng thái không hợp lệ']);
         return;
@@ -1631,8 +1631,8 @@ function update_commission_status_callback()
         $format[] = '%f';
     }
 
-    // Set withdrawal_date when status is WITHDRAWN
-    if ($new_status === 'WITHDRAWN') {
+    // Set withdrawal_date when status is WITHDRAWN or DIRECT_DISCOUNT
+    if ($new_status === 'WITHDRAWN' || $new_status === 'DIRECT_DISCOUNT') {
         $update_data['withdrawal_date'] = current_time('Y-m-d');
         $format[] = '%s';
     }
@@ -1672,7 +1672,7 @@ function bulk_update_commission_status_callback()
     }
 
     // Validate status
-    $valid_statuses = ['PENDING', 'PAID', 'WITHDRAWN', 'CANCELLED'];
+    $valid_statuses = ['PENDING', 'PAID', 'WITHDRAWN', 'CANCELLED', 'DIRECT_DISCOUNT'];
     if (!in_array($new_status, $valid_statuses)) {
         wp_send_json_error(['message' => 'Trạng thái không hợp lệ']);
         return;
@@ -1681,7 +1681,7 @@ function bulk_update_commission_status_callback()
     $commissions_table = $wpdb->prefix . 'im_partner_commissions';
 
     // Build query based on status
-    if ($new_status === 'WITHDRAWN') {
+    if ($new_status === 'WITHDRAWN' || $new_status === 'DIRECT_DISCOUNT') {
         $update_query = "UPDATE {$commissions_table} SET status = %s, withdrawal_date = %s WHERE id IN (" .
             implode(',', array_fill(0, count($commission_ids), '%d')) . ")";
         $query_params = array_merge([$new_status, current_time('Y-m-d')], $commission_ids);

@@ -25,6 +25,7 @@ function CreateDatabaseBookOrder()
         `company_address` text NULL,
         `invoice_email` varchar(255) NULL,
         `invoice_phone` varchar(20) NULL,
+        `zalo_thread_id` varchar(255) NULL,
         `status` varchar(255) DEFAULT 'ACTIVE',
         `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
         `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -266,7 +267,7 @@ function CreateDatabaseBookOrder()
          `discount_rate` decimal(5, 2) NULL COMMENT 'Tỷ lệ chiết khấu áp dụng (%)',
         `service_amount` bigint(20) NULL COMMENT 'Giá trị ban đầu của dịch vụ',
         `calculation_date` date NOT NULL,
-        `status` enum('PENDING','PAID','WITHDRAWN','CANCELLED') NOT NULL DEFAULT 'PENDING',
+        `status` enum('PENDING','PAID','WITHDRAWN','CANCELLED','DIRECT_DISCOUNT') NOT NULL DEFAULT 'PENDING',
         `payout_date` date NULL COMMENT 'Ngày thanh toán',
         `payout_amount` bigint(20) NULL COMMENT 'Số tiền thực tế thanh toán',
         `withdrawal_date` date NULL COMMENT 'Ngày rút tiền (cuối cùng)',
@@ -280,6 +281,12 @@ function CreateDatabaseBookOrder()
         KEY `status` (`status`)
     ) {$charsetCollate};";
     dbDelta($createTable);
+
+    // Migrate im_users table: add zalo_thread_id if not exists
+    $user_columns = $wpdb->get_col("SHOW COLUMNS FROM `{$usersTable}`", 0);
+    if (!in_array('zalo_thread_id', $user_columns)) {
+        $wpdb->query("ALTER TABLE `{$usersTable}` ADD COLUMN `zalo_thread_id` varchar(255) NULL AFTER `invoice_phone`");
+    }
 
     # 12. recurring_expenses table - Quản lý chi tiêu định kỳ
     $recurring_expenses_table = $wpdb->prefix . 'im_recurring_expenses';
@@ -572,23 +579,42 @@ function create_commissions_for_invoice($invoice_id)
             continue;
         }
 
-        // Get discount rate for this service type
-        $discount_rate = get_partner_discount_rate(
-            $partner_id,
-            $normalized_service_type,
-            $calculation_date
-        );
-
-        // Skip if no discount rate found
-        if ($discount_rate <= 0) {
-            continue;
+        // NEW LOGIC: Prioritize explicit discount_amount from service record (Cart logic)
+        $explicit_commission = 0;
+        if ($item->service_type === 'hosting') {
+            $explicit_commission = $wpdb->get_var($wpdb->prepare(
+                "SELECT discount_amount FROM `{$wpdb->prefix}im_hostings` WHERE id = %d",
+                $item->service_id
+            ));
+        } elseif ($item->service_type === 'maintenance') {
+            $explicit_commission = $wpdb->get_var($wpdb->prepare(
+                "SELECT discount_amount FROM `{$wpdb->prefix}im_maintenance_packages` WHERE id = %d",
+                $item->service_id
+            ));
         }
 
-        // Calculate commission amount
-        $commission_amount = calculate_commission_amount(
-            $item->item_total,
-            $discount_rate
-        );
+        if ($explicit_commission > 0) {
+            $commission_amount = $explicit_commission;
+            $discount_rate = 0; // Mark as explicit amount
+        } else {
+            // Get discount rate for this service type as fallback
+            $discount_rate = get_partner_discount_rate(
+                $partner_id,
+                $normalized_service_type,
+                $calculation_date
+            );
+
+            // Skip if no discount rate found
+            if ($discount_rate <= 0) {
+                continue;
+            }
+
+            // Calculate commission amount
+            $commission_amount = calculate_commission_amount(
+                $item->item_total,
+                $discount_rate
+            );
+        }
 
         // Insert into partner_commissions table
         $result = $wpdb->insert(
@@ -953,28 +979,27 @@ function auto_create_renewal_invoices_callback()
 
         // Determine the earliest expiry date to use as the invoice due date
         $all_expiry_dates = array();
-        foreach ($user_services['domains'] as $d) $all_expiry_dates[] = $d->expiry_date;
-        foreach ($user_services['hostings'] as $h) $all_expiry_dates[] = $h->expiry_date;
-        foreach ($user_services['maintenances'] as $m) $all_expiry_dates[] = $m->expiry_date;
-        
+        foreach ($user_services['domains'] as $d)
+            $all_expiry_dates[] = $d->expiry_date;
+        foreach ($user_services['hostings'] as $h)
+            $all_expiry_dates[] = $h->expiry_date;
+        foreach ($user_services['maintenances'] as $m)
+            $all_expiry_dates[] = $m->expiry_date;
+
         $due_date = !empty($all_expiry_dates) ? min($all_expiry_dates) : '';
 
-        // Create invoice using unified function
-        $invoice_id = create_invoice_with_items(
+        // Create invoice using unified standard function
+        $invoice_id = im_create_invoice_from_items(
             $user_id,
             $items,
-            'Hóa đơn gia hạn dịch vụ tự động',
-            'pending',
-            0,
-            'system',
-            '', // current date
-            $due_date
+            [
+                'notes'           => 'Hóa đơn gia hạn dịch vụ tự động',
+                'status'          => 'pending',
+                'created_by_id'   => 0,
+                'created_by_type' => 'system',
+                'due_date'        => $due_date,
+            ]
         );
-
-        // Send webhook notification if invoice created successfully
-        if ($invoice_id) {
-            trigger_invoice_creation_webhook($invoice_id, $user_id);
-        }
     }
 }
 
@@ -1111,7 +1136,7 @@ function generate_invoice_code($user_id)
         "SELECT COUNT(*) FROM $invoices_table WHERE user_id = %d",
         $user_id
     ));
-    
+
     $next = $count + 1;
     $sequence_part = str_pad($next, 3, '0', STR_PAD_LEFT);
     $invoice_code = strtoupper($user_code) . $date_part . $sequence_part;
@@ -1397,6 +1422,8 @@ function send_expiry_notification_emails($milestone)
 
 function check_and_send_expiry_emails()
 {
+    global $wpdb;
+
     // Define milestones (hard-coded, not configurable)
     $milestones = [-30, -7, -3, 0, 1, 14];
 
@@ -1428,11 +1455,117 @@ function check_and_send_expiry_emails()
     error_log('Expiry notification emails check completed at ' . current_time('Y-m-d H:i:s'));
 }
 
+function check_website_online_status()
+{
+    global $wpdb;
+
+    // Check website status (over 1 day and over 2 days)
+    $websites_table = $wpdb->prefix . 'im_websites';
+    $users_table = $wpdb->prefix . 'im_users';
+
+    $current_time_mysql = current_time('mysql');
+
+    // Websites over 1 day (between 24h and 48h since last active_time)
+    $websites_over_1_day = $wpdb->get_results($wpdb->prepare("
+        SELECT w.*, u.name as owner_name, u.email as owner_email
+        FROM $websites_table w
+        LEFT JOIN $users_table u ON w.owner_user_id = u.id
+        WHERE w.active_time <= DATE_SUB(%s, INTERVAL 1 DAY)
+        AND w.active_time > DATE_SUB(%s, INTERVAL 2 DAY)
+        AND (w.status IS NULL OR w.status != 'DELETED')
+    ", $current_time_mysql, $current_time_mysql));
+
+    // Websites over 2 days (between 48h and 72h since last active_time)
+    $websites_over_2_days = $wpdb->get_results($wpdb->prepare("
+        SELECT w.*, u.name as owner_name, u.email as owner_email
+        FROM $websites_table w
+        LEFT JOIN $users_table u ON w.owner_user_id = u.id
+        WHERE w.active_time <= DATE_SUB(%s, INTERVAL 2 DAY)
+        AND w.active_time > DATE_SUB(%s, INTERVAL 3 DAY)
+        AND (w.status IS NULL OR w.status != 'DELETED')
+    ", $current_time_mysql, $current_time_mysql));
+
+
+    if (!empty($websites_over_1_day) || !empty($websites_over_2_days)) {
+        trigger_website_online_status_webhook($websites_over_1_day, $websites_over_2_days);
+    }
+
+    error_log('Website status check completed at ' . current_time('Y-m-d H:i:s'));
+}
+
 function schedule_expiry_check_cron()
 {
+    // Schedule for services expiry check
     if (!wp_next_scheduled('inovamanager_check_expiry_daily')) {
         wp_schedule_event(strtotime('08:00:00'), 'daily_8am', 'inovamanager_check_expiry_daily');
     }
+
+    // Schedule for website online status check
+    if (!wp_next_scheduled('inovamanager_check_website_status_daily')) {
+        wp_schedule_event(strtotime('08:05:00'), 'daily_8am', 'inovamanager_check_website_status_daily');
+    }
+}
+
+/**
+ * Unified standard function to create an invoice from a list of items.
+ * Handles automatic discounts, commission creation (via create_invoice_with_items),
+ * cart clearing, and webhook notifications.
+ * 
+ * @param int $user_id The customer ID
+ * @param array $items Array of items with service_type, service_id, description, unit_price, quantity, item_total, etc.
+ * @param array $args Optional arguments: notes, status, created_by_id, created_by_type, invoice_date, due_date, discount_total, from_cart
+ * @return int|bool Invoice ID on success, false on failure
+ */
+function im_create_invoice_from_items($user_id, $items, $args = [])
+{
+    global $wpdb;
+
+    $defaults = [
+        'notes'           => '',
+        'status'          => 'pending',
+        'created_by_id'   => 0,
+        'created_by_type' => 'system',
+        'invoice_date'    => '',
+        'due_date'        => '',
+        'discount_total'  => 0, // Extra manual discount
+        'from_cart'       => false,
+    ];
+    $args = wp_parse_args($args, $defaults);
+
+    // 1. Process discount logic: separate invoice discount and items info
+    $discount_result = process_discount_and_commission($items);
+    $processed_items = $discount_result['items'];
+    $auto_discount = $discount_result['invoice_discount']; // Discount from items without partner_id
+
+    // Final discount total includes manual discount + auto discounts
+    $final_discount_total = floatval($args['discount_total']) + $auto_discount;
+
+    // 2. Create invoice with items
+    // This calls create_commissions_for_invoice which handles priority commissions
+    $invoice_id = create_invoice_with_items(
+        $user_id,
+        $processed_items,
+        $args['notes'],
+        $args['status'],
+        $args['created_by_id'],
+        $args['created_by_type'],
+        $args['invoice_date'],
+        $args['due_date'],
+        $final_discount_total
+    );
+
+    if ($invoice_id) {
+        // 3. Clear cart items if applicable
+        if ($args['from_cart']) {
+            $cart_table = $wpdb->prefix . 'im_cart';
+            $wpdb->delete($cart_table, ['user_id' => $user_id]);
+        }
+
+        // 4. Trigger webhook notification
+        trigger_invoice_creation_webhook($invoice_id, $user_id);
+    }
+
+    return $invoice_id;
 }
 
 function handle_invoice_form_submission()
@@ -1473,17 +1606,21 @@ function handle_invoice_form_submission()
     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
 
     if ($action === 'add_invoice') {
-        $invoice_status = isset($_POST['finalize']) && $_POST['finalize'] == 1 ? 'pending' : 'draft';
-        $new_invoice_id = create_invoice_with_items(
+        $invoice_status = (isset($_POST['finalize']) && $_POST['finalize'] == 1) || (isset($_POST['save_finalized']) && $_POST['save_finalized'] == 1) ? 'pending' : 'draft';
+        
+        $new_invoice_id = im_create_invoice_from_items(
             $user_id,
             $items,
-            $notes,
-            $invoice_status,
-            get_current_user_id(),
-            'admin',
-            $formatted_invoice_date,
-            $formatted_due_date,
-            $final_discount_total
+            [
+                'notes'           => $notes,
+                'status'          => $invoice_status,
+                'created_by_id'   => get_current_user_id(),
+                'created_by_type' => 'admin',
+                'invoice_date'    => $formatted_invoice_date,
+                'due_date'        => $formatted_due_date,
+                'discount_total'  => $discount_total,
+                'from_cart'       => (isset($_POST['from_cart']) && $_POST['from_cart'] == 1),
+            ]
         );
 
         if (!$new_invoice_id) {
@@ -1491,23 +1628,8 @@ function handle_invoice_form_submission()
         } else {
             echo '<div class="alert alert-success">Hóa đơn đã được tạo thành công!</div>';
 
-            // Create commissions for items with partner_id
-            if (!empty($commission_data)) {
-                create_commissions_from_discount_data($new_invoice_id, $commission_data);
-            }
-
-            // Clear cart items if invoice was created from cart
-            if (isset($_POST['from_cart']) && $_POST['from_cart'] == 1) {
-                $cart_table = $wpdb->prefix . 'im_cart';
-                $wpdb->delete($cart_table, ['user_id' => $user_id]);
-            }
-
             // Redirect to invoice detail page if finalized
-            if (isset($_POST['finalize']) && $_POST['finalize'] == 1) {
-                wp_redirect(home_url('/chi-tiet-hoa-don/?invoice_id=' . $new_invoice_id));
-                exit;
-            } elseif (isset($_POST['save_finalized']) && $_POST['save_finalized'] == 1) {
-                $wpdb->update($invoices_table, ['status' => 'pending'], ['id' => $new_invoice_id]);
+            if ($invoice_status === 'pending') {
                 wp_redirect(home_url('/chi-tiet-hoa-don/?invoice_id=' . $new_invoice_id));
                 exit;
             }
@@ -1581,14 +1703,10 @@ function handle_invoice_form_submission()
             $wpdb->insert($invoice_items_table, $insert_data);
         }
 
-        // Delete existing commissions and recreate from discount data
+        // Delete existing commissions and recreate for invoice using unified logic
         $commissions_table = $wpdb->prefix . 'im_partner_commissions';
         $wpdb->delete($commissions_table, ['invoice_id' => $invoice_id]);
-
-        // Create new commissions for items with partner_id
-        if (!empty($commission_data)) {
-            create_commissions_from_discount_data($invoice_id, $commission_data);
-        }
+        create_commissions_for_invoice($invoice_id);
 
         echo '<div class="alert alert-success">Hóa đơn đã được cập nhật thành công!</div>';
 
@@ -1966,21 +2084,21 @@ function build_renewal_products($items_data, $type)
         $price = 0;
 
         if (!empty($item->product_catalog_id)) {
-             $product_info = $wpdb->get_row($wpdb->prepare(
-                 "SELECT name, renew_price, register_price FROM $products_table WHERE id = %d",
-                 $item->product_catalog_id
-             ));
+            $product_info = $wpdb->get_row($wpdb->prepare(
+                "SELECT name, renew_price, register_price FROM $products_table WHERE id = %d",
+                $item->product_catalog_id
+            ));
 
-             if ($product_info) {
-                 $product_name = $product_info->name;
-                 // For domains: use renew_price if ACTIVE, register_price if PENDING
-                 if ($type === 'domain' && isset($item->status)) {
-                     $price = floatval(($item->status === 'ACTIVE') ? $product_info->renew_price : $product_info->register_price);
-                 } else {
-                     $price = floatval($product_info->renew_price);
-                 }
-             }
-         }
+            if ($product_info) {
+                $product_name = $product_info->name;
+                // For domains: use renew_price if ACTIVE, register_price if PENDING
+                if ($type === 'domain' && isset($item->status)) {
+                    $price = floatval(($item->status === 'ACTIVE') ? $product_info->renew_price : $product_info->register_price);
+                } else {
+                    $price = floatval($product_info->renew_price);
+                }
+            }
+        }
 
         // Fallback to item price if product_catalog price not available
         if (empty($price)) {
@@ -2107,92 +2225,110 @@ function calculate_invoice_totals(&$invoice_items, &$renewal_products)
 
 function display_invoice_info_card()
 {
-    global $invoice_id, $existing_invoice, $product_data, $website_id, $user_id, $users, $partner_info, $service_type, $bulk_domains, $bulk_hostings, $bulk_maintenances, $bulk_websites;
+    global $invoice_id, $existing_invoice, $product_data, $website_id, $user_id, $users, $partner_info, $service_type, $bulk_domains, $bulk_hostings, $bulk_maintenances, $bulk_websites, $renewal_products;
     ?>
-            <div class="card mb-4">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">Thông tin hóa đơn</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Khách hàng <span class="text-danger">*</span></label>
-                            <select name="user_id" id="user_id" class="form-select" required <?php echo ($existing_invoice || $product_data || $website_id > 0 || in_array($service_type, ['bulk_domains', 'bulk_hostings', 'bulk_maintenances', 'bulk_websites'])) ? 'disabled' : ''; ?>>
-                                <option value="">-- Chọn khách hàng --</option>
-                                <?php foreach ($users as $user): ?>
-                                        <option value="<?php echo $user->id; ?>" <?php selected($user_id, $user->id); ?>>
-                                            <?php echo esc_html($user->user_code . ' - ' . $user->name); ?>
-                                        </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <?php if ($existing_invoice || $product_data || $website_id > 0 || in_array($service_type, ['bulk_domains', 'bulk_hostings', 'bulk_maintenances', 'bulk_websites'])): ?>
-                                    <input type="hidden" name="user_id" value="<?php echo $user_id; ?>">
-                            <?php endif; ?>
-                        </div>
-                
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Mã hóa đơn</label>
-                            <input type="text" class="form-control" name="invoice_code_display" value="<?php echo $existing_invoice ? esc_attr($existing_invoice->invoice_code) : '(sẽ được tạo tự động)'; ?>" readonly>
-                        </div>
-                    </div>
-            
-                    <?php if ($partner_info): ?>
-                            <div class="alert alert-info">
-                                <strong>Đối tác liên quan:</strong> <?php echo esc_html($partner_info->user_code . ' - ' . $partner_info->name); ?>
-                            </div>
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Thông tin hóa đơn</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Khách hàng <span class="text-danger">*</span></label>
+                    <select name="user_id" id="user_id" class="form-select" required <?php echo ($existing_invoice || $product_data || $website_id > 0 || in_array($service_type, ['bulk_domains', 'bulk_hostings', 'bulk_maintenances', 'bulk_websites'])) ? 'disabled' : ''; ?>>
+                        <option value="">-- Chọn khách hàng --</option>
+                        <?php foreach ($users as $user): ?>
+                            <option value="<?php echo $user->id; ?>" <?php selected($user_id, $user->id); ?>>
+                                <?php echo esc_html($user->user_code . ' - ' . $user->name); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php if ($existing_invoice || $product_data || $website_id > 0 || in_array($service_type, ['bulk_domains', 'bulk_hostings', 'bulk_maintenances', 'bulk_websites'])): ?>
+                        <input type="hidden" name="user_id" value="<?php echo $user_id; ?>">
                     <?php endif; ?>
-            
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Ngày xuất hóa đơn <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control datepicker" name="invoice_date" value="<?php echo $existing_invoice ? date('d/m/Y', strtotime($existing_invoice->invoice_date)) : date('d/m/Y'); ?>" required>
-                        </div>
-                
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Hạn thanh toán <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control datepicker" name="due_date" value="<?php echo $existing_invoice ? date('d/m/Y', strtotime($existing_invoice->due_date)) : date('d/m/Y', strtotime('+7 days')); ?>" required>
-                        </div>
-                    </div>
-            
-                    <div class="mb-3">
-                        <label class="form-label">Ghi chú</label>
-                        <textarea class="form-control" name="notes" rows="3"><?php echo $existing_invoice ? esc_textarea($existing_invoice->notes) : ''; ?></textarea>
-                    </div>
+                </div>
+
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Mã hóa đơn</label>
+                    <input type="text" class="form-control" name="invoice_code_display"
+                        value="<?php echo $existing_invoice ? esc_attr($existing_invoice->invoice_code) : '(sẽ được tạo tự động)'; ?>"
+                        readonly>
                 </div>
             </div>
-            <?php
+
+            <?php if ($partner_info): ?>
+                <div class="alert alert-info">
+                    <strong>Đối tác liên quan:</strong>
+                    <?php echo esc_html($partner_info->user_code . ' - ' . $partner_info->name); ?>
+                </div>
+            <?php endif; ?>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Ngày xuất hóa đơn <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control datepicker" name="invoice_date"
+                        value="<?php echo $existing_invoice ? date('d/m/Y', strtotime($existing_invoice->invoice_date)) : date('d/m/Y'); ?>"
+                        required>
+                </div>
+
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Hạn thanh toán <span class="text-danger">*</span></label>
+                    <?php
+                    $default_due_date = date('d/m/Y', strtotime('+7 days'));
+                    if (!$existing_invoice && !empty($renewal_products)) {
+                        $expiry_dates = array_column($renewal_products, 'expiry_date');
+                        $expiry_dates = array_filter($expiry_dates);
+                        if (!empty($expiry_dates)) {
+                            $default_due_date = date('d/m/Y', strtotime(min($expiry_dates)));
+                        }
+                    }
+                    ?>
+                    <input type="text" class="form-control datepicker" name="due_date"
+                        value="<?php echo $existing_invoice ? date('d/m/Y', strtotime($existing_invoice->due_date)) : $default_due_date; ?>"
+                        required>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Ghi chú</label>
+                <textarea class="form-control" name="notes"
+                    rows="3"><?php echo $existing_invoice ? esc_textarea($existing_invoice->notes) : ''; ?></textarea>
+            </div>
+        </div>
+    </div>
+    <?php
 }
 
 function display_invoice_items_card()
 {
     global $invoice_items, $renewal_products;
     ?>
-            <div class="card">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">Chi tiết hóa đơn</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table" id="invoice-items-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 25%">Dịch vụ</th>
-                                    <th style="width: 25%">Mô tả</th>
-                                    <th style="width: 12%">Đơn giá</th>
-                                    <th style="width: 8%">SL</th>
-                                    <th style="width: 12%">Thành tiền</th>
-                                    <th style="width: 12%">VAT</th>
-                                    <th style="width: 6%">Xóa</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php render_invoice_items_rows($invoice_items, $renewal_products); ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Chi tiết hóa đơn</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table" id="invoice-items-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 25%">Dịch vụ</th>
+                            <th style="width: 25%">Mô tả</th>
+                            <th style="width: 12%">Đơn giá</th>
+                            <th style="width: 8%">SL</th>
+                            <th style="width: 12%">Thành tiền</th>
+                            <th style="width: 12%">VAT</th>
+                            <th style="width: 6%">Xóa</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php render_invoice_items_rows($invoice_items, $renewal_products); ?>
+                    </tbody>
+                </table>
             </div>
-            <?php
+        </div>
+    </div>
+    <?php
 }
 
 function render_invoice_items_rows($invoice_items, $renewal_products)
@@ -2218,31 +2354,35 @@ function render_invoice_item_row($item)
     $vat_amount = isset($item->vat_amount) ? $item->vat_amount : calculate_vat_amount($item->item_total, $vat_rate);
     $service_type_label = format_service_type($item->service_type);
     ?>
-            <tr class="invoice-item">
-                <td>
-                    <input type="hidden" name="item_id[]" value="<?php echo $item->id; ?>">
-                    <input type="hidden" name="service_type[]" value="<?php echo $item->service_type; ?>">
-                    <input type="hidden" name="service_id[]" value="<?php echo $item->service_id; ?>">
-                    <input type="hidden" name="vat_rate[]" value="<?php echo $vat_rate; ?>">
-                    <strong><?php echo $service_type_label; ?>:</strong> <?php echo esc_html($item->service_name); ?>
-                </td>
-                <td><input type="text" class="form-control" name="description[]" value="<?php echo esc_attr($item->description); ?>" required></td>
-                <td><input type="text" class="form-control unit-price" name="unit_price[]" value="<?php echo number_format($item->unit_price, 0, '', ''); ?>" required></td>
-                <td><input type="number" class="form-control quantity" name="quantity[]" value="<?php echo $item->quantity; ?>" min="1" required></td>
-                <td><input type="text" class="form-control item-total" name="item_total[]" value="<?php echo number_format($item->item_total, 0, '', ''); ?>" readonly></td>
-                <td>
-                    <div class="item-vat-display">
-                        <?php if ($vat_amount > 0): ?>
-                                <span class="vat-amount"><?php echo number_format($vat_amount, 0, ',', '.'); ?> VNĐ</span>
-                                <br><small class="text-muted vat-rate">(<?php echo number_format($vat_rate, 1); ?>%)</small>
-                        <?php else: ?>
-                                <span class="text-muted">-</span>
-                        <?php endif; ?>
-                    </div>
-                </td>
-                <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="ph ph-trash"></i></button></td>
-            </tr>
-            <?php
+    <tr class="invoice-item">
+        <td>
+            <input type="hidden" name="item_id[]" value="<?php echo $item->id; ?>">
+            <input type="hidden" name="service_type[]" value="<?php echo $item->service_type; ?>">
+            <input type="hidden" name="service_id[]" value="<?php echo $item->service_id; ?>">
+            <input type="hidden" name="vat_rate[]" value="<?php echo $vat_rate; ?>">
+            <strong><?php echo $service_type_label; ?>:</strong> <?php echo esc_html($item->service_name); ?>
+        </td>
+        <td><input type="text" class="form-control" name="description[]" value="<?php echo esc_attr($item->description); ?>"
+                required></td>
+        <td><input type="text" class="form-control unit-price" name="unit_price[]"
+                value="<?php echo number_format($item->unit_price, 0, '', ''); ?>" required></td>
+        <td><input type="number" class="form-control quantity" name="quantity[]" value="<?php echo $item->quantity; ?>"
+                min="1" required></td>
+        <td><input type="text" class="form-control item-total" name="item_total[]"
+                value="<?php echo number_format($item->item_total, 0, '', ''); ?>" readonly></td>
+        <td>
+            <div class="item-vat-display">
+                <?php if ($vat_amount > 0): ?>
+                    <span class="vat-amount"><?php echo number_format($vat_amount, 0, ',', '.'); ?> VNĐ</span>
+                    <br><small class="text-muted vat-rate">(<?php echo number_format($vat_rate, 1); ?>%)</small>
+                <?php else: ?>
+                    <span class="text-muted">-</span>
+                <?php endif; ?>
+            </div>
+        </td>
+        <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="ph ph-trash"></i></button></td>
+    </tr>
+    <?php
 }
 
 function render_renewal_product_row($product)
@@ -2256,84 +2396,91 @@ function render_renewal_product_row($product)
     $end_date = $product['end_date'] ?? calculate_end_date($product['expiry_date'], $product['period'], $product['period_type'] === 'years' ? 'years' : 'months');
     $service_type_label = format_service_type($product['type']);
     ?>
-            <tr class="invoice-item">
-                <td>
-                    <input type="hidden" name="item_id[]" value="0">
-                    <input type="hidden" name="service_type[]" value="<?php echo $product['type']; ?>">
-                    <input type="hidden" name="service_id[]" value="<?php echo $product['id']; ?>">
-                    <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
-                    <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
-                    <input type="hidden" name="vat_rate[]" value="<?php echo $product_vat_rate; ?>">
-                    <strong><?php echo $service_type_label; ?>:</strong> <?php echo esc_html($product['name']); ?>
-                    <?php if (isset($product['website_name']) && !empty($product['website_name'])): ?>
-                            <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i> <?php echo esc_html($product['website_name']); ?></small>
-                    <?php endif; ?>
-                </td>
-                <td><input type="text" class="form-control" name="description[]" value="<?php echo esc_attr($product['description']); ?>" required></td>
-                <td><input type="text" class="form-control unit-price" name="unit_price[]" value="<?php echo number_format($product['price'], 0, '', ''); ?>" required></td>
-                <td><input type="number" class="form-control quantity" name="quantity[]" value="<?php echo $item_quantity; ?>" min="1" required></td>
-                <td><input type="text" class="form-control item-total" name="item_total[]" value="<?php echo number_format($item_total, 0, '', ''); ?>" readonly></td>
-                <td>
-                    <div class="item-vat-display">
-                        <?php if ($product_vat_amount > 0): ?>
-                                <span class="vat-amount"><?php echo number_format($product_vat_amount, 0, ',', '.'); ?> VNĐ</span>
-                                <br><small class="text-muted vat-rate">(<?php echo number_format($product_vat_rate, 1); ?>%)</small>
-                        <?php else: ?>
-                                <span class="text-muted">-</span>
-                        <?php endif; ?>
-                    </div>
-                </td>
-                <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="ph ph-trash"></i></button></td>
-            </tr>
-            <?php
+    <tr class="invoice-item">
+        <td>
+            <input type="hidden" name="item_id[]" value="0">
+            <input type="hidden" name="service_type[]" value="<?php echo $product['type']; ?>">
+            <input type="hidden" name="service_id[]" value="<?php echo $product['id']; ?>">
+            <input type="hidden" name="start_date[]" value="<?php echo $start_date; ?>">
+            <input type="hidden" name="end_date[]" value="<?php echo $end_date; ?>">
+            <input type="hidden" name="vat_rate[]" value="<?php echo $product_vat_rate; ?>">
+            <strong><?php echo $service_type_label; ?>:</strong> <?php echo esc_html($product['name']); ?>
+            <?php if (isset($product['website_name']) && !empty($product['website_name'])): ?>
+                <br><small class="text-muted"><i class="ph ph-globe-hemisphere-west"></i>
+                    <?php echo esc_html($product['website_name']); ?></small>
+            <?php endif; ?>
+        </td>
+        <td><input type="text" class="form-control" name="description[]"
+                value="<?php echo esc_attr($product['description']); ?>" required></td>
+        <td><input type="text" class="form-control unit-price" name="unit_price[]"
+                value="<?php echo number_format($product['price'], 0, '', ''); ?>" required></td>
+        <td><input type="number" class="form-control quantity" name="quantity[]" value="<?php echo $item_quantity; ?>"
+                min="1" required></td>
+        <td><input type="text" class="form-control item-total" name="item_total[]"
+                value="<?php echo number_format($item_total, 0, '', ''); ?>" readonly></td>
+        <td>
+            <div class="item-vat-display">
+                <?php if ($product_vat_amount > 0): ?>
+                    <span class="vat-amount"><?php echo number_format($product_vat_amount, 0, ',', '.'); ?> VNĐ</span>
+                    <br><small class="text-muted vat-rate">(<?php echo number_format($product_vat_rate, 1); ?>%)</small>
+                <?php else: ?>
+                    <span class="text-muted">-</span>
+                <?php endif; ?>
+            </div>
+        </td>
+        <td><button type="button" class="btn btn-danger btn-sm remove-item"><i class="ph ph-trash"></i></button></td>
+    </tr>
+    <?php
 }
 
 function display_invoice_summary_card()
 {
     global $sub_total, $existing_invoice;
     ?>
-            <div class="card mb-4">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">Tóm tắt hóa đơn</h5>
-                </div>
-                <div class="card-body">
-                    <div class="d-flex justify-content-between mb-2">
-                        <span>Tổng tiền dịch vụ:</span>
-                        <span id="summary-subtotal"><?php echo number_format($sub_total, 0, ',', '.'); ?> VNĐ</span>
-                    </div>
-                    <div class="d-flex justify-content-between mb-2">
-                        <div>
-                            <span>Chiết khấu:</span>
-                            <small class="text-muted d-block" style="font-size: 11px;">
-                                <i>Tự động: từ sản phẩm không có đối tác<br/>
-                                + Nhập thêm chiết khấu khác</i>
-                            </small>
-                        </div>
-                        <input type="number" class="form-control" style="width: 140px;" name="discount_total" id="discount-amount" value="0" min="0">
-                    </div>
-                    <div class="d-flex justify-content-between mb-2">
-                        <span>Thuế (VAT):</span>
-                        <input type="number" class="form-control" style="width: 140px;" name="tax_amount" id="tax-amount" value="0" min="0">
-                    </div>
-                    <hr>
-                    <div class="d-flex justify-content-between mb-3 fw-bold">
-                        <span>Thành tiền:</span>
-                        <span id="summary-total"><?php echo number_format($sub_total, 0, ',', '.'); ?> VNĐ</span>
-                    </div>
-                    <input type="hidden" name="sub_total" id="sub-total-input" value="<?php echo $sub_total; ?>">
-                    <input type="hidden" name="total_amount" id="total-amount-input" value="<?php echo $sub_total; ?>">
-                </div>
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Tóm tắt hóa đơn</h5>
+        </div>
+        <div class="card-body">
+            <div class="d-flex justify-content-between mb-2">
+                <span>Tổng tiền dịch vụ:</span>
+                <span id="summary-subtotal"><?php echo number_format($sub_total, 0, ',', '.'); ?> VNĐ</span>
             </div>
-    
-            <div class="card-footer bg-white text-end pt-3">
-                <button type="submit" name="save_draft" class="btn btn-secondary me-2">
-                    <i class="ph ph-floppy-disk me-1"></i> Lưu nháp
-                </button>
-                <button type="submit" name="finalize" class="btn btn-primary" value="1">
-                    <i class="ph ph-check-circle me-1"></i> Hoàn tất hóa đơn
-                </button>
+            <div class="d-flex justify-content-between mb-2">
+                <div>
+                    <span>Chiết khấu:</span>
+                    <small class="text-muted d-block" style="font-size: 11px;">
+                        <i>Tự động: từ sản phẩm không có đối tác<br />
+                            + Nhập thêm chiết khấu khác</i>
+                    </small>
+                </div>
+                <input type="number" class="form-control" style="width: 140px;" name="discount_total" id="discount-amount"
+                    value="0" min="0">
             </div>
-            <?php
+            <div class="d-flex justify-content-between mb-2">
+                <span>Thuế (VAT):</span>
+                <input type="number" class="form-control" style="width: 140px;" name="tax_amount" id="tax-amount" value="0"
+                    min="0">
+            </div>
+            <hr>
+            <div class="d-flex justify-content-between mb-3 fw-bold">
+                <span>Thành tiền:</span>
+                <span id="summary-total"><?php echo number_format($sub_total, 0, ',', '.'); ?> VNĐ</span>
+            </div>
+            <input type="hidden" name="sub_total" id="sub-total-input" value="<?php echo $sub_total; ?>">
+            <input type="hidden" name="total_amount" id="total-amount-input" value="<?php echo $sub_total; ?>">
+        </div>
+    </div>
+
+    <div class="card-footer bg-white text-end pt-3">
+        <button type="submit" name="save_draft" class="btn btn-secondary me-2">
+            <i class="ph ph-floppy-disk me-1"></i> Lưu nháp
+        </button>
+        <button type="submit" name="finalize" class="btn btn-primary" value="1">
+            <i class="ph ph-check-circle me-1"></i> Hoàn tất hóa đơn
+        </button>
+    </div>
+    <?php
 }
 
 function get_invoice_item_website_names($item)
@@ -2655,6 +2802,41 @@ function trigger_expiry_check_webhook($expiring_domains, $expiring_hostings, $ex
     }
 }
 
+function trigger_website_online_status_webhook($websites_over_1_day, $websites_over_2_days)
+{
+    // Check if webhook is enabled for website status
+    if (!get_option('inova_webhook_enabled_website_status', 1)) {
+        return;
+    }
+
+    $status_data = array(
+        'over_1_day' => array_map(function ($w) {
+            return array(
+                'id' => intval($w->id),
+                'name' => $w->name,
+                'owner_name' => $w->owner_name,
+                'owner_email' => $w->owner_email,
+                'active_time' => $w->active_time,
+                'last_seen_diff' => human_time_diff(strtotime($w->active_time), current_time('timestamp'))
+            );
+        }, $websites_over_1_day),
+        'over_2_days' => array_map(function ($w) {
+            return array(
+                'id' => intval($w->id),
+                'name' => $w->name,
+                'owner_name' => $w->owner_name,
+                'owner_email' => $w->owner_email,
+                'active_time' => $w->active_time,
+                'last_seen_diff' => human_time_diff(strtotime($w->active_time), current_time('timestamp'))
+            );
+        }, $websites_over_2_days),
+    );
+
+    if (!empty($websites_over_1_day) || !empty($websites_over_2_days)) {
+        send_webhook_data($status_data, 'website_status_check');
+    }
+}
+
 
 /* ===== REGISTER HOOKS FOR DATABASE FUNCTIONS ===== */
 
@@ -2670,8 +2852,9 @@ add_filter('cron_schedules', function ($schedules) {
 add_action('after_switch_theme', 'schedule_expiry_check_cron');
 add_action('init', 'schedule_expiry_check_cron');
 
-// Scheduled email notifications
+// Scheduled checks
 add_action('inovamanager_check_expiry_daily', 'check_and_send_expiry_emails');
+add_action('inovamanager_check_website_status_daily', 'check_website_online_status');
 
 // Auto renewal scheduling
 add_action('wp', 'schedule_auto_renewal_invoices');

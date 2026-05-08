@@ -446,7 +446,12 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
             WHEN ii.service_type = 'website_service' THEN ws.description
             ELSE ''
         END AS service_reference,
-        COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status IN ('WITHDRAWN', 'PAID')), 0) AS withdrawn_commission,
+        COALESCE((SELECT SUM(commission_amount) FROM $commissions_table WHERE invoice_item_id = ii.id AND status = 'DIRECT_DISCOUNT'), 0) AS withdrawn_commission,
+        CASE
+            WHEN ii.service_type = 'hosting' THEN (SELECT discount_amount FROM $hostings_table WHERE id = ii.service_id)
+            WHEN ii.service_type = 'maintenance' THEN (SELECT discount_amount FROM $maintenance_table WHERE id = ii.service_id)
+            ELSE 0
+        END AS item_discount_amount,
         CASE
             WHEN ii.service_type = 'domain' THEN (SELECT expiry_date FROM $domains_table WHERE id = ii.service_id)
             WHEN ii.service_type = 'hosting' THEN (SELECT expiry_date FROM $hostings_table WHERE id = ii.service_id)
@@ -472,16 +477,25 @@ foreach ($invoice_items as $item) {
     $item->website_names = get_invoice_item_website_names($item);
 }
 
-// Calculate totals and check if has commissions to show
-$has_commission_deduction = false;
+// Calculate totals and check if has discounts/commissions to show
+$has_item_discount = false;
 $total_commission_deduction = 0;
 
 foreach ($invoice_items as $item) {
-    if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0) {
-        $has_commission_deduction = true;
-        $total_commission_deduction += $item->withdrawn_commission;
+    $item_commission = isset($item->withdrawn_commission) ? floatval($item->withdrawn_commission) : 0;
+    $item_discount = isset($item->item_discount_amount) ? floatval($item->item_discount_amount) : 0;
+    
+    // Sum of commission for the bottom summary
+    if ($item_commission > 0) {
+        $total_commission_deduction += $item_commission;
+    }
+    
+    // Flag to show "Giảm giá" and "Sau giảm" columns in items table
+    if ($item_commission > 0 || $item_discount > 0) {
+        $has_item_discount = true;
     }
 }
+$has_commission_deduction = $has_item_discount; // Rename for consistency in table header
 
 // Check for related invoices (for 50% payment system)
 $related_invoices = $wpdb->get_results($wpdb->prepare("
@@ -672,6 +686,16 @@ get_header();
                          
                          // Display each group with header
                          foreach ($grouped_items as $product_type => $items):
+                             // Check if this group has any discount/commission
+                             $group_has_discount = false;
+                             foreach ($items as $item) {
+                                 if ((isset($item->withdrawn_commission) && $item->withdrawn_commission > 0) || 
+                                     (isset($item->item_discount_amount) && $item->item_discount_amount > 0)) {
+                                     $group_has_discount = true;
+                                     break;
+                                 }
+                             }
+
                              // Get VAT rate from first item (all items in group should have same rate)
                              $group_vat_rate = 0;
                              if ($invoice->requires_vat_invoice && !empty($items)) {
@@ -692,13 +716,12 @@ get_header();
                                              <th class="text-center">Gia hạn đến</th>
                                              <?php endif; ?>
                                              <th class="text-end">Thành tiền</th>
+                                             <?php if ($group_has_discount): ?>
+                                             <th class="text-end">Giảm giá</th>
+                                             <th class="text-end">Sau giảm</th>
+                                             <?php endif; ?>
                                              <?php if ($invoice->requires_vat_invoice): ?>
                                              <th class="text-end">VAT <?php echo $group_vat_rate > 0 ? '(' . intval($group_vat_rate) . '%)' : ''; ?></th>
-                                             <?php endif; ?>
-                                             <?php if ($has_commission_deduction): ?>
-                                             <th class="text-end">Chiết khấu</th>
-                                             <?php endif; ?>
-                                             <?php if ($invoice->requires_vat_invoice): ?>
                                              <th class="text-end">Tổng</th>
                                              <?php endif; ?>
                                              <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
@@ -747,38 +770,35 @@ get_header();
                                                  ?>
                                              </td>
                                              <?php endif; ?>
-                                             <td class="text-end"><?php echo number_format($item->item_total); ?>đ</td>
-                                             <?php if ($invoice->requires_vat_invoice): ?>
+                                             <?php 
+                                                 $display_data = get_invoice_item_display_data($item, $invoice->requires_vat_invoice);
+                                             ?>
+                                             <td class="text-end"><?php echo number_format($display_data['subtotal']); ?>đ</td>
+                                             
+                                             <?php if ($group_has_discount): ?>
                                              <td class="text-end">
-                                                 <?php
-                                                 $item_vat_rate = isset($item->vat_rate) ? floatval($item->vat_rate) : 0;
-                                                 $item_vat_calculated = ($item->item_total * $item_vat_rate) / 100;
-                                                 
-                                                 if ($item_vat_calculated > 0):
-                                                     echo number_format($item_vat_calculated) . 'đ';
-                                                 else:
-                                                     echo '<span class="text-muted">-</span>';
-                                                 endif;
-                                                 ?>
-                                             </td>
-                                             <?php endif; ?>
-                                             <?php if ($has_commission_deduction): ?>
-                                             <td class="text-end">
-                                                 <?php if (isset($item->withdrawn_commission) && $item->withdrawn_commission > 0): ?>
-                                                     <span class="text-danger">-<?php echo number_format($item->withdrawn_commission); ?>đ</span>
+                                                 <?php if ($display_data['total_discount'] > 0): ?>
+                                                     <span class="text-danger">-<?php echo number_format($display_data['total_discount']); ?>đ</span>
                                                  <?php else: ?>
                                                      <span class="text-muted">-</span>
                                                  <?php endif; ?>
                                              </td>
+                                             <td class="text-end">
+                                                 <?php echo number_format($display_data['total_after_discount']); ?>đ
+                                             </td>
                                              <?php endif; ?>
+
                                              <?php if ($invoice->requires_vat_invoice): ?>
-                                             <td class="text-end"><strong><?php 
-                                                 $item_vat = ($item->item_total * floatval($item->vat_rate ?? 0)) / 100;
-                                                 $item_commission = (isset($item->withdrawn_commission) ? $item->withdrawn_commission : 0);
-                                                 $item_total_final = $item->item_total + $item_vat - $item_commission;
-                                                 echo number_format($item_total_final); 
-                                             ?>đ</strong></td>
+                                             <td class="text-end">
+                                                 <?php if ($display_data['vat_amount'] > 0): ?>
+                                                     <?php echo number_format($display_data['vat_amount']); ?>đ
+                                                 <?php else: ?>
+                                                     <span class="text-muted">-</span>
+                                                 <?php endif; ?>
+                                             </td>
+                                             <td class="text-end"><strong><?php echo number_format($display_data['final_total']); ?>đ</strong></td>
                                              <?php endif; ?>
+                                             
                                              <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
                                              <td class="text-center">
                                                  <button type="button" class="btn btn-sm btn-danger delete-invoice-item" 
@@ -823,7 +843,7 @@ get_header();
                                      <!-- Commission deduction (always show if exists) -->
                                      <?php if ($total_commission_deduction > 0): ?>
                                      <tr class="table-light">
-                                         <td class="text-muted">Chiết khấu (rút tiền hoa hồng):</td>
+                                         <td class="text-muted">Chiết khấu:</td>
                                          <td class="text-end text-danger">-<?php echo number_format($total_commission_deduction); ?> VNĐ</td>
                                      </tr>
                                      <?php endif; ?>

@@ -203,6 +203,46 @@ function calculate_vat_amount($item_total, $vat_rate)
     return round($item_total * $vat_rate / 100);
 }
 
+/**
+ * Calculate display data for an invoice item
+ * 
+ * @param object $item The invoice item object
+ * @param bool $requires_vat_invoice Whether the invoice requires VAT
+ * @return array Calculated values
+ */
+function get_invoice_item_display_data($item, $requires_vat_invoice) {
+    $subtotal = floatval($item->item_total ?? 0);
+    $vat_rate = floatval($item->vat_rate ?? 0);
+    
+    // Inherent discount of the product
+    $inherent_discount = isset($item->item_discount_amount) ? floatval($item->item_discount_amount) : 0;
+    
+    // Commission discount (partner)
+    $commission_discount = isset($item->withdrawn_commission) ? floatval($item->withdrawn_commission) : 0;
+    
+    // Total discount for display in columns
+    $total_discount = $inherent_discount + $commission_discount;
+    
+    $vat_amount = $requires_vat_invoice ? round(($subtotal * $vat_rate) / 100) : 0;
+    
+    // Amount after all discounts but before VAT
+    $total_after_discount = $subtotal - $total_discount;
+    
+    // Final total including VAT and minus all discounts
+    $final_total = $subtotal + $vat_amount - $total_discount;
+
+    return array(
+        'subtotal' => $subtotal,
+        'vat_rate' => $vat_rate,
+        'vat_amount' => $vat_amount,
+        'inherent_discount' => $inherent_discount,
+        'commission_discount' => $commission_discount,
+        'total_discount' => $total_discount,
+        'total_after_discount' => $total_after_discount,
+        'final_total' => $final_total
+    );
+}
+
 function get_relationship($partnerID, $type = "full")
 {
     global $wpdb;

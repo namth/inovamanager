@@ -139,6 +139,13 @@ function register_bookorder_api_routes()
         'callback' => 'get_managed_websites_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for updating user info
+    register_rest_route('bookorder/v1', '/update-user', array(
+        'methods' => 'POST',
+        'callback' => 'update_user_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -374,6 +381,8 @@ function update_partner_api($request)
         $update_data['address'] = sanitize_text_field($params['address']);
     if (isset($params['notes']))
         $update_data['notes'] = sanitize_text_field($params['notes']);
+    if (isset($params['zalo_thread_id']))
+        $update_data['zalo_thread_id'] = sanitize_text_field($params['zalo_thread_id']);
     if (isset($params['status']))
         $update_data['status'] = sanitize_text_field($params['status']);
 
@@ -416,6 +425,114 @@ function update_partner_api($request)
             array(
                 'success' => false,
                 'message' => "Database error while updating partner"
+            ),
+            500
+        );
+    }
+}
+
+/**
+ * API callback function for updating user information (more generic than update-partner)
+ * 
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function update_user_api($request)
+{
+    $params = $request->get_params();
+    $user_id = isset($params['user_id']) ? intval($params['user_id']) : 0;
+
+    if ($user_id <= 0) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => "Missing or invalid user_id"
+            ),
+            400
+        );
+    }
+
+    global $wpdb;
+    $users_table = $wpdb->prefix . 'im_users';
+
+    // Check if user exists
+    $user = $wpdb->get_row(
+        $wpdb->prepare("SELECT * FROM $users_table WHERE id = %d", $user_id)
+    );
+
+    if (!$user) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => "User with ID {$user_id} not found"
+            ),
+            404
+        );
+    }
+
+    // Prepare data for update
+    $update_data = array();
+
+    // Mapping fields - only update if provided and not null/empty
+    $fields_to_update = [
+        'user_code'      => 'sanitize_text_field',
+        'user_type'      => 'sanitize_text_field',
+        'name'           => 'sanitize_text_field',
+        'email'          => 'sanitize_email',
+        'phone_number'   => 'sanitize_text_field',
+        'tax_code'       => 'sanitize_text_field',
+        'address'        => 'sanitize_text_field',
+        'notes'          => 'sanitize_text_field',
+        'zalo_thread_id' => 'sanitize_text_field',
+        'status'         => 'sanitize_text_field',
+        'company_name'   => 'sanitize_text_field',
+        'company_address' => 'sanitize_text_field',
+        'invoice_email'  => 'sanitize_email',
+        'invoice_phone'  => 'sanitize_text_field',
+    ];
+
+    foreach ($fields_to_update as $field => $sanitizer) {
+        if (!empty($params[$field])) {
+            $update_data[$field] = $sanitizer($params[$field]);
+        }
+    }
+
+    // Special case for boolean/integer fields that might be 0 but not empty in terms of intent
+    if (isset($params['requires_vat_invoice'])) {
+        $update_data['requires_vat_invoice'] = $params['requires_vat_invoice'] ? 1 : 0;
+    }
+
+    if (empty($update_data)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => "No data provided to update"
+            ),
+            400
+        );
+    }
+
+    // Update the database
+    $result = $wpdb->update(
+        $users_table,
+        $update_data,
+        array('id' => $user_id)
+    );
+
+    if ($result !== false) {
+        return new WP_REST_Response(
+            array(
+                'success' => true,
+                'message' => "User updated successfully",
+                'user_id' => $user_id
+            ),
+            200
+        );
+    } else {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => "Database error while updating user"
             ),
             500
         );
@@ -776,14 +893,15 @@ function update_website_status_api($request)
 {
     global $wpdb;
 
-    // Get website_id parameter
+    // Get website_id and website_name parameters
     $website_id = isset($request['website_id']) ? intval($request['website_id']) : 0;
+    $website_name = isset($request['website_name']) ? sanitize_text_field($request['website_name']) : '';
 
-    if ($website_id <= 0) {
+    if ($website_id <= 0 && empty($website_name)) {
         return new WP_REST_Response(
             array(
                 'success' => false,
-                'message' => 'Valid website_id is required'
+                'message' => 'Valid website_id or website_name is required'
             ),
             400
         );
@@ -791,10 +909,21 @@ function update_website_status_api($request)
 
     // Check if website exists
     $websites_table = $wpdb->prefix . 'im_websites';
-    $website = $wpdb->get_row($wpdb->prepare(
-        "SELECT id, name FROM {$websites_table} WHERE id = %d",
-        $website_id
-    ));
+    
+    if ($website_id > 0) {
+        $website = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, name FROM {$websites_table} WHERE id = %d",
+            $website_id
+        ));
+    } else {
+        $website = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, name FROM {$websites_table} WHERE name = %s AND (status IS NULL OR status != 'DELETED')",
+            $website_name
+        ));
+        if ($website) {
+            $website_id = $website->id;
+        }
+    }
 
     if (!$website) {
         return new WP_REST_Response(
