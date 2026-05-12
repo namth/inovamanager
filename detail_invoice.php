@@ -611,7 +611,7 @@ get_header();
                                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#statusModal">
                                         <i class="ph ph-arrow-clockwise me-2"></i>Cập nhật trạng thái
                                     </a></li>
-                                    <li><a class="dropdown-item" href="javascript:void(0);" id="recalculateInvoice">
+                                    <li><a class="dropdown-item recalculateInvoiceBtn" href="javascript:void(0);">
                                         <i class="ph ph-calculator me-2"></i>Tính lại tổng tiền
                                     </a></li>
                                     <li><hr class="dropdown-divider"></li>
@@ -1039,6 +1039,9 @@ get_header();
                              <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
                              <button type="button" class="btn btn-info mb-2" data-bs-toggle="modal" data-bs-target="#mergeInvoiceModal">
                                  <i class="ph ph-plus me-2"></i>Gộp hóa đơn
+                             </button>
+                             <button type="button" class="btn btn-warning mb-2 recalculateInvoiceBtn">
+                                 <i class="ph ph-calculator me-2"></i>Tính lại tổng tiền
                              </button>
                              <?php endif; ?>
                              
@@ -1524,7 +1527,7 @@ jQuery(document).ready(function($) {
     /**
      * Recalculate Invoice handler
      */
-    $('#recalculateInvoice').on('click', function(e) {
+    $(document).on('click', '.recalculateInvoiceBtn', function(e) {
         e.preventDefault();
         
         if (!confirm('Xác nhận tính toán lại toàn bộ tổng tiền, VAT và chiết khấu cho hóa đơn này dựa trên các dịch vụ hiện có?')) {
