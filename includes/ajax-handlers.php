@@ -2905,3 +2905,91 @@ function recalculate_invoice_totals_ajax() {
     ));
 }
 add_action('wp_ajax_recalculate_invoice_totals', 'recalculate_invoice_totals_ajax');
+
+/**
+ * AJAX handler for searching customers (Select2 format)
+ */
+function search_customers_select2_ajax() {
+    $search = isset($_GET['q']) ? sanitize_text_field($_GET['q']) : '';
+    
+    global $wpdb;
+    $users_table = $wpdb->prefix . 'im_users';
+    
+    $query = "SELECT id, name, user_code FROM $users_table WHERE status = 'ACTIVE'";
+    $params = array();
+    
+    if (!empty($search)) {
+        $query .= " AND (name LIKE %s OR user_code LIKE %s)";
+        $search_term = '%' . $wpdb->esc_like($search) . '%';
+        $params[] = $search_term;
+        $params[] = $search_term;
+    }
+    
+    $query .= " ORDER BY name ASC LIMIT 20";
+    
+    if (!empty($params)) {
+        $results = $wpdb->get_results($wpdb->prepare($query, $params));
+    } else {
+        $results = $wpdb->get_results($query);
+    }
+    
+    $data = array();
+    foreach ($results as $user) {
+        $data[] = array(
+            'id' => $user->id,
+            'text' => $user->user_code . ' - ' . $user->name
+        );
+    }
+    
+    wp_send_json(array('results' => $data));
+}
+add_action('wp_ajax_search_customers_select2', 'search_customers_select2_ajax');
+
+/**
+ * Change invoice customer - AJAX handler
+ */
+function change_invoice_customer_ajax() {
+    if (!isset($_POST['invoice_id']) || !isset($_POST['new_user_id'])) {
+        wp_send_json_error(array('message' => 'Thiếu thông tin cần thiết.'));
+        return;
+    }
+
+    $invoice_id = intval($_POST['invoice_id']);
+    $new_user_id = intval($_POST['new_user_id']);
+    
+    if ($new_user_id <= 0) {
+        wp_send_json_error(array('message' => 'ID khách hàng không hợp lệ.'));
+        return;
+    }
+
+    global $wpdb;
+    $invoice_table = $wpdb->prefix . 'im_invoices';
+    $users_table = $wpdb->prefix . 'im_users';
+
+    // Check permission
+    if (!current_user_can('manage_options') && !current_user_can('edit_users')) {
+         wp_send_json_error(array('message' => 'Bạn không có quyền thực hiện thao tác này.'));
+         return;
+    }
+
+    // Get new user info
+    $new_user = $wpdb->get_row($wpdb->prepare("SELECT requires_vat_invoice FROM $users_table WHERE id = %d", $new_user_id));
+    if (!$new_user) {
+        wp_send_json_error(array('message' => 'Không tìm thấy khách hàng mới.'));
+        return;
+    }
+
+    // Update invoice
+    $updated = $wpdb->update($invoice_table, array(
+        'user_id' => $new_user_id,
+        'requires_vat_invoice' => $new_user->requires_vat_invoice,
+        'updated_at' => current_time('mysql')
+    ), array('id' => $invoice_id));
+
+    if ($updated !== false) {
+        wp_send_json_success(array('message' => 'Thay đổi khách hàng thành công. Đang cập nhật lại hóa đơn...'));
+    } else {
+        wp_send_json_error(array('message' => 'Lỗi khi cập nhật cơ sở dữ liệu.'));
+    }
+}
+add_action('wp_ajax_change_invoice_customer', 'change_invoice_customer_ajax');

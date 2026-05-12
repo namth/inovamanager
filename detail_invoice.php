@@ -614,10 +614,6 @@ get_header();
                                     <li><a class="dropdown-item recalculateInvoiceBtn" href="javascript:void(0);">
                                         <i class="ph ph-calculator me-2"></i>Tính lại tổng tiền
                                     </a></li>
-                                    <li><hr class="dropdown-divider"></li>
-                                    <li><a class="dropdown-item" href="<?php echo home_url('/danh-sach-hoa-don/'); ?>">
-                                        <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
-                                    </a></li>
                                 </ul>
                             </div>
                             <?php endif; ?>
@@ -1040,14 +1036,14 @@ get_header();
                              <button type="button" class="btn btn-info mb-2" data-bs-toggle="modal" data-bs-target="#mergeInvoiceModal">
                                  <i class="ph ph-plus me-2"></i>Gộp hóa đơn
                              </button>
-                             <button type="button" class="btn btn-warning mb-2 recalculateInvoiceBtn">
+                             <button type="button" class="btn btn-primary mb-2 recalculateInvoiceBtn">
                                  <i class="ph ph-calculator me-2"></i>Tính lại tổng tiền
+                             </button>
+                             <button type="button" class="btn btn-secondary mb-2" data-bs-toggle="modal" data-bs-target="#changeCustomerModal">
+                                 <i class="ph ph-user-circle-plus me-2"></i>Thay đổi khách hàng
                              </button>
                              <?php endif; ?>
                              
-                             <a href="<?php echo home_url('/danh-sach-hoa-don/'); ?>" class="btn btn-secondary mb-2">
-                                 <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
-                             </a>
                              </div>
                              </div>
                              </div>
@@ -1228,6 +1224,40 @@ get_header();
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
                 <button type="button" class="btn btn-primary" id="mergeSubmitBtn" disabled>
                     <i class="ph ph-check me-2"></i>Gộp hóa đơn
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- Change Customer Modal -->
+<?php if ($can_edit_invoice): ?>
+<div class="modal fade" id="changeCustomerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="ph ph-user-circle-plus me-2"></i>Thay đổi khách hàng
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            
+            <div class="modal-body">
+                <p class="text-muted mb-3">Chọn khách hàng mới cho hóa đơn này. Lưu ý: Cài đặt VAT sẽ được cập nhật theo khách hàng mới.</p>
+                
+                <div class="mb-3">
+                    <label class="form-label">Tìm khách hàng <span class="text-danger">*</span></label>
+                    <select id="new_customer_id" class="form-select select2-customer" style="width: 100%">
+                        <option value="">-- Tìm theo tên hoặc mã --</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" id="changeCustomerSubmitBtn" disabled>
+                    <i class="ph ph-check me-2"></i>Xác nhận thay đổi
                 </button>
             </div>
         </div>
@@ -1556,6 +1586,87 @@ jQuery(document).ready(function($) {
             error: function() {
                 alert('Có lỗi hệ thống xảy ra.');
                 $btn.html(originalHtml).removeClass('disabled');
+            }
+        });
+    });
+
+    /**
+     * Change Customer Modal Handler
+     */
+    $('#changeCustomerModal').on('shown.bs.modal', function() {
+        $('.select2-customer').select2({
+            dropdownParent: $('#changeCustomerModal'),
+            ajax: {
+                url: '<?php echo admin_url('admin-ajax.php'); ?>',
+                dataType: 'json',
+                delay: 250,
+                data: function(params) {
+                    return {
+                        q: params.term,
+                        action: 'search_customers_select2'
+                    };
+                },
+                processResults: function(data) {
+                    return {
+                        results: data.results
+                    };
+                },
+                cache: true
+            },
+            placeholder: '-- Tìm theo tên hoặc mã --',
+            minimumInputLength: 2
+        });
+    });
+
+    $('.select2-customer').on('change', function() {
+        $('#changeCustomerSubmitBtn').prop('disabled', !$(this).val());
+    });
+
+    $('#changeCustomerSubmitBtn').on('click', function() {
+        var newUserId = $('#new_customer_id').val();
+        var invoiceId = <?php echo $invoice_id; ?>;
+        
+        if (!newUserId) return;
+        
+        
+        var btn = $(this);
+        var originalHtml = btn.html();
+        btn.html('<i class="ph ph-spinner ph-spin me-2"></i>Đang xử lý...').prop('disabled', true);
+        
+        $.ajax({
+            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+            type: 'POST',
+            dataType: 'json',
+            data: {
+                action: 'change_invoice_customer',
+                invoice_id: invoiceId,
+                new_user_id: newUserId
+            },
+            success: function(response) {
+                if (response.success) {
+                    // Success! Now recalculate to ensure everything is correct
+                    $.ajax({
+                        url: '<?php echo admin_url('admin-ajax.php'); ?>',
+                        type: 'POST',
+                        data: {
+                            action: 'recalculate_invoice_totals',
+                            invoice_id: invoiceId
+                        },
+                        success: function() {
+                            location.reload();
+                        },
+                        error: function() {
+                            location.reload();
+                        }
+                    });
+                } else {
+                    alert('Lỗi: ' + response.data.message);
+                    btn.html(originalHtml).prop('disabled', false);
+                }
+            },
+            error: function(xhr, status, error) {
+                alert('Có lỗi xảy ra: ' + error);
+                btn.html(originalHtml).prop('disabled', false);
             }
         });
     });
