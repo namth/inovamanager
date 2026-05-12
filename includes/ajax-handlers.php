@@ -2795,3 +2795,113 @@ add_action('wp_ajax_delete_expense_declaration', 'delete_expense_declaration_cal
 // Revenue Statistics
 add_action('wp_ajax_get_monthly_invoice_details', 'get_monthly_invoice_details_callback');
 add_action('wp_ajax_export_revenue_report', 'export_revenue_report_callback');
+
+/**
+ * Recalculate invoice totals, VAT, and discounts/commissions based on current items
+ */
+function recalculate_invoice_totals_ajax() {
+    if (!isset($_POST['invoice_id'])) {
+        wp_send_json_error(array('message' => 'Thiếu ID hóa đơn'));
+        return;
+    }
+
+    $invoice_id = intval($_POST['invoice_id']);
+    global $wpdb;
+
+    $invoice_table = $wpdb->prefix . 'im_invoices';
+    $items_table = $wpdb->prefix . 'im_invoice_items';
+    $users_table = $wpdb->prefix . 'im_users';
+
+    // 1. Get invoice and current user settings
+    $invoice = $wpdb->get_row($wpdb->prepare("
+        SELECT i.*, u.requires_vat_invoice as current_user_vat_setting 
+        FROM $invoice_table i 
+        JOIN $users_table u ON i.user_id = u.id 
+        WHERE i.id = %d
+    ", $invoice_id));
+
+    if (!$invoice) {
+        wp_send_json_error(array('message' => 'Không tìm thấy hóa đơn'));
+        return;
+    }
+    
+    // Check permission
+    $can_edit = current_user_can('manage_options') || current_user_can('edit_users');
+    if (!$can_edit) {
+         wp_send_json_error(array('message' => 'Bạn không có quyền thực hiện thao tác này'));
+         return;
+    }
+
+    // 2. Get current invoice items
+    $items = $wpdb->get_results($wpdb->prepare("SELECT * FROM $items_table WHERE invoice_id = %d", $invoice_id), ARRAY_A);
+    
+    if (empty($items)) {
+        wp_send_json_error(array('message' => 'Hóa đơn không có item nào'));
+        return;
+    }
+
+    // 3. Update requires_vat_invoice from user setting if it changed
+    $requires_vat = intval($invoice->current_user_vat_setting);
+
+    // 4. Process discounts and commissions (this identifies partner discounts from service records)
+    $discount_result = process_discount_and_commission($items);
+    $processed_items = $discount_result['items'];
+    $auto_discount = $discount_result['invoice_discount']; // Sum of discounts where partner_id = 0
+
+    // 5. Calculate new totals and update items
+    $new_sub_total = 0;
+    $new_tax_amount = 0;
+    $vat_rates = get_current_vat_rates();
+
+    foreach ($processed_items as $item) {
+        $item_total = floatval($item['item_total']);
+        $new_sub_total += $item_total;
+        
+        // Identify service type for VAT rate lookup
+        $service_type_for_vat = '';
+        $type = $item['service_type'];
+        if ($type === 'hosting') $service_type_for_vat = 'Hosting';
+        elseif ($type === 'domain') $service_type_for_vat = 'Domain';
+        elseif ($type === 'maintenance') $service_type_for_vat = 'Maintenance';
+        elseif ($type === 'website_service') $service_type_for_vat = 'Website';
+        
+        $item_vat_rate = 0;
+        if ($service_type_for_vat && isset($vat_rates[$service_type_for_vat])) {
+            $item_vat_rate = $vat_rates[$service_type_for_vat];
+        }
+        
+        $item_vat_amount = 0;
+        if ($requires_vat) {
+            $item_vat_amount = calculate_vat_amount($item_total, $item_vat_rate);
+            $new_tax_amount += $item_vat_amount;
+        }
+        
+        // Update item in database with new VAT info
+        $wpdb->update($items_table, array(
+            'vat_rate' => $item_vat_rate,
+            'vat_amount' => $item_vat_amount
+        ), array('id' => $item['id']));
+    }
+
+    $new_total_amount = $new_sub_total + $new_tax_amount - $auto_discount;
+
+    // 6. Update invoice header
+    $wpdb->update($invoice_table, array(
+        'sub_total' => $new_sub_total,
+        'tax_amount' => $new_tax_amount,
+        'discount_total' => $auto_discount,
+        'total_amount' => $new_total_amount,
+        'requires_vat_invoice' => $requires_vat,
+        'updated_at' => current_time('mysql')
+    ), array('id' => $invoice_id));
+
+    // 7. Refresh commissions (delete and recreate based on current item totals and service records)
+    cancel_commissions_for_invoice($invoice_id);
+    create_commissions_for_invoice($invoice_id);
+
+    wp_send_json_success(array(
+        'message' => 'Đã tính toán lại tổng tiền, VAT và chiết khấu thành công dựa trên cấu hình hiện tại.',
+        'new_total' => number_format($new_total_amount) . 'đ'
+    ));
+}
+add_action('wp_ajax_recalculate_invoice_totals', 'recalculate_invoice_totals_ajax');

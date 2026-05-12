@@ -611,6 +611,9 @@ get_header();
                                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#statusModal">
                                         <i class="ph ph-arrow-clockwise me-2"></i>Cập nhật trạng thái
                                     </a></li>
+                                    <li><a class="dropdown-item" href="javascript:void(0);" id="recalculateInvoice">
+                                        <i class="ph ph-calculator me-2"></i>Tính lại tổng tiền
+                                    </a></li>
                                     <li><hr class="dropdown-divider"></li>
                                     <li><a class="dropdown-item" href="<?php echo home_url('/danh-sach-hoa-don/'); ?>">
                                         <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
@@ -1516,6 +1519,42 @@ jQuery(document).ready(function($) {
             var alertInstance = bootstrap.Alert.getOrCreateInstance(alert);
             alertInstance.close();
         }, 5000);
+    });
+
+    /**
+     * Recalculate Invoice handler
+     */
+    $('#recalculateInvoice').on('click', function(e) {
+        e.preventDefault();
+        
+        if (!confirm('Xác nhận tính toán lại toàn bộ tổng tiền, VAT và chiết khấu cho hóa đơn này dựa trên các dịch vụ hiện có?')) {
+            return;
+        }
+        
+        var $btn = $(this);
+        var originalHtml = $btn.html();
+        $btn.html('<i class="ph ph-spinner ph-spin me-2"></i>Đang xử lý...').addClass('disabled');
+        
+        $.ajax({
+            url: '<?php echo admin_url('admin-ajax.php'); ?>',
+            type: 'POST',
+            data: {
+                action: 'recalculate_invoice_totals',
+                invoice_id: <?php echo $invoice_id; ?>
+            },
+            success: function(response) {
+                if (response.success) {
+                    location.reload();
+                } else {
+                    alert('Lỗi: ' + (response.data ? response.data.message : 'Không xác định'));
+                    $btn.html(originalHtml).removeClass('disabled');
+                }
+            },
+            error: function() {
+                alert('Có lỗi hệ thống xảy ra.');
+                $btn.html(originalHtml).removeClass('disabled');
+            }
+        });
     });
 });
 </script>
