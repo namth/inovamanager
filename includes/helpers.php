@@ -332,17 +332,22 @@ function make_cloudflare_request($endpoint)
     return $data['result'];
 }
 
-function generate_payment_qr_code($amount, $add_info = '', $requires_vat_invoice = 0)
+function generate_payment_qr_code($amount, $add_info = '', $requires_vat_invoice = 0, $payment_method = '')
 {
-    // Select appropriate bank account based on VAT invoice requirement
-    if ($requires_vat_invoice) {
-        // Use account for customers WITH VAT invoice
-        $bank_code = get_option('payment_bank_code_with_vat');
-        $account_number = get_option('payment_account_number_with_vat');
-    } else {
-        // Use account for customers WITHOUT VAT invoice
+    // Bank account selection logic:
+    // 1. If NO VAT invoice is required, ALWAYS use the No-VAT account.
+    // 2. If VAT invoice IS required:
+    //    - If payment method is 'cash', use the No-VAT account.
+    //    - If payment method is 'bank_transfer' or Default, use the VAT account.
+    
+    if (!$requires_vat_invoice || $payment_method === 'cash') {
+        // Use account for customers WITHOUT VAT invoice (or cash preference)
         $bank_code = get_option('payment_bank_code_no_vat');
         $account_number = get_option('payment_account_number_no_vat');
+    } else {
+        // Use account for customers WITH VAT invoice (and bank transfer or default preference)
+        $bank_code = get_option('payment_bank_code_with_vat');
+        $account_number = get_option('payment_account_number_with_vat');
     }
 
     // Fallback to old keys if new keys are not set (backward compatibility)

@@ -43,9 +43,14 @@ $requires_vat_invoice = 0;
 
 load_invoice_data($invoice_id, $user_id, $from_cart, $bulk_domains, $bulk_hostings, $bulk_maintenances, $bulk_websites, $domain_id, $hosting_id, $maintenance_id, $website_id);
 
-# 4. Get requires_vat_invoice setting from user
-if ($user_id) {
-    $users_table = $wpdb->prefix . 'im_users';
+# 4. Get requires_vat_invoice setting (Invoice priority, then User fallback)
+if ($invoice_id > 0) {
+    $invoice_settings = $wpdb->get_row($wpdb->prepare(
+        "SELECT requires_vat_invoice FROM $invoice_table WHERE id = %d",
+        $invoice_id
+    ));
+    $requires_vat_invoice = ($invoice_settings) ? intval($invoice_settings->requires_vat_invoice) : 0;
+} elseif ($user_id > 0) {
     $user = $wpdb->get_row($wpdb->prepare(
         "SELECT requires_vat_invoice FROM $users_table WHERE id = %d",
         $user_id

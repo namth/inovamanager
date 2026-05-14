@@ -159,6 +159,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                 }
                 break;
                 
+            case 'edit_invoice_settings':
+                $requires_vat = isset($_POST['requires_vat_invoice']) ? 1 : 0;
+                $payment_method = sanitize_text_field($_POST['payment_method']);
+                
+                // Update basic settings
+                $wpdb->update($invoice_table, array(
+                    'requires_vat_invoice' => $requires_vat,
+                    'payment_method' => $payment_method,
+                    'updated_at' => current_time('mysql')
+                ), array('id' => $invoice_id));
+                
+                // Recalculate totals because VAT setting might have changed
+                try {
+                    $remaining_items = $wpdb->get_results($wpdb->prepare("
+                        SELECT ii.item_total, ii.vat_rate, ii.service_type, ii.service_id
+                        FROM $invoice_items_table ii
+                        WHERE ii.invoice_id = %d
+                    ", $invoice_id));
+                    
+                    $new_sub_total = 0;
+                    $new_tax_amount = 0;
+                    $new_discount_total = 0;
+                    
+                    $hostings_table = $wpdb->prefix . 'im_hostings';
+                    $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+                    
+                    foreach ($remaining_items as $item) {
+                        $item_total = floatval($item->item_total);
+                        $new_sub_total += $item_total;
+                        
+                        if ($requires_vat) {
+                            $item_vat_rate = floatval($item->vat_rate ?? 0);
+                            $new_tax_amount += ($item_total * $item_vat_rate) / 100;
+                        }
+                        
+                        // Recalculate discount
+                        $discount_amount = 0;
+                        if ($item->service_type === 'hosting') {
+                            $discount_amount = floatval($wpdb->get_var($wpdb->prepare("SELECT discount_amount FROM $hostings_table WHERE id = %d", $item->service_id)) ?? 0);
+                        } elseif ($item->service_type === 'maintenance') {
+                            $discount_amount = floatval($wpdb->get_var($wpdb->prepare("SELECT discount_amount FROM $maintenance_table WHERE id = %d", $item->service_id)) ?? 0);
+                        }
+                        $new_discount_total += $discount_amount;
+                    }
+                    
+                    $new_total_amount = $new_sub_total + $new_tax_amount - $new_discount_total;
+                    
+                    $wpdb->update($invoice_table, array(
+                        'sub_total' => $new_sub_total,
+                        'tax_amount' => $new_tax_amount,
+                        'total_amount' => $new_total_amount,
+                        'discount_total' => $new_discount_total
+                    ), array('id' => $invoice_id));
+                    
+                    $success_message = 'Đã cập nhật cấu hình hóa đơn thành công.';
+                } catch (Exception $e) {
+                    $error_message = 'Lỗi khi tính toán lại: ' . $e->getMessage();
+                }
+                break;
+                
             case 'mark_as_paid':
                 error_log('Processing mark_as_paid for invoice ID: ' . $invoice_id);
                 $paid_amount = floatval($_POST['paid_amount']);
@@ -406,7 +466,7 @@ $invoice = $wpdb->get_row($wpdb->prepare("
         u.tax_code,
         u.address AS customer_address,
         u.phone_number AS customer_phone,
-        u.requires_vat_invoice
+        u.requires_vat_invoice AS user_requires_vat
     FROM 
         $invoice_table i
     LEFT JOIN 
@@ -597,26 +657,7 @@ get_header();
                                     </span>
                                 </div>
                             </div>
-                            <?php if ($can_edit_invoice): ?>
-                            <div class="dropdown">
-                                <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                    <i class="ph ph-gear me-2"></i>Thao tác
-                                </button>
-                                <ul class="dropdown-menu">
-                                    <?php if ($invoice->status !== 'paid'): ?>
-                                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#paymentModal">
-                                            <i class="ph ph-credit-card me-2"></i>Đánh dấu đã thanh toán
-                                        </a></li>
-                                    <?php endif; ?>
-                                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#statusModal">
-                                        <i class="ph ph-arrow-clockwise me-2"></i>Cập nhật trạng thái
-                                    </a></li>
-                                    <li><a class="dropdown-item recalculateInvoiceBtn" href="javascript:void(0);">
-                                        <i class="ph ph-calculator me-2"></i>Tính lại tổng tiền
-                                    </a></li>
-                                </ul>
-                            </div>
-                            <?php endif; ?>
+
                         </div>
 
                         <!-- Invoice Info -->
@@ -902,7 +943,7 @@ get_header();
                      // Pass requires_vat_invoice to select appropriate bank account
                      $qr_add_info = 'HD ' . $invoice->invoice_code;
                      $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
-                     $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
+                     $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice, $invoice->payment_method);
 
                     if ($qr_code_url):
                 ?>
@@ -1036,6 +1077,9 @@ get_header();
                              <button type="button" class="btn btn-info mb-2" data-bs-toggle="modal" data-bs-target="#mergeInvoiceModal">
                                  <i class="ph ph-plus me-2"></i>Gộp hóa đơn
                              </button>
+                             <button type="button" class="btn btn-warning mb-2" data-bs-toggle="modal" data-bs-target="#editInvoiceModal">
+                                 <i class="ph ph-note-pencil me-2"></i>Tùy chọn thanh toán
+                             </button>
                              <button type="button" class="btn btn-primary mb-2 recalculateInvoiceBtn">
                                  <i class="ph ph-calculator me-2"></i>Tính lại tổng tiền
                              </button>
@@ -1087,11 +1131,11 @@ get_header();
                     <div class="mb-3">
                         <label class="form-label">Phương thức thanh toán</label>
                         <select class="form-select" name="payment_method">
-                            <option value="bank_transfer">Chuyển khoản ngân hàng</option>
-                            <option value="cash">Tiền mặt</option>
-                            <option value="credit_card">Thẻ tín dụng</option>
-                            <option value="e_wallet">Ví điện tử</option>
-                            <option value="other">Khác</option>
+                            <option value="bank_transfer" <?php echo ($invoice->payment_method === 'bank_transfer') ? 'selected' : ''; ?>>Chuyển khoản ngân hàng</option>
+                            <option value="cash" <?php echo ($invoice->payment_method === 'cash') ? 'selected' : ''; ?>>Tiền mặt</option>
+                            <option value="credit_card" <?php echo ($invoice->payment_method === 'credit_card') ? 'selected' : ''; ?>>Thẻ tín dụng</option>
+                            <option value="e_wallet" <?php echo ($invoice->payment_method === 'e_wallet') ? 'selected' : ''; ?>>Ví điện tử</option>
+                            <option value="other" <?php echo ($invoice->payment_method === 'other') ? 'selected' : ''; ?>>Khác</option>
                         </select>
                     </div>
                     
@@ -1231,6 +1275,65 @@ get_header();
 </div>
 <?php endif; ?>
 
+<?php if ($can_edit_invoice): ?>
+<div class="modal fade" id="editInvoiceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <?php wp_nonce_field('invoice_action', 'action_nonce'); ?>
+                <input type="hidden" name="action" value="edit_invoice_settings">
+                
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="ph ph-note-pencil me-2"></i>Chỉnh sửa cấu hình hóa đơn
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                
+                <div class="modal-body">
+                    <div class="mb-4">
+                        <div class="form-check form-switch">
+                            <label class="form-check-label fw-bold" for="requiresVatSwitch">Lấy hóa đơn VAT (10%)
+                                <input class="form-check-input" type="checkbox" name="requires_vat_invoice" id="requiresVatSwitch" 
+                                       <?php echo $invoice->requires_vat_invoice ? 'checked' : ''; ?>>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Phương thức thanh toán</label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="payment_method" id="methodNone" value="" 
+                                       <?php echo empty($invoice->payment_method) ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="methodNone">Mặc định</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="payment_method" id="methodCash" value="cash" 
+                                       <?php echo $invoice->payment_method === 'cash' ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="methodCash">Tiền mặt</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="payment_method" id="methodTransfer" value="bank_transfer" 
+                                       <?php echo $invoice->payment_method === 'bank_transfer' ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="methodTransfer">Chuyển khoản</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="ph ph-check me-2"></i>Lưu thay đổi
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Change Customer Modal -->
 <?php if ($can_edit_invoice): ?>
 <div class="modal fade" id="changeCustomerModal" tabindex="-1">
@@ -1298,9 +1401,7 @@ jQuery(document).ready(function($) {
         var invoiceId = <?php echo $invoice_id; ?>;
         
         // Confirm deletion
-        if (!confirm('Bạn chắc chắn muốn xóa item "' + itemName + '" khỏi hóa đơn?\n\nTổng tiền hóa đơn sẽ được tính lại.')) {
-            return;
-        }
+
         
         var btn = $(this);
         var originalHtml = btn.html();
@@ -1553,6 +1654,8 @@ jQuery(document).ready(function($) {
             alertInstance.close();
         }, 5000);
     });
+    
+
 
     /**
      * Recalculate Invoice handler
@@ -1560,9 +1663,7 @@ jQuery(document).ready(function($) {
     $(document).on('click', '.recalculateInvoiceBtn', function(e) {
         e.preventDefault();
         
-        if (!confirm('Xác nhận tính toán lại toàn bộ tổng tiền, VAT và chiết khấu cho hóa đơn này dựa trên các dịch vụ hiện có?')) {
-            return;
-        }
+
         
         var $btn = $(this);
         var originalHtml = $btn.html();

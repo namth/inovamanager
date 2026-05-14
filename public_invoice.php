@@ -33,7 +33,7 @@ $invoice = $wpdb->get_row($wpdb->prepare("
         u.tax_code,
         u.address AS customer_address,
         u.phone_number AS customer_phone,
-        u.requires_vat_invoice
+        u.requires_vat_invoice AS user_requires_vat
     FROM 
         $invoice_table i
     LEFT JOIN 
@@ -172,6 +172,31 @@ $status_classes = array(
 $logo_url = get_template_directory_uri() . '/img/inova_logo.png';
 $site_name = get_bloginfo('name');
 $public_invoice_url = home_url('/public-invoice/?token=' . urlencode(base64_encode($invoice->id . '|' . $invoice->created_at)));
+
+// Collect all unique website names for page title
+$all_website_names = array();
+foreach ($invoice_items as $item) {
+    if (!empty($item->website_names)) {
+        $all_website_names = array_merge($all_website_names, $item->website_names);
+    }
+}
+$unique_website_names = array_unique($all_website_names);
+$website_count = count($unique_website_names);
+
+if ($website_count === 0) {
+    $website_title = get_bloginfo('name');
+} elseif ($website_count <= 3) {
+    $website_title = implode(', ', $unique_website_names);
+} else {
+    $first_two = array_slice($unique_website_names, 0, 2);
+    $remaining = $website_count - 2;
+    $website_title = implode(', ', $first_two) . ' và ' . $remaining . ' website khác';
+}
+
+// Set custom page title
+add_filter('wp_title', function($title) use ($invoice, $website_title) {
+    return 'Hóa đơn ' . $website_title . ' | Khách hàng ' . $invoice->customer_name;
+}, 100);
 
 get_header('nologin');
 ?>
@@ -483,7 +508,7 @@ get_header('nologin');
     <div class="public-invoice-container">
         <!-- Header -->
         <div class="invoice-header">
-            <h1 class="text-dark" id="invoice-header-title">HÓA ĐƠN DỊCH VỤ</h1>
+            <h1 class="text-dark" id="invoice-header-title">HÓA ĐƠN <?php echo esc_html($invoice->invoice_code); ?></h1>
             <p class="text-muted" id="invoice-header-subtitle">
                 <?php echo 'Hạn thanh toán: ' . date('d/m/Y', strtotime($invoice->due_date)); ?>
             </p>
@@ -776,7 +801,7 @@ get_header('nologin');
                     $remaining_amount = $final_total - $invoice->paid_amount;
                     $qr_add_info = 'HD ' . $invoice->invoice_code;
                     $requires_vat_invoice = isset($invoice->requires_vat_invoice) ? $invoice->requires_vat_invoice : 0;
-                    $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice);
+                    $qr_code_url = generate_payment_qr_code($remaining_amount, $qr_add_info, $requires_vat_invoice, $invoice->payment_method);
 
                     if ($qr_code_url):
                         ?>

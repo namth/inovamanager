@@ -2840,8 +2840,12 @@ function recalculate_invoice_totals_ajax() {
         return;
     }
 
-    // 3. Update requires_vat_invoice from user setting if it changed
-    $requires_vat = intval($invoice->current_user_vat_setting);
+    // 3. Determine VAT setting (manual override > invoice setting > user setting)
+    if (isset($_POST['requires_vat'])) {
+        $requires_vat = intval($_POST['requires_vat']);
+    } else {
+        $requires_vat = intval($invoice->requires_vat_invoice);
+    }
 
     // 4. Process discounts and commissions (this identifies partner discounts from service records)
     $discount_result = process_discount_and_commission($items);
@@ -2854,16 +2858,68 @@ function recalculate_invoice_totals_ajax() {
     $vat_rates = get_current_vat_rates();
 
     foreach ($processed_items as $item) {
-        $item_total = floatval($item['item_total']);
+        $service_type = $item['service_type'];
+        $service_id = $item['service_id'];
+        $quantity = floatval($item['quantity'] ?: 1);
+        
+        // Fetch current price based on service type (mirroring cart.php logic)
+        $current_unit_price = floatval($item['unit_price']); // Fallback to current price
+        
+        switch ($service_type) {
+            case 'domain':
+                $price = $wpdb->get_var($wpdb->prepare("
+                    SELECT COALESCE(pc.renew_price, pc.register_price, 0)
+                    FROM {$wpdb->prefix}im_domains d
+                    LEFT JOIN {$wpdb->prefix}im_product_catalog pc ON d.product_catalog_id = pc.id
+                    WHERE d.id = %d
+                ", $service_id));
+                if ($price !== null) $current_unit_price = floatval($price);
+                break;
+
+            case 'hosting':
+                $price = $wpdb->get_var($wpdb->prepare("
+                    SELECT COALESCE(pc.renew_price, h.price, 0)
+                    FROM {$wpdb->prefix}im_hostings h
+                    LEFT JOIN {$wpdb->prefix}im_product_catalog pc ON h.product_catalog_id = pc.id
+                    WHERE h.id = %d
+                ", $service_id));
+                if ($price !== null) $current_unit_price = floatval($price);
+                break;
+
+            case 'maintenance':
+                $price = $wpdb->get_var($wpdb->prepare("
+                    SELECT m.price_per_cycle
+                    FROM {$wpdb->prefix}im_maintenance_packages m
+                    WHERE m.id = %d
+                ", $service_id));
+                if ($price !== null) $current_unit_price = floatval($price);
+                break;
+
+            case 'website_service':
+                $service = $wpdb->get_row($wpdb->prepare("
+                    SELECT pricing_type, fixed_price, daily_rate, estimated_manday
+                    FROM {$wpdb->prefix}im_website_services
+                    WHERE id = %d
+                ", $service_id));
+                if ($service) {
+                    if ($service->pricing_type === 'FIXED' && $service->fixed_price) {
+                        $current_unit_price = floatval($service->fixed_price);
+                    } elseif ($service->pricing_type === 'DAILY' && $service->daily_rate && $service->estimated_manday) {
+                        $current_unit_price = floatval($service->daily_rate * $service->estimated_manday);
+                    }
+                }
+                break;
+        }
+
+        $item_total = $current_unit_price * $quantity;
         $new_sub_total += $item_total;
         
         // Identify service type for VAT rate lookup
         $service_type_for_vat = '';
-        $type = $item['service_type'];
-        if ($type === 'hosting') $service_type_for_vat = 'Hosting';
-        elseif ($type === 'domain') $service_type_for_vat = 'Domain';
-        elseif ($type === 'maintenance') $service_type_for_vat = 'Maintenance';
-        elseif ($type === 'website_service') $service_type_for_vat = 'Website';
+        if ($service_type === 'hosting') $service_type_for_vat = 'Hosting';
+        elseif ($service_type === 'domain') $service_type_for_vat = 'Domain';
+        elseif ($service_type === 'maintenance') $service_type_for_vat = 'Maintenance';
+        elseif ($service_type === 'website_service') $service_type_for_vat = 'Website';
         
         $item_vat_rate = 0;
         if ($service_type_for_vat && isset($vat_rates[$service_type_for_vat])) {
@@ -2876,8 +2932,10 @@ function recalculate_invoice_totals_ajax() {
             $new_tax_amount += $item_vat_amount;
         }
         
-        // Update item in database with new VAT info
+        // Update item in database with new price and VAT info
         $wpdb->update($items_table, array(
+            'unit_price' => $current_unit_price,
+            'item_total' => $item_total,
             'vat_rate' => $item_vat_rate,
             'vat_amount' => $item_vat_amount
         ), array('id' => $item['id']));
@@ -2905,6 +2963,7 @@ function recalculate_invoice_totals_ajax() {
     ));
 }
 add_action('wp_ajax_recalculate_invoice_totals', 'recalculate_invoice_totals_ajax');
+add_action('wp_ajax_toggle_invoice_vat', 'recalculate_invoice_totals_ajax');
 
 /**
  * AJAX handler for searching customers (Select2 format)
