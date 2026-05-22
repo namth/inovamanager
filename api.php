@@ -1600,6 +1600,87 @@ function update_invoice_status_api($request)
             500
         );
     }
+    
+    // Set "cancelled" status to all services contained in this invoice if status is canceled
+    if ($status === 'canceled' || $status === 'cancelled') {
+        if (function_exists('cancel_commissions_for_invoice')) {
+            cancel_commissions_for_invoice($invoice_id);
+        }
+        
+        $domains_table = $wpdb->prefix . 'im_domains';
+        $hostings_table = $wpdb->prefix . 'im_hostings';
+        $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
+        $service_table = $wpdb->prefix . 'im_services';
+        $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+        
+        $invoice_items_to_cancel = $wpdb->get_results($wpdb->prepare("
+            SELECT service_type, service_id
+            FROM $invoice_items_table
+            WHERE invoice_id = %d AND service_id IS NOT NULL
+        ", $invoice_id));
+        
+        $affected_website_ids = array();
+        
+        foreach ($invoice_items_to_cancel as $item) {
+            switch ($item->service_type) {
+                case 'domain':
+                    $wpdb->update($domains_table, array('status' => 'DELETED', 'updated_at' => current_time('mysql')), array('id' => $item->service_id));
+                    $affected_website_ids = array_merge($affected_website_ids, $wpdb->get_col($wpdb->prepare("SELECT id FROM $websites_table WHERE domain_id = %d", $item->service_id)));
+                    break;
+                case 'hosting':
+                    $wpdb->update($hostings_table, array('status' => 'DELETED', 'updated_at' => current_time('mysql')), array('id' => $item->service_id));
+                    $affected_website_ids = array_merge($affected_website_ids, $wpdb->get_col($wpdb->prepare("SELECT id FROM $websites_table WHERE hosting_id = %d", $item->service_id)));
+                    break;
+                case 'maintenance':
+                    $wpdb->update($maintenance_table, array('status' => 'DELETED', 'updated_at' => current_time('mysql')), array('id' => $item->service_id));
+                    $affected_website_ids = array_merge($affected_website_ids, $wpdb->get_col($wpdb->prepare("SELECT id FROM $websites_table WHERE maintenance_package_id = %d", $item->service_id)));
+                    break;
+                case 'website_service':
+                    $wpdb->update($service_table, array('status' => 'CANCELLED', 'updated_at' => current_time('mysql')), array('id' => $item->service_id));
+                    break;
+            }
+        }
+        
+        // Check and soft delete affected websites
+        $websites_table = $wpdb->prefix . 'im_websites';
+        if (!empty($affected_website_ids)) {
+            $affected_website_ids = array_unique($affected_website_ids);
+            foreach ($affected_website_ids as $website_id) {
+                $website = $wpdb->get_row($wpdb->prepare("SELECT domain_id, hosting_id, maintenance_package_id, status FROM $websites_table WHERE id = %d", $website_id));
+                if ($website && $website->status !== 'DELETED') {
+                    $has_active_service = false;
+                    
+                    // Check domain (counts as active if managed by Inova and not DELETED)
+                    if ($website->domain_id) {
+                        $domain = $wpdb->get_row($wpdb->prepare("SELECT managed_by_inova, status FROM $domains_table WHERE id = %d", $website->domain_id));
+                        if ($domain && $domain->managed_by_inova == 1 && $domain->status !== 'DELETED') {
+                            $has_active_service = true;
+                        }
+                    }
+                    
+                    // Check hosting (counts as active if not DELETED)
+                    if (!$has_active_service && $website->hosting_id) {
+                        $hosting = $wpdb->get_row($wpdb->prepare("SELECT status FROM $hostings_table WHERE id = %d", $website->hosting_id));
+                        if ($hosting && $hosting->status !== 'DELETED') {
+                            $has_active_service = true;
+                        }
+                    }
+                    
+                    // Check maintenance (counts as active if not DELETED)
+                    if (!$has_active_service && $website->maintenance_package_id) {
+                        $maintenance = $wpdb->get_row($wpdb->prepare("SELECT status FROM $maintenance_table WHERE id = %d", $website->maintenance_package_id));
+                        if ($maintenance && $maintenance->status !== 'DELETED') {
+                            $has_active_service = true;
+                        }
+                    }
+                    
+                    if (!$has_active_service) {
+                        $wpdb->update($websites_table, array('status' => 'DELETED'), array('id' => $website_id));
+                    }
+                }
+            }
+        }
+    }
 
     // Get updated invoice
     $updated_invoice = $wpdb->get_row($wpdb->prepare(

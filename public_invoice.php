@@ -194,7 +194,7 @@ if ($website_count === 0) {
 }
 
 // Set custom page title
-add_filter('wp_title', function($title) use ($invoice, $website_title) {
+add_filter('wp_title', function ($title) use ($invoice, $website_title) {
     return 'Hóa đơn ' . $website_title . ' | Khách hàng ' . $invoice->customer_name;
 }, 100);
 
@@ -508,9 +508,9 @@ get_header('nologin');
     <div class="public-invoice-container">
         <!-- Header -->
         <div class="invoice-header">
-            <h1 class="text-dark" id="invoice-header-title">HÓA ĐƠN <?php echo esc_html($invoice->invoice_code); ?></h1>
+            <h1 class="text-dark" id="invoice-header-title">HÓA ĐƠN DỊCH VỤ</h1>
             <p class="text-muted" id="invoice-header-subtitle">
-                <?php echo 'Hạn thanh toán: ' . date('d/m/Y', strtotime($invoice->due_date)); ?>
+                <?php echo 'Mã hóa đơn: ' . $invoice->invoice_code . ' &nbsp; Hạn thanh toán: ' . date('d/m/Y', strtotime($invoice->due_date)); ?>
             </p>
             <p id="invoice-header-status">
                 <?php
