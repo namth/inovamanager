@@ -400,6 +400,26 @@ function CreateDatabaseBookOrder()
     ) {$charsetCollate};";
     dbDelta($createTable);
 
+    # 15. service_tasks table - Quản lý các task nhỏ trong mỗi website service
+    $serviceTasksTable = $wpdb->prefix . 'im_service_tasks';
+    $createTable = "CREATE TABLE `{$serviceTasksTable}` (
+        `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        `service_id` bigint(20) UNSIGNED NOT NULL,
+        `title` varchar(255) NOT NULL,
+        `description` text NULL,
+        `status` enum('TODO','IN_PROGRESS','DONE','CANCELLED') DEFAULT 'TODO',
+        `sort_order` int DEFAULT 0,
+        `created_by` bigint(20) UNSIGNED NULL,
+        `completed_at` datetime NULL,
+        `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`),
+        KEY `service_id` (`service_id`),
+        KEY `status` (`status`),
+        KEY `created_by` (`created_by`)
+    ) {$charsetCollate};";
+    dbDelta($createTable);
+
     # Initialize default email notification settings in WordPress options
     // Set global default for email notifications (can be overridden per user via user meta)
     if (!get_option('inova_email_notification_defaults')) {

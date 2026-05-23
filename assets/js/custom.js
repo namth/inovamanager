@@ -327,6 +327,18 @@ jQuery(document).ready(function($) {
         
         $('#deleteInvoiceModal').modal('show');
     });
+
+    // Mark invoice as exported modal functionality
+    $(document).on('click', '.mark-invoice-exported', function(e) {
+        e.preventDefault();
+        var invoiceId = $(this).data('invoice-id');
+        var invoiceCode = $(this).data('invoice-code');
+        
+        $('#exported-invoice-id').val(invoiceId);
+        $('#exported-invoice-code').text(invoiceCode);
+        
+        $('#markExportedModal').modal('show');
+    });
     
     // Format paid amount with thousand separators
     $(document).on('blur', '#paid-amount', function() {

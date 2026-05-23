@@ -187,3 +187,79 @@ tr:last-child td:last-child {
     background: #f95e521f;
 }
 
+/* ==========================================
+   Service List & Execution Custom Styles
+   ========================================== */
+
+/* Title Hover Underline */
+.hover-underline:hover {
+    color: #4b49ac !important;
+    text-decoration: underline !important;
+}
+
+/* Service Execution Task Items */
+.task-item {
+    transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.task-item:hover {
+    background-color: #f8f9fa;
+}
+
+.task-status-todo {
+    border-left: 3px solid #6c757d !important;
+}
+
+.task-status-in_progress {
+    border-left: 3px solid #0d6efd !important;
+    background-color: #e9f2feff;
+}
+
+.task-status-done {
+    border-left: 3px solid #198754 !important;
+    background-color: #f0fdf4;
+}
+
+.task-status-cancelled {
+    border-left: 3px solid #dc3545 !important;
+    opacity: 0.6;
+}
+
+.btn-task-toggle {
+    transition: all 0.2s ease;
+}
+
+.btn-task-toggle:hover {
+    transform: scale(1.1);
+}
+
+.task-item.task-adding {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.task-item.task-removing {
+    animation: fadeOut 0.3s ease forwards;
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+}
+

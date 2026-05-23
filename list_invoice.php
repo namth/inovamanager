@@ -8,6 +8,47 @@ $invoice_table = $wpdb->prefix . 'im_invoices';
 $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
 $users_table = $wpdb->prefix . 'im_users';
 
+// Process mark invoice as exported if POST request
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'mark_invoice_exported') {
+    $invoice_id = isset($_POST['invoice_id']) ? intval($_POST['invoice_id']) : 0;
+
+    if ($invoice_id > 0) {
+        // Start transaction
+        $wpdb->query('START TRANSACTION');
+
+        try {
+            $result = $wpdb->update(
+                $invoice_table,
+                array(
+                    'status' => 'paid',
+                    'updated_at' => current_time('mysql')
+                ),
+                array('id' => $invoice_id)
+            );
+
+            if ($result !== false) {
+                $wpdb->query('COMMIT');
+
+                // Show success message
+                echo '<div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <i class="ph ph-check-circle me-2"></i> Hóa đơn đã được xác nhận xuất VAT và chuyển sang trạng thái Đã thanh toán thành công.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>';
+            } else {
+                throw new Exception("Error updating invoice status");
+            }
+        } catch (Exception $e) {
+            $wpdb->query('ROLLBACK');
+
+            // Show error message
+            echo '<div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="ph ph-warning me-2"></i> Đã xảy ra lỗi khi cập nhật hóa đơn. Vui lòng thử lại.
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>';
+        }
+    }
+}
+
 // Process invoice deletion if POST request
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_invoice') {
     // Verify nonce for security (optional, can be added later)
@@ -20,6 +61,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $wpdb->query('START TRANSACTION');
 
         try {
+            // Safeguard: do not delete paid or pending_vat invoices
+            $invoice_status = $wpdb->get_var($wpdb->prepare("SELECT status FROM $invoice_table WHERE id = %d", $invoice_id));
+            if (in_array($invoice_status, ['pending_vat', 'paid'])) {
+                throw new Exception("Không thể xóa hóa đơn đã thanh toán hoặc đang chờ xuất hóa đơn VAT.");
+            }
+
             // First delete related invoice items
             $wpdb->delete($invoice_items_table, array('invoice_id' => $invoice_id));
 
@@ -205,6 +252,7 @@ get_header();
                                     <option value="pending" <?php selected($status_filter, 'pending'); ?>>Chờ thanh toán
                                     </option>
                                     <option value="pending_completion" <?php selected($status_filter, 'pending_completion'); ?>>Chờ hoàn thành</option>
+                                    <option value="pending_vat" <?php selected($status_filter, 'pending_vat'); ?>>Chờ xuất hóa đơn</option>
                                     <option value="paid" <?php selected($status_filter, 'paid'); ?>>Đã thanh toán
                                     </option>
                                     <option value="canceled" <?php selected($status_filter, 'canceled'); ?>>Đã hủy
@@ -319,6 +367,9 @@ get_header();
                                                     case 'pending_completion':
                                                         echo '<span class="badge bg-info border-radius-9">Chờ hoàn thành</span>';
                                                         break;
+                                                    case 'pending_vat':
+                                                        echo '<span class="badge bg-light-info text-info border-info border-radius-9">Chờ xuất hóa đơn</span>';
+                                                        break;
                                                     case 'paid':
                                                         echo '<span class="badge bg-success border-radius-9">Đã thanh toán</span>';
                                                         break;
@@ -358,9 +409,17 @@ get_header();
                                                                 <i class="ph ph-clock fa-150p"></i>
                                                             </span>
                                                         <?php endif; ?>
+
+                                                        <?php if ($invoice->status == 'pending_vat'): ?>
+                                                            <a href="#" class="nav-link text-info me-2 mark-invoice-exported" title="Đã xuất hóa đơn"
+                                                                data-invoice-id="<?php echo $invoice->id; ?>"
+                                                                data-invoice-code="<?php echo $invoice->invoice_code; ?>">
+                                                                <i class="ph ph-file-text fa-150p"></i>
+                                                            </a>
+                                                        <?php endif; ?>
                                                     <?php endif; ?>
 
-                                                    <?php if (is_inova_admin()): ?>
+                                                    <?php if (is_inova_admin() && !in_array($invoice->status, ['pending_vat', 'paid'])): ?>
                                                         <a href="#" class="nav-link text-danger delete-invoice" title="Xóa hóa đơn"
                                                             data-invoice-id="<?php echo $invoice->id; ?>"
                                                             data-invoice-code="<?php echo $invoice->invoice_code; ?>">
@@ -499,6 +558,31 @@ get_header();
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
                     <button type="submit" class="btn btn-danger">Xác nhận xóa</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Mark Exported Modal -->
+<div class="modal fade" id="markExportedModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="mark-exported-form" method="post" action="">
+                <div class="modal-header">
+                    <h5 class="modal-title">Xác nhận xuất hóa đơn VAT</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="mark_invoice_exported">
+                    <input type="hidden" name="invoice_id" id="exported-invoice-id">
+
+                    <p>Bạn đang xác nhận đã xuất hóa đơn VAT thành công cho hóa đơn <strong id="exported-invoice-code"></strong>.</p>
+                    <p>Hệ thống sẽ chuyển trạng thái của hóa đơn này sang <strong>Đã thanh toán</strong>.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-success">Xác nhận đã xuất</button>
                 </div>
             </form>
         </div>

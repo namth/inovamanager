@@ -82,6 +82,26 @@ foreach ($stats as $stat) {
     $status_counts[$stat->status] = $stat->count;
 }
 
+// Get task stats for all services in a single query
+$tasks_table = $wpdb->prefix . 'im_service_tasks';
+$service_ids = wp_list_pluck($services, 'id');
+$task_stats_map = array();
+if (!empty($service_ids)) {
+    $ids_placeholder = implode(',', array_map('intval', $service_ids));
+    $task_stats_raw = $wpdb->get_results("
+        SELECT service_id,
+               SUM(CASE WHEN status != 'CANCELLED' THEN 1 ELSE 0 END) as total,
+               SUM(CASE WHEN status = 'DONE' THEN 1 ELSE 0 END) as done,
+               SUM(CASE WHEN status = 'IN_PROGRESS' THEN 1 ELSE 0 END) as in_progress
+        FROM {$tasks_table}
+        WHERE service_id IN ({$ids_placeholder})
+        GROUP BY service_id
+    ");
+    foreach ($task_stats_raw as $ts) {
+        $task_stats_map[$ts->service_id] = $ts;
+    }
+}
+
 get_header(); 
 ?>
 
@@ -202,6 +222,7 @@ get_header();
                                         <th>Khách hàng</th>
                                         <th>Người thực hiện</th>
                                         <th>Trạng thái</th>
+                                        <th>Tiến độ</th>
                                         <th>Giá trị</th>
                                         <th>Ngày tạo</th>
                                         <th>Thao tác</th>
@@ -210,6 +231,20 @@ get_header();
                                 <tbody>
                                     <?php if (!empty($services)): ?>
                                         <?php foreach ($services as $service): ?>
+                                        <?php
+                                        $next_step_url = '#';
+                                        if ($service->status === 'PENDING') {
+                                            $next_step_url = home_url('/bao-gia/?service_id=' . $service->id);
+                                        } elseif ($service->status === 'APPROVED') {
+                                            $next_step_url = home_url('/processing/?service_id=' . $service->id);
+                                        } elseif ($service->status === 'IN_PROGRESS') {
+                                            $next_step_url = home_url('/processing/?service_id=' . $service->id);
+                                        } elseif ($service->status === 'COMPLETED') {
+                                            $next_step_url = home_url('/completion/?service_id=' . $service->id);
+                                        } else {
+                                            $next_step_url = home_url('/service-request/?service_id=' . $service->id);
+                                        }
+                                        ?>
                                         <tr>
                                             <td>
                                                 <strong><?php echo esc_html($service->service_code); ?></strong>
@@ -229,7 +264,9 @@ get_header();
                                             </td>
                                             <td>
                                                 <div class="text-truncate" style="max-width: 200px;" title="<?php echo esc_attr($service->title); ?>">
-                                                    <?php echo esc_html($service->title); ?>
+                                                    <a href="<?php echo esc_url($next_step_url); ?>" class="fw-bold text-dark text-decoration-none hover-underline" style="transition: color 0.2s;">
+                                                        <?php echo esc_html($service->title); ?>
+                                                    </a>
                                                 </div>
                                             </td>
                                             <td>
@@ -258,6 +295,24 @@ get_header();
                                                 </span>
                                             </td>
                                             <td>
+                                                <?php
+                                                $ts = $task_stats_map[$service->id] ?? null;
+                                                if ($ts && $ts->total > 0):
+                                                    $percent = round(($ts->done / $ts->total) * 100);
+                                                    $bar_class = ($percent === 100) ? 'bg-success' : (($ts->in_progress > 0) ? 'bg-primary' : 'bg-warning');
+                                                ?>
+                                                    <div class="d-flex align-items-center gap-2 mb-1" style="min-width: 100px;">
+                                                        <div class="progress flex-grow-1" style="height: 6px; border-radius: 3px;">
+                                                            <div class="progress-bar <?php echo $bar_class; ?>" role="progressbar" style="width: <?php echo $percent; ?>%" aria-valuenow="<?php echo $percent; ?>" aria-valuemin="0" aria-valuemax="100"></div>
+                                                        </div>
+                                                        <span class="small fw-bold text-dark"><?php echo $percent; ?>%</span>
+                                                    </div>
+                                                    <small class="text-muted" style="font-size: 0.75rem;"><?php echo $ts->done; ?>/<?php echo $ts->total; ?> tasks</small>
+                                                <?php else: ?>
+                                                    <span class="text-muted small">Chưa có task</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
                                                 <?php if ($service->pricing_type === 'DAILY' && $service->estimated_manday && $service->daily_rate): ?>
                                                     <?php echo number_format($service->estimated_manday * $service->daily_rate); ?> VNĐ
                                                     <br><small class="text-muted"><?php echo $service->estimated_manday; ?> ngày</small>
@@ -274,46 +329,46 @@ get_header();
                                                 <div class="d-flex gap-2">
                                                 
                                                     <!-- Stage 1: Customer Request -->
-                                                    <a class="nav-link text-warning" href="<?php echo home_url('/service-request/?service_id=' . $service->id); ?>">
+                                                    <a class="nav-link text-warning" href="<?php echo home_url('/service-request/?service_id=' . $service->id); ?>" title="Xem yêu cầu">
                                                         <i class="ph ph-eye fa-150p"></i>
                                                     </a>
                                                     
-                                                    <!-- Stage 2: Quotation (if PENDING) -->
-                                                    <?php if ($service->status === 'PENDING'): ?>
-                                                    <a class="nav-link text-warning" href="<?php echo home_url('/bao-gia/?service_id=' . $service->id); ?>">
+                                                    <!-- Stage 2: Quotation -->
+                                                    <?php if (in_array($service->status, ['PENDING', 'APPROVED', 'IN_PROGRESS', 'COMPLETED'])): ?>
+                                                    <a class="nav-link text-warning" href="<?php echo home_url('/bao-gia/?service_id=' . $service->id); ?>" title="Báo giá">
                                                         <i class="ph ph-calculator fa-150p"></i>
                                                     </a>
                                                     <?php endif; ?>
                                                     
-                                                    <!-- Stage 3: Invoice (if APPROVED) -->
-                                                    <?php if ($service->status === 'APPROVED'): ?>
-                                                    <a class="nav-link text-warning" href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>">
+                                                    <!-- Stage 3: Invoice -->
+                                                    <?php if (in_array($service->status, ['APPROVED', 'IN_PROGRESS', 'COMPLETED'])): ?>
+                                                    <a class="nav-link text-warning" href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>" title="Tạo hóa đơn">
                                                         <i class="ph ph-receipt fa-150p"></i>
                                                     </a>
                                                     
-                                                    <!-- Add to Cart (if APPROVED) -->
+                                                    <!-- Add to Cart -->
                                                     <button class="nav-link text-success add-service-to-cart" data-service-id="<?php echo $service->id; ?>" title="Thêm vào giỏ hàng">
                                                         <i class="ph ph-shopping-cart fa-150p"></i>
                                                     </button>
                                                     <?php endif; ?>
                                                     
-                                                    <!-- Stage 4: Execution (if APPROVED or IN_PROGRESS) -->
-                                                    <?php if (in_array($service->status, ['APPROVED', 'IN_PROGRESS'])): ?>
-                                                    <a class="nav-link text-warning" href="<?php echo home_url('/processing/?service_id=' . $service->id); ?>">
+                                                    <!-- Stage 4: Execution -->
+                                                    <?php if (in_array($service->status, ['PENDING', 'APPROVED', 'IN_PROGRESS', 'COMPLETED'])): ?>
+                                                    <a class="nav-link text-warning" href="<?php echo home_url('/processing/?service_id=' . $service->id); ?>" title="Thực hiện & Quản lý Task">
                                                         <i class="ph ph-gear fa-150p"></i>
                                                     </a>
                                                     <?php endif; ?>
                                                     
-                                                    <!-- Stage 5: Completion (if IN_PROGRESS) -->
+                                                    <!-- Stage 5: Completion -->
                                                     <?php if ($service->status === 'IN_PROGRESS'): ?>
-                                                    <a class="nav-link text-warning" href="<?php echo home_url('/completion/?service_id=' . $service->id); ?>">
+                                                    <a class="nav-link text-warning" href="<?php echo home_url('/completion/?service_id=' . $service->id); ?>" title="Hoàn thành & Bàn giao">
                                                         <i class="ph ph-check-circle fa-150p"></i>
                                                     </a>
                                                     <?php endif; ?>
                                                     
-                                                    <!-- View completed (if COMPLETED) -->
+                                                    <!-- View completed -->
                                                     <?php if ($service->status === 'COMPLETED'): ?>
-                                                    <a class="nav-link text-warning" href="<?php echo home_url('/completion/?service_id=' . $service->id); ?>">
+                                                    <a class="nav-link text-warning" href="<?php echo home_url('/completion/?service_id=' . $service->id); ?>" title="Xem Báo cáo hoàn thành">
                                                         <i class="ph ph-file-text fa-150p"></i>
                                                     </a>
                                                     <?php endif; ?>
@@ -327,7 +382,7 @@ get_header();
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="9" class="text-center text-muted py-4">
+                                            <td colspan="10" class="text-center text-muted py-4">
                                                 <i class="ph ph-empty ph-2x mb-3"></i>
                                                 <br>Không có dịch vụ nào được tìm thấy
                                             </td>

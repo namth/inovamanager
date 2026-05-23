@@ -23,10 +23,10 @@ if ($service_id) {
         LEFT JOIN {$wpdb->prefix}im_domains d ON w.domain_id = d.id
         LEFT JOIN {$wpdb->prefix}im_users u1 ON s.requested_by = u1.id
         LEFT JOIN {$wpdb->prefix}im_users u2 ON s.assigned_to = u2.id
-        WHERE s.id = %d AND s.status = 'IN_PROGRESS'
+        WHERE s.id = %d
     ", $service_id));
     
-    if (!$service) {
+    if (!$service || !in_array($service->status, ['IN_PROGRESS', 'COMPLETED'])) {
         wp_redirect(home_url('/danh-sach-dich-vu/'));
         exit;
     }
@@ -44,6 +44,16 @@ if ($service_id) {
     if (count($invoices) > 1) {
         $second_invoice = $invoices[1]; // Second invoice (50% completion payment)
     }
+
+    // Get all tasks for this service
+    $tasks_table = $wpdb->prefix . 'im_service_tasks';
+    $tasks = $wpdb->get_results($wpdb->prepare("
+        SELECT t.*, u.name as creator_name
+        FROM $tasks_table t
+        LEFT JOIN {$wpdb->prefix}im_users u ON t.created_by = u.id
+        WHERE t.service_id = %d
+        ORDER BY t.sort_order ASC, t.created_at ASC
+    ", $service_id));
 }
 
 /* 
@@ -399,6 +409,48 @@ get_header();
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Task List -->
+                                <div class="card mt-3">
+                                    <div class="card-header bg-dark text-white py-2">
+                                        <h6 class="mb-0 fw-bold small"><i class="ph ph-list-checks me-2"></i>Nhiệm vụ thực hiện</h6>
+                                    </div>
+                                    <div class="card-body p-0">
+                                        <?php if (!empty($tasks)): ?>
+                                            <ul class="list-group list-group-flush">
+                                                <?php foreach ($tasks as $task): ?>
+                                                    <?php
+                                                    $status_badge = 'bg-secondary';
+                                                    $status_text = 'Chờ làm';
+                                                    if ($task->status === 'IN_PROGRESS') {
+                                                        $status_badge = 'bg-primary';
+                                                        $status_text = 'Đang làm';
+                                                    } elseif ($task->status === 'DONE') {
+                                                        $status_badge = 'bg-success';
+                                                        $status_text = 'Đã xong';
+                                                    } elseif ($task->status === 'CANCELLED') {
+                                                        $status_badge = 'bg-danger';
+                                                        $status_text = 'Đã hủy';
+                                                    }
+                                                    ?>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-start py-2">
+                                                        <div class="ms-2 me-auto text-wrap">
+                                                            <div class="fw-bold small <?php echo $task->status === 'DONE' ? 'text-decoration-line-through text-muted' : ''; ?> <?php echo $task->status === 'CANCELLED' ? 'text-decoration-line-through text-danger' : ''; ?>">
+                                                                <?php echo esc_html($task->title); ?>
+                                                            </div>
+                                                            <?php if ($task->description): ?>
+                                                                <small class="text-muted text-wrap d-block mt-1" style="font-size: 0.75rem;"><?php echo esc_html($task->description); ?></small>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                        <span class="badge <?php echo $status_badge; ?> rounded-pill ms-2" style="font-size: 0.7rem;"><?php echo $status_text; ?></span>
+                                                    </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        <?php else: ?>
+                                            <div class="p-3 text-center text-muted small">Không có nhiệm vụ nào</div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <?php else: ?>
@@ -421,6 +473,52 @@ get_header();
                                         <h6 class="fw-bold">Báo cáo hoàn thành:</h6>
                                         <div class="border p-3 bg-light mb-3">
                                             <?php echo nl2br(esc_html($service->notes)); ?>
+                                        </div>
+
+                                        <h6 class="fw-bold mt-4 mb-2"><i class="ph ph-list-checks me-2"></i>Nhiệm vụ đã thực hiện:</h6>
+                                        <div class="table-responsive mb-4 border rounded">
+                                            <table class="table table-hover mb-0">
+                                                <thead>
+                                                    <tr class="table-light">
+                                                        <th>Tên nhiệm vụ</th>
+                                                        <th>Mô tả</th>
+                                                        <th>Người tạo</th>
+                                                        <th>Trạng thái</th>
+                                                        <th>Hoàn thành lúc</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php if (!empty($tasks)): ?>
+                                                        <?php foreach ($tasks as $task): ?>
+                                                            <?php
+                                                            $status_badge = 'bg-secondary';
+                                                            $status_text = 'Chờ làm';
+                                                            if ($task->status === 'IN_PROGRESS') {
+                                                                $status_badge = 'bg-primary';
+                                                                $status_text = 'Đang làm';
+                                                            } elseif ($task->status === 'DONE') {
+                                                                $status_badge = 'bg-success';
+                                                                $status_text = 'Đã xong';
+                                                            } elseif ($task->status === 'CANCELLED') {
+                                                                $status_badge = 'bg-danger';
+                                                                $status_text = 'Đã hủy';
+                                                            }
+                                                            ?>
+                                                            <tr>
+                                                                <td><strong class="<?php echo $task->status === 'DONE' ? 'text-decoration-line-through text-muted' : ''; ?> <?php echo $task->status === 'CANCELLED' ? 'text-decoration-line-through text-danger' : ''; ?>"><?php echo esc_html($task->title); ?></strong></td>
+                                                                <td><small class="text-muted"><?php echo esc_html($task->description ?: 'Không có'); ?></small></td>
+                                                                <td><small><?php echo esc_html($task->creator_name ?: 'N/A'); ?></small></td>
+                                                                <td><span class="badge <?php echo $status_badge; ?> text-white"><?php echo $status_text; ?></span></td>
+                                                                <td><small><?php echo $task->completed_at ? date('d/m/Y H:i', strtotime($task->completed_at)) : 'N/A'; ?></small></td>
+                                                            </tr>
+                                                        <?php endforeach; ?>
+                                                    <?php else: ?>
+                                                        <tr>
+                                                            <td colspan="5" class="text-center text-muted">Không có nhiệm vụ nào</td>
+                                                        </tr>
+                                                    <?php endif; ?>
+                                                </tbody>
+                                            </table>
                                         </div>
 
                                         <div class="row">

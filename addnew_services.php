@@ -38,7 +38,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $service_code = sanitize_text_field($_POST['service_code']);
         $title = sanitize_text_field($_POST['title']);
         $description = sanitize_textarea_field($_POST['description']);
-        $pricing_type = sanitize_text_field($_POST['pricing_type']);
+        $pricing_type = !empty($_POST['pricing_type']) ? sanitize_text_field($_POST['pricing_type']) : null;
         $estimated_manday = !empty($_POST['estimated_manday']) ? floatval($_POST['estimated_manday']) : null;
         $daily_rate = !empty($_POST['daily_rate']) ? intval($_POST['daily_rate']) : null;
         $fixed_price = !empty($_POST['fixed_price']) ? intval($_POST['fixed_price']) : null;
@@ -63,17 +63,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $service_code = 'SV' . str_pad($website_id, 3, '0', STR_PAD_LEFT) . str_pad($next_number, 3, '0', STR_PAD_LEFT);
         }
         
-        // Validate required fields
-        if (!empty($website_id) && !empty($title) && !empty($description) && !empty($pricing_type) && !empty($requested_by)) {
-            // Validate pricing logic
-            $pricing_valid = false;
+        // Validate required fields (pricing is now optional)
+        if (!empty($website_id) && !empty($title) && !empty($description) && !empty($requested_by)) {
+            // Validate pricing logic only if pricing_type is provided
+            $pricing_valid = true;
             if ($pricing_type === 'DAILY') {
                 $pricing_valid = !empty($estimated_manday) && !empty($daily_rate);
-                $fixed_price = null; // Clear fixed_price for daily pricing
+                $fixed_price = null;
             } elseif ($pricing_type === 'FIXED') {
                 $pricing_valid = !empty($fixed_price);
-                $estimated_manday = null; // Clear daily fields for fixed pricing
+                $estimated_manday = null;
                 $daily_rate = null;
+            } else {
+                // No pricing type selected - clear all pricing fields
+                $pricing_type = null;
+                $estimated_manday = null;
+                $daily_rate = null;
+                $fixed_price = null;
             }
             
             if ($pricing_valid) {
@@ -110,7 +116,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $notification = '<div class="alert alert-warning" role="alert">Vui lòng điền đầy đủ thông tin giá theo loại định giá đã chọn.</div>';
             }
         } else {
-            $notification = '<div class="alert alert-warning" role="alert">Vui lòng điền đầy đủ thông tin bắt buộc.</div>';
+            $notification = '<div class="alert alert-warning" role="alert">Vui lòng điền đầy đủ thông tin bắt buộc (Website, Tiêu đề, Mô tả, Người yêu cầu).</div>';
         }
     }
 }
@@ -282,17 +288,24 @@ if ($wpdb->last_error) {
                                         </div>
                                         
                                         <div class="form-group mb-3">
-                                            <label class="fw-bold">Loại định giá <span class="text-danger">*</span></label>
+                                            <label class="fw-bold">Loại định giá</label>
+                                            <small class="text-muted ms-2">(Có thể báo giá sau)</small>
                                             <div class="d-flex gap-5 mt-2">
                                                 <div class="form-check mb-2">
+                                                    <label class="form-check-label" for="pricing_type_none">
+                                                        <input class="form-check-input" type="radio" name="pricing_type" id="pricing_type_none" value="" checked>
+                                                        Chưa báo giá
+                                                    </label>
+                                                </div>
+                                                <div class="form-check mb-2">
                                                     <label class="form-check-label" for="pricing_type_fixed">
-                                                        <input class="form-check-input" type="radio" name="pricing_type" id="pricing_type_fixed" value="FIXED" required checked>
+                                                        <input class="form-check-input" type="radio" name="pricing_type" id="pricing_type_fixed" value="FIXED">
                                                         Giá cố định
                                                     </label>
                                                 </div>
                                                 <div class="form-check">
                                                     <label class="form-check-label" for="pricing_type_daily">
-                                                        <input class="form-check-input" type="radio" name="pricing_type" id="pricing_type_daily" value="DAILY" required>
+                                                        <input class="form-check-input" type="radio" name="pricing_type" id="pricing_type_daily" value="DAILY">
                                                         Theo ngày công
                                                     </label>
                                                 </div>
@@ -418,12 +431,10 @@ jQuery(document).ready(function($) {
             
             if (value === 'DAILY') {
                 dailyPricing.style.display = 'block';
-                estimatedManday.setAttribute('required', 'required');
-                dailyRate.setAttribute('required', 'required');
             } else if (value === 'FIXED') {
                 fixedPricing.style.display = 'block';
-                fixedPrice.setAttribute('required', 'required');
             }
+            // value === '' means "Chưa báo giá" - no sections shown
             
             updatePricingSummary();
         });

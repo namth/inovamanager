@@ -368,6 +368,8 @@ get_header();
                                                 <select class="form-control" id="status" name="status">
                                                     <option value="PENDING" <?php echo ($service->status === 'PENDING') ? 'selected' : ''; ?>>Chờ xử lý</option>
                                                     <option value="APPROVED" <?php echo ($service->status === 'APPROVED') ? 'selected' : ''; ?>>Đã duyệt</option>
+                                                    <option value="IN_PROGRESS" <?php echo ($service->status === 'IN_PROGRESS') ? 'selected' : ''; ?>>Đang thực hiện</option>
+                                                    <option value="COMPLETED" <?php echo ($service->status === 'COMPLETED') ? 'selected' : ''; ?>>Hoàn thành</option>
                                                     <option value="CANCELLED" <?php echo ($service->status === 'CANCELLED') ? 'selected' : ''; ?>>Đã hủy</option>
                                                 </select>
                                             </div>

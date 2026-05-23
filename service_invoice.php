@@ -24,10 +24,10 @@ if ($service_id) {
         LEFT JOIN {$wpdb->prefix}im_domains d ON w.domain_id = d.id
         LEFT JOIN {$wpdb->prefix}im_users u1 ON s.requested_by = u1.id
         LEFT JOIN {$wpdb->prefix}im_users u2 ON s.assigned_to = u2.id
-        WHERE s.id = %d AND s.status = 'APPROVED'
+        WHERE s.id = %d
     ", $service_id));
 
-    if (!$service) {
+    if (!$service || !in_array($service->status, ['APPROVED', 'IN_PROGRESS', 'COMPLETED'])) {
         wp_redirect(home_url('/danh-sach-dich-vu/'));
         exit;
     }

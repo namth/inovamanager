@@ -1526,7 +1526,7 @@ function update_invoice_status_api($request)
 
     // Validate status value - convert to lowercase for consistency
     $status = strtolower($status);
-    $valid_statuses = array('draft', 'pending', 'pending_completion', 'paid', 'canceled');
+    $valid_statuses = array('draft', 'pending', 'pending_completion', 'paid', 'canceled', 'pending_vat');
     if (!in_array($status, $valid_statuses)) {
         return new WP_REST_Response(
             array(
@@ -1557,8 +1557,8 @@ function update_invoice_status_api($request)
     $update_data = array('status' => $status);
     $update_formats = array('%s');
 
-    // If status is paid, update payment information
-    if ($status === 'paid') {
+    // If status is paid or pending_vat, update payment information
+    if ($status === 'paid' || $status === 'pending_vat') {
         if (!$payment_date) {
             $payment_date = current_time('mysql');
         }

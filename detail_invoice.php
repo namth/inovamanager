@@ -232,6 +232,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                 $payment_notes = $payment_notes?"\n\nGhi chú thanh toán: " . $payment_notes:"";
 
                 try {
+                    // Check if invoice requires VAT
+                    $requires_vat = intval($wpdb->get_var($wpdb->prepare(
+                        "SELECT requires_vat_invoice FROM $invoice_table WHERE id = %d",
+                        $invoice_id
+                    )));
+                    $new_status = ($requires_vat === 1) ? 'pending_vat' : 'paid';
+
                     // Update invoice status
                     $invoice_result = $wpdb->update(
                         $invoice_table,
@@ -240,7 +247,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                             'payment_date' => $payment_date,
                             'payment_method' => $payment_method,
                             'notes' => $wpdb->get_var($wpdb->prepare("SELECT notes FROM $invoice_table WHERE id = %d", $invoice_id)) . $payment_notes,
-                            'status' => 'paid',
+                            'status' => $new_status,
                             'updated_at' => current_time('mysql')
                         ),
                         array('id' => $invoice_id)
@@ -416,11 +423,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
                     update_commissions_on_invoice_paid($invoice_id);
 
                     $wpdb->query('COMMIT');
-                    $success_message = 'Hóa đơn đã được đánh dấu là đã thanh toán. Ngày hết hạn của các sản phẩm/dịch vụ đã được cập nhật.';
+                    if ($new_status === 'pending_vat') {
+                        $success_message = 'Hóa đơn VAT đã được ghi nhận thanh toán và chuyển sang trạng thái "Chờ xuất hóa đơn". Dịch vụ đã được gia hạn.';
+                    } else {
+                        $success_message = 'Hóa đơn đã được đánh dấu là đã thanh toán. Ngày hết hạn của các sản phẩm/dịch vụ đã được cập nhật.';
+                    }
 
                 } catch (Exception $e) {
                     $wpdb->query('ROLLBACK');
                     $error_message = 'Có lỗi xảy ra khi cập nhật: ' . $e->getMessage();
+                }
+                break;
+
+            case 'mark_invoice_exported':
+                error_log('Processing mark_invoice_exported for invoice ID: ' . $invoice_id);
+                $wpdb->query('START TRANSACTION');
+                try {
+                    $invoice_result = $wpdb->update(
+                        $invoice_table,
+                        array(
+                            'status' => 'paid',
+                            'updated_at' => current_time('mysql')
+                        ),
+                        array('id' => $invoice_id)
+                    );
+
+                    if ($invoice_result === false) {
+                        throw new Exception('Failed to update invoice status to paid');
+                    }
+
+                    $wpdb->query('COMMIT');
+                    $success_message = 'Đã cập nhật trạng thái hóa đơn thành công sang Đã thanh toán (Đã xuất hóa đơn VAT).';
+                } catch (Exception $e) {
+                    $wpdb->query('ROLLBACK');
+                    $error_message = 'Có lỗi xảy ra: ' . $e->getMessage();
                 }
                 break;
                 
@@ -665,6 +701,7 @@ $final_total -= $total_commission_deduction;
 $status_options = array(
     'draft' => 'Nháp',
     'pending' => 'Chờ thanh toán',
+    'pending_vat' => 'Chờ xuất hóa đơn',
     'paid' => 'Đã thanh toán',
     'canceled' => 'Đã hủy',
     'pending_completion' => 'Chờ hoàn thành dịch vụ'
@@ -673,6 +710,7 @@ $status_options = array(
 $status_classes = array(
     'draft' => 'bg-secondary',
     'pending' => 'bg-warning',
+    'pending_vat' => 'bg-info',
     'paid' => 'bg-success',
     'canceled' => 'bg-danger',
     'pending_completion' => 'bg-info'
@@ -839,7 +877,7 @@ get_header();
                                              <th class="text-end">VAT <?php echo $group_vat_rate > 0 ? '(' . intval($group_vat_rate) . '%)' : ''; ?></th>
                                              <th class="text-end">Tổng</th>
                                              <?php endif; ?>
-                                             <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
+                                             <?php if ($can_edit_invoice && !in_array($invoice->status, ['paid', 'pending_vat'])): ?>
                                              <th class="text-center">Thao tác</th>
                                              <?php endif; ?>
                                          </tr>
@@ -914,7 +952,7 @@ get_header();
                                              <td class="text-end"><strong><?php echo number_format($display_data['final_total']); ?>đ</strong></td>
                                              <?php endif; ?>
                                              
-                                             <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
+                                             <?php if ($can_edit_invoice && !in_array($invoice->status, ['paid', 'pending_vat'])): ?>
                                              <td class="text-center">
                                                  <button type="button" class="btn btn-sm btn-danger delete-invoice-item" 
                                                          data-item-id="<?php echo $item->id; ?>"
@@ -1010,7 +1048,7 @@ get_header();
                     (get_option('payment_bank_code') && get_option('payment_account_number'))
                 );
 
-                if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
+                if ($has_qr_settings && !in_array($invoice->status, ['paid', 'pending_vat', 'canceled'])):
                      // Calculate remaining amount after paid amount
                      $remaining_amount = $final_total - $invoice->paid_amount;
 
@@ -1137,7 +1175,11 @@ get_header();
                         
                         <div class="d-flex flex-column">
                              <?php if ($can_edit_invoice): ?>
-                             <?php if ($invoice->status !== 'paid'): ?>
+                             <?php if ($invoice->status === 'pending_vat'): ?>
+                             <button type="button" class="btn btn-success mb-2" data-bs-toggle="modal" data-bs-target="#markExportedModalDetail">
+                                 <i class="ph ph-file-text me-2"></i>Đã xuất hóa đơn
+                             </button>
+                             <?php elseif ($invoice->status !== 'paid'): ?>
                              <button type="button" class="btn btn-success mb-2" data-bs-toggle="modal" data-bs-target="#paymentModal">
                                  <i class="ph ph-credit-card me-2"></i>Đánh dấu đã thanh toán
                              </button>
@@ -1148,7 +1190,7 @@ get_header();
                              </button>
                              <?php endif; ?>
                              
-                             <?php if ($can_edit_invoice && $invoice->status !== 'paid'): ?>
+                             <?php if ($can_edit_invoice && !in_array($invoice->status, ['paid', 'pending_vat'])): ?>
                              <button type="button" class="btn btn-info mb-2" data-bs-toggle="modal" data-bs-target="#mergeInvoiceModal">
                                  <i class="ph ph-plus me-2"></i>Gộp hóa đơn
                              </button>
@@ -1422,13 +1464,23 @@ get_header();
             </div>
             
             <div class="modal-body">
-                <p class="text-muted mb-3">Chọn khách hàng mới cho hóa đơn này. Lưu ý: Cài đặt VAT sẽ được cập nhật theo khách hàng mới.</p>
+                <p class="text-muted mb-3">Chọn khách hàng mới cho hóa đơn này.</p>
                 
                 <div class="mb-3">
                     <label class="form-label">Tìm khách hàng <span class="text-danger">*</span></label>
                     <select id="new_customer_id" class="form-select select2-customer" style="width: 100%">
                         <option value="">-- Tìm theo tên hoặc mã --</option>
                     </select>
+                </div>
+
+                <div class="form-check mb-3">
+                    <label class="form-check-label text-warning fw-bold" for="change_services_owner">
+                        <input class="form-check-input" type="checkbox" id="change_services_owner" value="1">
+                        Thay đổi chủ sở hữu của dịch vụ
+                    </label>
+                    <small class="form-text text-muted d-block mt-1">
+                        Nếu chọn, các dịch vụ liên kết trong hóa đơn này cũng sẽ tự động đổi sang chủ sở hữu mới.
+                    </small>
                 </div>
             </div>
             
@@ -1443,7 +1495,44 @@ get_header();
 </div>
 <?php endif; ?>
 
-<?php if ($auto_open_payment && $invoice->status !== 'paid'): ?>
+<!-- Mark Exported Modal -->
+<?php if ($can_edit_invoice): ?>
+<div class="modal fade" id="markExportedModalDetail" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content border-0 shadow-lg">
+            <form method="POST">
+                <?php wp_nonce_field('invoice_action', 'action_nonce'); ?>
+                <input type="hidden" name="action" value="mark_invoice_exported">
+                
+                <div class="modal-header bg-success text-white border-0 py-3">
+                    <h5 class="modal-title d-flex align-items-center">
+                        <i class="ph ph-file-text me-2 fs-4"></i> Xác nhận Đã xuất hóa đơn
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                
+                <div class="modal-body p-4 text-center">
+                    <div class="mb-3 text-success">
+                        <i class="ph ph-check-circle display-4"></i>
+                    </div>
+                    <h5 class="mb-3 text-dark fw-bold">Hoàn tất quy trình xuất hóa đơn VAT?</h5>
+                    <p class="text-muted mb-0">Bạn có chắc chắn muốn xác nhận hóa đơn mã <strong class="text-primary"><?php echo esc_html($invoice->invoice_code); ?></strong> đã được xuất VAT và chuyển trạng thái sang <strong class="text-success">Đã thanh toán</strong>?</p>
+                    <p class="text-danger small mt-2"><i class="ph ph-warning me-1"></i> Lưu ý: Thao tác này sẽ chỉ cập nhật trạng thái hóa đơn và KHÔNG gia hạn lại dịch vụ hay tính lại hoa hồng.</p>
+                </div>
+                
+                <div class="modal-footer border-0 bg-light py-3 d-flex justify-content-end">
+                    <button type="button" class="btn btn-secondary px-4 border-radius-9" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-success px-4 border-radius-9">
+                        <i class="ph ph-check me-2"></i> Xác nhận
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($auto_open_payment && !in_array($invoice->status, ['paid', 'pending_vat'])): ?>
 <script>
 jQuery(document).ready(function($) {
     console.log('Auto-opening payment modal...');
@@ -1801,6 +1890,7 @@ jQuery(document).ready(function($) {
     $('#changeCustomerSubmitBtn').on('click', function() {
         var newUserId = $('#new_customer_id').val();
         var invoiceId = <?php echo $invoice_id; ?>;
+        var changeServicesOwner = $('#change_services_owner').is(':checked') ? 1 : 0;
         
         if (!newUserId) return;
         
@@ -1816,7 +1906,8 @@ jQuery(document).ready(function($) {
             data: {
                 action: 'change_invoice_customer',
                 invoice_id: invoiceId,
-                new_user_id: newUserId
+                new_user_id: newUserId,
+                change_services_owner: changeServicesOwner
             },
             success: function(response) {
                 if (response.success) {

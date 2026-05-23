@@ -157,7 +157,8 @@ $status_options = array(
     'pending' => 'Chờ thanh toán',
     'paid' => 'Đã thanh toán',
     'canceled' => 'Đã hủy',
-    'pending_completion' => 'Chờ hoàn thành dịch vụ'
+    'pending_completion' => 'Chờ hoàn thành dịch vụ',
+    'pending_vat' => 'Chờ xuất hóa đơn'
 );
 
 $status_classes = array(
@@ -165,7 +166,8 @@ $status_classes = array(
     'pending' => 'bg-warning',
     'paid' => 'bg-success',
     'canceled' => 'bg-danger',
-    'pending_completion' => 'bg-info'
+    'pending_completion' => 'bg-info',
+    'pending_vat' => 'bg-light-info text-info border-info'
 );
 
 // Get site logo
@@ -521,6 +523,8 @@ get_header('nologin');
                     $badge_class = 'bg-light-warning text-warning';
                 } elseif ($invoice->status === 'canceled') {
                     $badge_class = 'bg-light-danger text-danger';
+                } elseif ($invoice->status === 'pending_vat') {
+                    $badge_class = 'bg-light-info text-info border-info';
                 }
                 ?>
                 <span class="btn btn-sm <?php echo $badge_class; ?>"
@@ -796,7 +800,7 @@ get_header('nologin');
                     (get_option('payment_bank_code') && get_option('payment_account_number'))
                 );
 
-                if ($has_qr_settings && $invoice->status !== 'paid' && $invoice->status !== 'canceled'):
+                if ($has_qr_settings && !in_array($invoice->status, ['paid', 'canceled', 'pending_vat'])):
                     // QR code is generated based on $final_total which already includes deduction
                     $remaining_amount = $final_total - $invoice->paid_amount;
                     $qr_add_info = 'HD ' . $invoice->invoice_code;

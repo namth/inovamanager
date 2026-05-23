@@ -3015,6 +3015,7 @@ function change_invoice_customer_ajax() {
 
     $invoice_id = intval($_POST['invoice_id']);
     $new_user_id = intval($_POST['new_user_id']);
+    $change_services_owner = isset($_POST['change_services_owner']) ? intval($_POST['change_services_owner']) : 0;
     
     if ($new_user_id <= 0) {
         wp_send_json_error(array('message' => 'ID khách hàng không hợp lệ.'));
@@ -3038,17 +3039,451 @@ function change_invoice_customer_ajax() {
         return;
     }
 
-    // Update invoice
-    $updated = $wpdb->update($invoice_table, array(
-        'user_id' => $new_user_id,
-        'requires_vat_invoice' => $new_user->requires_vat_invoice,
-        'updated_at' => current_time('mysql')
-    ), array('id' => $invoice_id));
+    try {
+        $wpdb->query('START TRANSACTION');
 
-    if ($updated !== false) {
-        wp_send_json_success(array('message' => 'Thay đổi khách hàng thành công. Đang cập nhật lại hóa đơn...'));
-    } else {
-        wp_send_json_error(array('message' => 'Lỗi khi cập nhật cơ sở dữ liệu.'));
+        // Update invoice
+        $updated = $wpdb->update($invoice_table, array(
+            'user_id' => $new_user_id,
+            'requires_vat_invoice' => $new_user->requires_vat_invoice,
+            'updated_at' => current_time('mysql')
+        ), array('id' => $invoice_id));
+
+        if ($updated === false) {
+            throw new Exception('Lỗi khi cập nhật cơ sở dữ liệu hóa đơn.');
+        }
+
+        // If requested, sync owner of related services
+        if ($change_services_owner === 1) {
+            $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+            $items = $wpdb->get_results($wpdb->prepare(
+                "SELECT service_type, service_id FROM $invoice_items_table WHERE invoice_id = %d AND service_id IS NOT NULL",
+                $invoice_id
+            ));
+
+            if (!empty($items)) {
+                foreach ($items as $item) {
+                    $update_res = true;
+                    switch ($item->service_type) {
+                        case 'domain':
+                            $update_res = $wpdb->update(
+                                $wpdb->prefix . 'im_domains',
+                                array('owner_user_id' => $new_user_id, 'updated_at' => current_time('mysql')),
+                                array('id' => $item->service_id)
+                            );
+                            break;
+                        case 'hosting':
+                            $update_res = $wpdb->update(
+                                $wpdb->prefix . 'im_hostings',
+                                array('owner_user_id' => $new_user_id, 'updated_at' => current_time('mysql')),
+                                array('id' => $item->service_id)
+                            );
+                            break;
+                        case 'maintenance':
+                            $update_res = $wpdb->update(
+                                $wpdb->prefix . 'im_maintenance_packages',
+                                array('owner_user_id' => $new_user_id, 'updated_at' => current_time('mysql')),
+                                array('id' => $item->service_id)
+                            );
+                            break;
+                        case 'website_service':
+                            $update_res = $wpdb->update(
+                                $wpdb->prefix . 'im_website_services',
+                                array('requested_by' => $new_user_id, 'updated_at' => current_time('mysql')),
+                                array('id' => $item->service_id)
+                            );
+                            break;
+                    }
+                    if ($update_res === false) {
+                        throw new Exception("Lỗi khi đồng bộ chủ sở hữu cho dịch vụ loại {$item->service_type} có ID {$item->service_id}.");
+                    }
+                }
+            }
+        }
+
+        $wpdb->query('COMMIT');
+        wp_send_json_success(array('message' => 'Thay đổi khách hàng và đồng bộ dịch vụ thành công. Đang cập nhật lại hóa đơn...'));
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        wp_send_json_error(array('message' => $e->getMessage()));
     }
 }
 add_action('wp_ajax_change_invoice_customer', 'change_invoice_customer_ajax');
+
+// ==========================================
+// SERVICE TASKS AJAX HANDLERS
+// ==========================================
+
+/**
+ * Add a new task to a website service
+ */
+function add_service_task_ajax()
+{
+    global $wpdb;
+
+    if (!is_inova_admin()) {
+        wp_send_json_error(array('message' => 'Chỉ quản trị viên mới có quyền thêm nhiệm vụ (task).'));
+        return;
+    }
+
+    $service_id = !empty($_POST['service_id']) ? intval($_POST['service_id']) : 0;
+    $title = !empty($_POST['title']) ? sanitize_text_field($_POST['title']) : '';
+    $description = !empty($_POST['description']) ? sanitize_textarea_field($_POST['description']) : null;
+
+    if (!$service_id || empty($title)) {
+        wp_send_json_error(array('message' => 'Thiếu thông tin bắt buộc (service_id, title)'));
+        return;
+    }
+
+    // Verify service exists
+    $service_table = $wpdb->prefix . 'im_website_services';
+    $service = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, status FROM {$service_table} WHERE id = %d",
+        $service_id
+    ));
+
+    if (!$service) {
+        wp_send_json_error(array('message' => 'Không tìm thấy dịch vụ'));
+        return;
+    }
+
+    // Get max sort_order for this service
+    $tasks_table = $wpdb->prefix . 'im_service_tasks';
+    $max_order = $wpdb->get_var($wpdb->prepare(
+        "SELECT COALESCE(MAX(sort_order), 0) FROM {$tasks_table} WHERE service_id = %d",
+        $service_id
+    ));
+
+    // Get current admin user id from im_users
+    $current_user = get_inova_user();
+    $created_by = $current_user ? $current_user->id : null;
+
+    // Insert new task
+    $result = $wpdb->insert(
+        $tasks_table,
+        array(
+            'service_id' => $service_id,
+            'title' => $title,
+            'description' => $description,
+            'status' => 'TODO',
+            'sort_order' => $max_order + 1,
+            'created_by' => $created_by,
+            'created_at' => current_time('mysql'),
+            'updated_at' => current_time('mysql')
+        ),
+        array('%d', '%s', '%s', '%s', '%d', '%d', '%s', '%s')
+    );
+
+    if ($result === false) {
+        wp_send_json_error(array('message' => 'Không thể thêm task: ' . $wpdb->last_error));
+        return;
+    }
+
+    $task_id = $wpdb->insert_id;
+
+    // Check if the service status is PENDING or COMPLETED
+    $service_status_changed = false;
+    $new_service_status = $service->status;
+    if (in_array($service->status, ['PENDING', 'COMPLETED'])) {
+        $wpdb->update(
+            $service_table,
+            array(
+                'status' => 'IN_PROGRESS',
+                'start_date' => date('Y-m-d'),
+                'updated_at' => current_time('mysql')
+            ),
+            array('id' => $service_id)
+        );
+        $service_status_changed = true;
+        $new_service_status = 'IN_PROGRESS';
+    }
+
+    // Get the newly created task with creator name
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT t.*, u.name as creator_name 
+         FROM {$tasks_table} t
+         LEFT JOIN {$wpdb->prefix}im_users u ON t.created_by = u.id
+         WHERE t.id = %d",
+        $task_id
+    ));
+
+    // Get updated task stats
+    $stats = get_service_task_stats($service_id);
+
+    wp_send_json_success(array(
+        'message' => 'Task đã được thêm thành công',
+        'task' => $task,
+        'stats' => $stats,
+        'new_service_status' => $new_service_status,
+        'service_status_changed' => $service_status_changed
+    ));
+}
+add_action('wp_ajax_add_service_task', 'add_service_task_ajax');
+
+/**
+ * Update a service task (status, title, description)
+ * Auto-transitions: 
+ *   - Any task → IN_PROGRESS/DONE → service auto IN_PROGRESS
+ *   - All tasks DONE → service auto COMPLETED
+ */
+function update_service_task_ajax()
+{
+    global $wpdb;
+
+    $task_id = !empty($_POST['task_id']) ? intval($_POST['task_id']) : 0;
+
+    if (!$task_id) {
+        wp_send_json_error(array('message' => 'Thiếu task ID'));
+        return;
+    }
+
+    $tasks_table = $wpdb->prefix . 'im_service_tasks';
+    $service_table = $wpdb->prefix . 'im_website_services';
+
+    // Get current task
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$tasks_table} WHERE id = %d",
+        $task_id
+    ));
+
+    if (!$task) {
+        wp_send_json_error(array('message' => 'Không tìm thấy task'));
+        return;
+    }
+
+    // Build update data
+    $update_data = array('updated_at' => current_time('mysql'));
+    $update_format = array('%s');
+
+    if (isset($_POST['status'])) {
+        $new_status = sanitize_text_field($_POST['status']);
+        if (!in_array($new_status, ['TODO', 'IN_PROGRESS', 'DONE', 'CANCELLED'])) {
+            wp_send_json_error(array('message' => 'Trạng thái không hợp lệ'));
+            return;
+        }
+        $update_data['status'] = $new_status;
+        $update_format[] = '%s';
+
+        // Set completed_at when marking as DONE
+        if ($new_status === 'DONE') {
+            $update_data['completed_at'] = current_time('mysql');
+            $update_format[] = '%s';
+        } else {
+            // Clear completed_at if moving away from DONE
+            $update_data['completed_at'] = null;
+            $update_format[] = '%s';
+        }
+    }
+
+    if (isset($_POST['title'])) {
+        $update_data['title'] = sanitize_text_field($_POST['title']);
+        $update_format[] = '%s';
+    }
+
+    if (isset($_POST['description'])) {
+        $update_data['description'] = sanitize_textarea_field($_POST['description']);
+        $update_format[] = '%s';
+    }
+
+    // Start transaction for atomic update
+    $wpdb->query('START TRANSACTION');
+
+    try {
+        // Update the task
+        $result = $wpdb->update(
+            $tasks_table,
+            $update_data,
+            array('id' => $task_id),
+            $update_format,
+            array('%d')
+        );
+
+        if ($result === false) {
+            throw new Exception('Không thể cập nhật task');
+        }
+
+        // Auto-transition service status
+        $service = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$service_table} WHERE id = %d",
+            $task->service_id
+        ));
+
+        $service_status_changed = false;
+        $new_service_status = $service->status;
+
+        if ($service) {
+            $new_task_status = isset($update_data['status']) ? $update_data['status'] : $task->status;
+
+            // Rule 1: If any task moves to IN_PROGRESS or DONE, and service is PENDING → auto IN_PROGRESS
+            if (in_array($new_task_status, ['IN_PROGRESS', 'DONE']) && $service->status === 'PENDING') {
+                $wpdb->update(
+                    $service_table,
+                    array(
+                        'status' => 'IN_PROGRESS',
+                        'start_date' => date('Y-m-d'),
+                        'updated_at' => current_time('mysql')
+                    ),
+                    array('id' => $task->service_id)
+                );
+                $service_status_changed = true;
+                $new_service_status = 'IN_PROGRESS';
+            }
+
+            // Rule 1b: If a task status changes from DONE to TODO/IN_PROGRESS (reopened), and service is COMPLETED → auto IN_PROGRESS
+            if ($task->status === 'DONE' && in_array($new_task_status, ['TODO', 'IN_PROGRESS']) && $service->status === 'COMPLETED') {
+                $wpdb->update(
+                    $service_table,
+                    array(
+                        'status' => 'IN_PROGRESS',
+                        'updated_at' => current_time('mysql')
+                    ),
+                    array('id' => $task->service_id)
+                );
+                $service_status_changed = true;
+                $new_service_status = 'IN_PROGRESS';
+            }
+
+            // Rule 2: Check if ALL non-cancelled tasks are DONE → auto COMPLETED
+            if ($new_task_status === 'DONE') {
+                $non_cancelled_count = $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$tasks_table} WHERE service_id = %d AND status != 'CANCELLED'",
+                    $task->service_id
+                ));
+
+                $done_count = $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$tasks_table} WHERE service_id = %d AND status = 'DONE'",
+                    $task->service_id
+                ));
+
+                if ($non_cancelled_count > 0 && $done_count == $non_cancelled_count) {
+                    $wpdb->update(
+                        $service_table,
+                        array(
+                            'status' => 'COMPLETED',
+                            'completion_date' => date('Y-m-d'),
+                            'updated_at' => current_time('mysql')
+                        ),
+                        array('id' => $task->service_id)
+                    );
+                    $service_status_changed = true;
+                    $new_service_status = 'COMPLETED';
+                }
+            }
+        }
+
+        $wpdb->query('COMMIT');
+
+        // Get updated task stats
+        $stats = get_service_task_stats($task->service_id);
+
+        wp_send_json_success(array(
+            'message' => 'Task đã được cập nhật',
+            'task_id' => $task_id,
+            'service_status_changed' => $service_status_changed,
+            'new_service_status' => $new_service_status,
+            'stats' => $stats
+        ));
+
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        wp_send_json_error(array('message' => $e->getMessage()));
+    }
+}
+add_action('wp_ajax_update_service_task', 'update_service_task_ajax');
+
+/**
+ * Delete a service task
+ */
+function delete_service_task_ajax()
+{
+    global $wpdb;
+
+    if (!is_inova_admin()) {
+        wp_send_json_error(array('message' => 'Chỉ quản trị viên mới có quyền xóa nhiệm vụ (task).'));
+        return;
+    }
+
+    $task_id = !empty($_POST['task_id']) ? intval($_POST['task_id']) : 0;
+
+    if (!$task_id) {
+        wp_send_json_error(array('message' => 'Thiếu task ID'));
+        return;
+    }
+
+    $tasks_table = $wpdb->prefix . 'im_service_tasks';
+
+    // Get task to find service_id
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$tasks_table} WHERE id = %d",
+        $task_id
+    ));
+
+    if (!$task) {
+        wp_send_json_error(array('message' => 'Không tìm thấy task'));
+        return;
+    }
+
+    $result = $wpdb->delete(
+        $tasks_table,
+        array('id' => $task_id),
+        array('%d')
+    );
+
+    if ($result) {
+        // Get updated stats
+        $stats = get_service_task_stats($task->service_id);
+
+        wp_send_json_success(array(
+            'message' => 'Task đã được xóa',
+            'stats' => $stats
+        ));
+    } else {
+        wp_send_json_error(array('message' => 'Không thể xóa task'));
+    }
+}
+add_action('wp_ajax_delete_service_task', 'delete_service_task_ajax');
+
+/**
+ * Helper: Get task statistics for a service
+ */
+function get_service_task_stats($service_id)
+{
+    global $wpdb;
+    $tasks_table = $wpdb->prefix . 'im_service_tasks';
+
+    $total = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tasks_table} WHERE service_id = %d AND status != 'CANCELLED'",
+        $service_id
+    ));
+
+    $done = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tasks_table} WHERE service_id = %d AND status = 'DONE'",
+        $service_id
+    ));
+
+    $in_progress = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tasks_table} WHERE service_id = %d AND status = 'IN_PROGRESS'",
+        $service_id
+    ));
+
+    $todo = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tasks_table} WHERE service_id = %d AND status = 'TODO'",
+        $service_id
+    ));
+
+    $cancelled = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tasks_table} WHERE service_id = %d AND status = 'CANCELLED'",
+        $service_id
+    ));
+
+    $percentage = $total > 0 ? round(($done / $total) * 100) : 0;
+
+    return array(
+        'total' => intval($total),
+        'done' => intval($done),
+        'in_progress' => intval($in_progress),
+        'todo' => intval($todo),
+        'cancelled' => intval($cancelled),
+        'percentage' => $percentage
+    );
+}

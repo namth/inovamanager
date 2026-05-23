@@ -73,14 +73,16 @@ get_header();
                                                             'pending' => 'bg-warning',
                                                             'paid' => 'bg-success',
                                                             'canceled' => 'bg-danger',
-                                                            'pending_completion' => 'bg-info'
+                                                            'pending_completion' => 'bg-info',
+                                                            'pending_vat' => 'bg-light-info text-info border-info'
                                                         ];
                                                         $status_labels = [
                                                             'draft' => 'Nháp',
                                                             'pending' => 'Chờ thanh toán',
                                                             'paid' => 'Đã thanh toán',
                                                             'canceled' => 'Đã hủy',
-                                                            'pending_completion' => 'Chờ hoàn thành'
+                                                            'pending_completion' => 'Chờ hoàn thành',
+                                                            'pending_vat' => 'Chờ xuất hóa đơn'
                                                         ];
                                                         $status_class = $status_classes[$invoice->status] ?? 'bg-secondary';
                                                         $status_label = $status_labels[$invoice->status] ?? $invoice->status;
