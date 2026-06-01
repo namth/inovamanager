@@ -633,7 +633,13 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
             WHEN ii.service_type = 'hosting' THEN (SELECT billing_cycle_months FROM $hostings_table WHERE id = ii.service_id)
             WHEN ii.service_type = 'maintenance' THEN (SELECT billing_cycle_months FROM $maintenance_table WHERE id = ii.service_id)
             ELSE NULL
-        END AS billing_cycle_months
+        END AS billing_cycle_months,
+        CASE
+            WHEN ii.service_type = 'domain' THEN (SELECT status FROM $domains_table WHERE id = ii.service_id)
+            WHEN ii.service_type = 'hosting' THEN (SELECT status FROM $hostings_table WHERE id = ii.service_id)
+            WHEN ii.service_type = 'maintenance' THEN (SELECT status FROM $maintenance_table WHERE id = ii.service_id)
+            ELSE NULL
+        END AS service_status
     FROM
         $invoice_items_table ii
     LEFT JOIN
@@ -900,7 +906,9 @@ get_header();
                                              <?php if ($product_type !== 'website_service'): ?>
                                              <td class="text-center">
                                                  <?php 
-                                                 if ($item->expiry_date):
+                                                 if (!empty($item->service_status) && strtoupper($item->service_status) === 'NEW'):
+                                                     echo !empty($item->start_date) ? date('d/m/Y', strtotime($item->start_date)) : '<span class="text-muted">-</span>';
+                                                 elseif ($item->expiry_date):
                                                      echo date('d/m/Y', strtotime($item->expiry_date));
                                                  else:
                                                      echo '<span class="text-muted">-</span>';
@@ -909,7 +917,9 @@ get_header();
                                              </td>
                                              <td class="text-center">
                                                  <?php 
-                                                 if ($item->expiry_date && $item->billing_cycle_months):
+                                                 if (!empty($item->service_status) && strtoupper($item->service_status) === 'NEW'):
+                                                     echo !empty($item->end_date) ? date('d/m/Y', strtotime($item->end_date)) : '<span class="text-muted">-</span>';
+                                                 elseif ($item->expiry_date && $item->billing_cycle_months):
                                                      // Calculate renewal date
                                                      $renewal_date = date('d/m/Y', strtotime($item->expiry_date . ' + ' . $item->billing_cycle_months . ' months'));
                                                      echo $renewal_date;

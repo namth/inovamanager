@@ -111,6 +111,7 @@ $query = "
     GROUP BY
         h.id
     ORDER BY
+        CASE WHEN h.status = 'NEW' THEN 0 ELSE 1 END ASC,
         h.expiry_date ASC
 ";
 

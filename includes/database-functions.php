@@ -917,7 +917,7 @@ function auto_create_renewal_invoices_callback()
             $items[] = array(
                 'service_type' => 'domain',
                 'service_id' => $domain->id,
-                'description' => 'Gia hạn tên miền: ' . $domain->domain_name,
+                'description' => 'Gia hạn tên miền ' . $domain->domain_name,
                 'unit_price' => $unit_price,
                 'quantity' => $quantity,
                 'item_total' => $item_total,
@@ -951,7 +951,7 @@ function auto_create_renewal_invoices_callback()
             $items[] = array(
                 'service_type' => 'hosting',
                 'service_id' => $hosting->id,
-                'description' => 'Gia hạn hosting: ' . $hosting_code,
+                'description' => 'Gói hosting cho ' . ($hosting->website_names ?: $hosting_code),
                 'unit_price' => $unit_price,
                 'quantity' => $quantity,
                 'item_total' => $item_total,
@@ -986,7 +986,7 @@ function auto_create_renewal_invoices_callback()
             $items[] = array(
                 'service_type' => 'maintenance',
                 'service_id' => $maintenance->id,
-                'description' => 'Gia hạn bảo trì: ' . $maintenance_code,
+                'description' => 'Gói bảo mật định kỳ ' . ($maintenance->website_names ?: $maintenance_code),
                 'unit_price' => $unit_price,
                 'quantity' => $quantity,
                 'item_total' => $item_total,
@@ -2140,9 +2140,10 @@ function build_renewal_products($items_data, $type)
         }
 
         $website_name = null;
-        if (in_array($type, ['hosting', 'maintenance'])) {
+        if (in_array($type, ['hosting', 'maintenance', 'domain'])) {
+            $column = $type === 'hosting' ? 'hosting_id' : ($type === 'maintenance' ? 'maintenance_package_id' : 'domain_id');
             $website_name = $wpdb->get_var($wpdb->prepare(
-                "SELECT name FROM $websites_table WHERE " . ($type === 'hosting' ? 'hosting_id' : 'maintenance_package_id') . " = %d LIMIT 1",
+                "SELECT name FROM $websites_table WHERE {$column} = %d LIMIT 1",
                 $item->id
             ));
         } elseif ($type === 'website_service' && isset($item->website_name)) {
@@ -2184,7 +2185,7 @@ function build_renewal_products($items_data, $type)
             'period_type' => $type === 'domain' ? 'years' : 'months',
             'expiry_date' => $expiry_date,
             'website_name' => $website_name,
-            'description' => build_service_description($type, $service_name, $product_name, $period),
+            'description' => build_service_description($type, $service_name, $product_name, $period, $website_name),
             'start_date' => $start_date,
             'end_date' => $end_date,
             'discount_amount' => floatval($item->discount_amount ?? 0),
@@ -2193,17 +2194,17 @@ function build_renewal_products($items_data, $type)
     }
 }
 
-function build_service_description($type, $nameOrItem, $product_name = '', $period = 1)
+function build_service_description($type, $nameOrItem, $product_name = '', $period = 1, $website_name = null)
 {
     $service_name = is_string($nameOrItem) ? $nameOrItem : (isset($nameOrItem->domain_name) ? $nameOrItem->domain_name : '');
 
     switch ($type) {
         case 'domain':
-            return 'Gia hạn tên miền ' . $service_name . ' - ' . intval($period) . ' năm';
+            return 'Gia hạn tên miền ' . $service_name;
         case 'hosting':
-            return 'Gói hosting ' . $product_name . ' - ' . round($period / 12, 2) . ' năm';
+            return 'Gói hosting cho ' . ($website_name ?: ($product_name ?: $service_name));
         case 'maintenance':
-            return 'Bảo trì, bảo dưỡng, chăm sóc website ' . $product_name . ' - ' . round($period / 12, 2) . ' năm';
+            return 'Gói bảo mật định kỳ ' . ($website_name ?: ($product_name ?: $service_name));
         case 'website_service':
             return 'Dịch vụ website: ' . $service_name;
         default:

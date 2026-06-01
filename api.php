@@ -1612,6 +1612,7 @@ function update_invoice_status_api($request)
         $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
         $service_table = $wpdb->prefix . 'im_services';
         $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
+        $websites_table = $wpdb->prefix . 'im_websites';
         
         $invoice_items_to_cancel = $wpdb->get_results($wpdb->prepare("
             SELECT service_type, service_id
@@ -1642,7 +1643,6 @@ function update_invoice_status_api($request)
         }
         
         // Check and soft delete affected websites
-        $websites_table = $wpdb->prefix . 'im_websites';
         if (!empty($affected_website_ids)) {
             $affected_website_ids = array_unique($affected_website_ids);
             foreach ($affected_website_ids as $website_id) {

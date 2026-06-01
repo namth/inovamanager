@@ -73,6 +73,7 @@ function api_create_bulk_invoice($request)
     $hostings_table = $wpdb->prefix . 'im_hostings';
     $maintenance_table = $wpdb->prefix . 'im_maintenance_packages';
     $product_catalog_table = $wpdb->prefix . 'im_product_catalog';
+    $websites_table = $wpdb->prefix . 'im_websites';
 
     // Generate invoice code
     $invoice_code = generate_invoice_code($user_id);
@@ -112,7 +113,7 @@ function api_create_bulk_invoice($request)
                     $item_data = [
                         'service_type' => 'domain',
                         'service_id' => $service_id,
-                        'description' => 'Gia hạn tên miền ' . $domain->domain_name . ' - 1 năm',
+                        'description' => 'Gia hạn tên miền ' . $domain->domain_name,
                         'unit_price' => $price,
                         'quantity' => $quantity,
                         'item_total' => $price * $quantity,
@@ -124,10 +125,12 @@ function api_create_bulk_invoice($request)
 
             case 'hosting':
                 $hosting = $wpdb->get_row($wpdb->prepare("
-                    SELECT h.*, pc.renew_price, pc.name AS product_name
+                    SELECT h.*, pc.renew_price, pc.name AS product_name, w.name AS website_name
                     FROM {$hostings_table} h
                     LEFT JOIN {$product_catalog_table} pc ON h.product_catalog_id = pc.id
+                    LEFT JOIN {$websites_table} w ON w.hosting_id = h.id
                     WHERE h.id = %d
+                    LIMIT 1
                 ", $service_id));
 
                 if ($hosting) {
@@ -146,7 +149,7 @@ function api_create_bulk_invoice($request)
                     $item_data = [
                         'service_type' => 'hosting',
                         'service_id' => $service_id,
-                        'description' => 'Gia hạn hosting ' . $hosting->hosting_code . ' - ' . $months . ' tháng',
+                        'description' => 'Gói hosting cho ' . ($hosting->website_name ?: ($hosting->product_name ?: $hosting->hosting_code)),
                         'unit_price' => $price,
                         'quantity' => $quantity,
                         'item_total' => $price * $quantity,
@@ -158,7 +161,11 @@ function api_create_bulk_invoice($request)
 
             case 'maintenance':
                 $maintenance = $wpdb->get_row($wpdb->prepare("
-                    SELECT * FROM {$maintenance_table} WHERE id = %d
+                    SELECT m.*, w.name AS website_name
+                    FROM {$maintenance_table} m
+                    LEFT JOIN {$websites_table} w ON w.maintenance_package_id = m.id
+                    WHERE m.id = %d
+                    LIMIT 1
                 ", $service_id));
 
                 if ($maintenance) {
@@ -177,7 +184,7 @@ function api_create_bulk_invoice($request)
                     $item_data = [
                         'service_type' => 'maintenance',
                         'service_id' => $service_id,
-                        'description' => 'Gia hạn gói bảo trì ' . $maintenance->order_code . ' - ' . $months . ' tháng',
+                        'description' => 'Gói bảo mật định kỳ ' . ($maintenance->website_name ?: $maintenance->order_code),
                         'unit_price' => $price,
                         'quantity' => $quantity,
                         'item_total' => $price * $quantity,

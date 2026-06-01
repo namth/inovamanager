@@ -120,7 +120,7 @@ get_header();
                                                             WHERE d.id = %d
                                                         ", $cart_item->service_id));
                                                             if ($service) {
-                                                                $service_name = $service->domain_name;
+                                                                $service_name = build_service_description('domain', $service->domain_name);
                                                                 $service_price = $service->price;
                                                                 $expiry_date = $service->expiry_date;
                                                             }
@@ -136,7 +136,12 @@ get_header();
                                                             WHERE h.id = %d
                                                         ", $cart_item->service_id));
                                                             if ($service) {
-                                                                $service_name = $service->hosting_code . ' (' . $service->product_name . ')';
+                                                                $websites_table = $wpdb->prefix . 'im_websites';
+                                                                $website_name = $wpdb->get_var($wpdb->prepare(
+                                                                    "SELECT name FROM $websites_table WHERE hosting_id = %d LIMIT 1",
+                                                                    $cart_item->service_id
+                                                                ));
+                                                                $service_name = build_service_description('hosting', $service->hosting_code, $service->product_name, 1, $website_name);
                                                                 $service_price = $service->price;
                                                                 $expiry_date = $service->expiry_date;
                                                             }
@@ -152,7 +157,12 @@ get_header();
                                                             WHERE m.id = %d
                                                         ", $cart_item->service_id));
                                                             if ($service) {
-                                                                $service_name = $service->order_code . ' (' . $service->product_name . ')';
+                                                                $websites_table = $wpdb->prefix . 'im_websites';
+                                                                $website_name = $wpdb->get_var($wpdb->prepare(
+                                                                    "SELECT name FROM $websites_table WHERE maintenance_package_id = %d LIMIT 1",
+                                                                    $cart_item->service_id
+                                                                ));
+                                                                $service_name = build_service_description('maintenance', $service->order_code, $service->product_name, 1, $website_name);
                                                                 $service_price = $service->price;
                                                                 $expiry_date = $service->expiry_date;
                                                             }
@@ -168,7 +178,7 @@ get_header();
                                                             WHERE ws.id = %d
                                                         ", $cart_item->service_id));
                                                             if ($service) {
-                                                                $service_name = $service->title;
+                                                                $service_name = build_service_description('website_service', $service->title);
                                                                 if ($service->pricing_type === 'FIXED' && $service->fixed_price) {
                                                                     $service_price = $service->fixed_price;
                                                                 } elseif ($service->pricing_type === 'DAILY' && $service->daily_rate && $service->estimated_manday) {

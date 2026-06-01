@@ -106,6 +106,7 @@ $query = "
         $product_catalog_table pc ON d.product_catalog_id = pc.id
     {$where_clause}
     ORDER BY
+        CASE WHEN d.status = 'NEW' THEN 0 ELSE 1 END ASC,
         d.expiry_date ASC
 ";
 
