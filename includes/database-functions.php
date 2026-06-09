@@ -976,7 +976,7 @@ function auto_create_renewal_invoices_callback()
 
             // Determine start_date and end_date based on status
             if ($maintenance->status === 'NEW') {
-                $start_date = $maintenance->registration_date;
+                $start_date = $maintenance->renew_date;
                 $end_date = $maintenance->expiry_date;
             } else {
                 $start_date = $maintenance->expiry_date;
@@ -2167,7 +2167,8 @@ function build_renewal_products($items_data, $type)
 
         // Determine start_date and end_date based on status
         if (isset($item->status) && $item->status === 'NEW') {
-            $start_date = $item->registration_date ?? $expiry_date;
+            $reg_date = ($type === 'maintenance') ? ($item->renew_date ?? null) : ($item->registration_date ?? null);
+            $start_date = $reg_date ?? $expiry_date;
             $end_date = $expiry_date;
         } else {
             $start_date = $expiry_date;

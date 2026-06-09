@@ -174,7 +174,7 @@ function api_create_bulk_invoice($request)
 
                     // Determine start_date and end_date based on status
                     if ($maintenance->status === 'NEW') {
-                        $start_date = $maintenance->registration_date;
+                        $start_date = $maintenance->renew_date;
                         $end_date = $maintenance->expiry_date;
                     } else {
                         $start_date = $maintenance->expiry_date;

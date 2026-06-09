@@ -228,7 +228,7 @@ get_header();
                                             </tr>
                                             <tr>
                                                 <th>Ngày đăng ký</th>
-                                                <td><?php echo date('d/m/Y', strtotime($maintenance->registration_date)); ?></td>
+                                                <td><?php echo date('d/m/Y', strtotime($maintenance->renew_date)); ?></td>
                                             </tr>
                                             <tr>
                                                 <th>Ngày hết hạn</th>
