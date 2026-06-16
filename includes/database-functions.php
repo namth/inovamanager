@@ -968,7 +968,7 @@ function auto_create_renewal_invoices_callback()
         foreach ($user_services['maintenances'] as $maintenance) {
             $maintenance_code = !empty($maintenance->order_code) ? $maintenance->order_code : 'MAINT-' . $maintenance->id;
             $months = $maintenance->billing_cycle_months;
-            $unit_price = floatval($maintenance->actual_revenue);
+            $unit_price = floatval($maintenance->price_per_cycle);
             $quantity = 1;
             $item_total = $unit_price * $quantity;
 
@@ -2120,6 +2120,8 @@ function build_renewal_products($items_data, $type)
                 // For domains: use renew_price if ACTIVE, register_price if PENDING
                 if ($type === 'domain' && isset($item->status)) {
                     $price = floatval(($item->status === 'ACTIVE') ? $product_info->renew_price : $product_info->register_price);
+                } elseif ($type === 'maintenance') {
+                    $price = floatval($item->price_per_cycle ?? 0);
                 } else {
                     $price = floatval($product_info->renew_price);
                 }

@@ -216,7 +216,7 @@ get_header();
                                     <th>Chủ sở hữu</th>
                                     <th>Chu kỳ thanh toán</th>
                                     <th>Ngày hết hạn</th>
-                                    <th>Chi phí</th>
+                                    <th>Giá tiền</th>
                                     <th>Trạng thái</th>
                                     <th>Thao tác</th>
                                 </tr>
@@ -321,7 +321,7 @@ get_header();
                                     </td>
                                     <td>
                                         <span class="fw-bold text-success">
-                                            <?php echo number_format($package->actual_revenue, 0, ',', '.'); ?> VND
+                                            <?php echo number_format($package->price_per_cycle, 0, ',', '.'); ?> VND
                                         </span>
                                     </td>
                                     <td>

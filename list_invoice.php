@@ -99,8 +99,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// Process quick create invoices if POST request
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'quick_create_invoices') {
+// Process quick create invoices if POST or GET request
+if ((($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'quick_create_invoices')) || ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'quick_create_invoices')) {
     if (is_inova_admin()) {
         $created_count = auto_create_renewal_invoices_callback();
         
@@ -250,13 +250,10 @@ get_header();
                         <h4 class="card-title">Quản lý hóa đơn</h4>
                         <?php if (is_inova_admin()): ?>
                             <div class="d-flex align-items-center">
-                                <form method="post" action="" class="me-2" onsubmit="return confirm('Bạn có chắc chắn muốn quét các dịch vụ sắp hết hạn để tạo nhanh hóa đơn không?');">
-                                    <input type="hidden" name="action" value="quick_create_invoices">
-                                    <button type="submit" class="btn btn-warning btn-icon-text">
-                                        <i class="ph ph-lightning btn-icon-prepend"></i>
-                                        <span>Tạo nhanh hóa đơn</span>
-                                    </button>
-                                </form>
+                                <a href="<?php echo add_query_arg('action', 'quick_create_invoices'); ?>" class="btn btn-secondary btn-icon-text me-2">
+                                    <i class="ph ph-lightning btn-icon-prepend"></i>
+                                    <span>Tạo nhanh hóa đơn</span>
+                                </a>
                                 <a href="<?php echo home_url('/tao-hoa-don/'); ?>" class="btn btn-primary btn-icon-text">
                                     <i class="ph ph-plus btn-icon-prepend"></i>
                                     <span>Tạo hóa đơn mới</span>
