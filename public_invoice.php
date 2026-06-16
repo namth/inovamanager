@@ -642,31 +642,31 @@ get_header('nologin');
                         <h3 class="text-muted"><i class="ph ph-list me-2"></i>Danh sách
                             <?php echo $product_type_labels[$product_type] ?? $product_type; ?>
                         </h3>
-                        <table class="items-table">
+                        <table class="items-table <?php echo $group_has_discount ? 'has-discount' : ''; ?>">
                             <thead>
                                 <tr>
-                                    <th>Tên sản phẩm/dịch vụ</th>
+                                    <th class="col-name">Tên sản phẩm/dịch vụ</th>
                                     <?php if ($product_type !== 'website_service'): ?>
-                                        <th class="text-center">Ngày hết hạn</th>
-                                        <th class="text-center">Gia hạn đến</th>
+                                        <th class="text-center col-expiry">Ngày hết hạn</th>
+                                        <th class="text-center col-renew">Gia hạn đến</th>
                                     <?php endif; ?>
-                                    <th class="text-end">Thành tiền</th>
+                                    <th class="text-end col-subtotal">Thành tiền</th>
                                     <?php if ($group_has_discount): ?>
-                                        <th class="text-end">Giảm giá</th>
-                                        <th class="text-end">Sau giảm</th>
+                                        <th class="text-end col-discount">Giảm giá</th>
+                                        <th class="text-end col-after-discount">Sau giảm</th>
                                     <?php endif; ?>
                                     <?php if ($invoice->requires_vat_invoice): ?>
-                                        <th class="text-end">VAT
+                                        <th class="text-end col-vat">VAT
                                             <?php echo $group_vat_rate > 0 ? '(' . intval($group_vat_rate) . '%)' : ''; ?>
                                         </th>
-                                        <th class="text-end">Tổng</th>
+                                        <th class="text-end col-total">Tổng</th>
                                     <?php endif; ?>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($items as $item): ?>
                                     <tr>
-                                        <td>
+                                        <td class="col-name">
                                             <div class="service-name text-dark">
                                                 <?php echo esc_html($item->service_title ?: $item->description); ?>
                                             </div>
@@ -682,7 +682,7 @@ get_header('nologin');
                                             <?php endif; ?>
                                         </td>
                                         <?php if ($product_type !== 'website_service'): ?>
-                                            <td class="text-center">
+                                            <td class="text-center col-expiry">
                                                 <?php
                                                 if (!empty($item->service_status) && strtoupper($item->service_status) === 'NEW'):
                                                     echo !empty($item->start_date) ? date('d/m/Y', strtotime($item->start_date)) : '<span class="text-muted">-</span>';
@@ -693,7 +693,7 @@ get_header('nologin');
                                                 endif;
                                                 ?>
                                             </td>
-                                            <td class="text-center">
+                                            <td class="text-center col-renew">
                                                 <?php
                                                 if (!empty($item->service_status) && strtoupper($item->service_status) === 'NEW'):
                                                     echo !empty($item->end_date) ? date('d/m/Y', strtotime($item->end_date)) : '<span class="text-muted">-</span>';
@@ -714,10 +714,10 @@ get_header('nologin');
                                         <?php
                                         $display_data = get_invoice_item_display_data($item, $invoice->requires_vat_invoice);
                                         ?>
-                                        <td class="text-end"><?php echo number_format($display_data['subtotal']); ?>đ</td>
+                                        <td class="text-end col-subtotal"><?php echo number_format($display_data['subtotal']); ?>đ</td>
 
                                         <?php if ($group_has_discount): ?>
-                                            <td class="text-end">
+                                            <td class="text-end col-discount">
                                                 <?php if ($display_data['total_discount'] > 0): ?>
                                                     <span
                                                         class="text-danger">-<?php echo number_format($display_data['total_discount']); ?>đ</span>
@@ -725,20 +725,20 @@ get_header('nologin');
                                                     <span class="text-muted">-</span>
                                                 <?php endif; ?>
                                             </td>
-                                            <td class="text-end">
+                                            <td class="text-end col-after-discount">
                                                 <?php echo number_format($display_data['total_after_discount']); ?>đ
                                             </td>
                                         <?php endif; ?>
 
                                         <?php if ($invoice->requires_vat_invoice): ?>
-                                            <td class="text-end">
+                                            <td class="text-end col-vat">
                                                 <?php if ($display_data['vat_amount'] > 0): ?>
                                                     <?php echo number_format($display_data['vat_amount']); ?>đ
                                                 <?php else: ?>
                                                     <span class="text-muted">-</span>
                                                 <?php endif; ?>
                                             </td>
-                                            <td class="text-end">
+                                            <td class="text-end col-total">
                                                 <strong><?php echo number_format($display_data['final_total']); ?>đ</strong>
                                             </td>
                                         <?php endif; ?>
@@ -885,6 +885,9 @@ get_header('nologin');
             hideQrBtn.on('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
+
+                // Add payment-info-hidden class to container to adjust table columns
+                $('.public-invoice-container').addClass('payment-info-hidden');
 
                 // Hide QR section
                 qrSection.addClass('hidden');

@@ -867,6 +867,8 @@ function auto_create_renewal_invoices_callback()
         $services_by_user[$maintenance->owner_user_id]['maintenances'][] = $maintenance;
     }
 
+    $created_count = 0;
+
     // Create invoices for each user
     foreach ($services_by_user as $user_id => $user_services) {
         // Check if invoice already exists for any of these services
@@ -1020,7 +1022,11 @@ function auto_create_renewal_invoices_callback()
                 'due_date'        => $due_date,
             ]
         );
+        if ($invoice_id) {
+            $created_count++;
+        }
     }
+    return $created_count;
 }
 
 function create_invoice_with_items($user_id, $items, $notes = '', $status = 'pending', $created_by_id = 0, $created_by_type = 'system', $invoice_date = '', $due_date = '', $discount_total = 0)

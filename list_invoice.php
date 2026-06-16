@@ -99,6 +99,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+// Process quick create invoices if POST request
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'quick_create_invoices') {
+    if (is_inova_admin()) {
+        $created_count = auto_create_renewal_invoices_callback();
+        
+        if ($created_count > 0) {
+            echo '<div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="ph ph-check-circle me-2"></i> Tạo thành công ' . $created_count . ' hóa đơn gia hạn tự động.
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>';
+        } else {
+            echo '<div class="alert alert-info alert-dismissible fade show" role="alert">
+                <i class="ph ph-info me-2"></i> Không có dịch vụ nào sắp hết hạn (trong vòng 30 ngày) cần tạo hóa đơn mới, hoặc hóa đơn đã được tạo trước đó.
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>';
+        }
+    } else {
+        echo '<div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="ph ph-warning me-2"></i> Bạn không có quyền thực hiện thao tác này.
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>';
+    }
+}
+
 // Initialize variables
 // $current_page = isset($_GET['paged']) ? intval($_GET['paged']) : 1;
 $current_page = max(1, intval(get_query_var('paged')));
@@ -225,10 +249,19 @@ get_header();
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h4 class="card-title">Quản lý hóa đơn</h4>
                         <?php if (is_inova_admin()): ?>
-                            <a href="<?php echo home_url('/tao-hoa-don/'); ?>" class="btn btn-primary btn-icon-text">
-                                <i class="ph ph-plus btn-icon-prepend"></i>
-                                <span>Tạo hóa đơn mới</span>
-                            </a>
+                            <div class="d-flex align-items-center">
+                                <form method="post" action="" class="me-2" onsubmit="return confirm('Bạn có chắc chắn muốn quét các dịch vụ sắp hết hạn để tạo nhanh hóa đơn không?');">
+                                    <input type="hidden" name="action" value="quick_create_invoices">
+                                    <button type="submit" class="btn btn-warning btn-icon-text">
+                                        <i class="ph ph-lightning btn-icon-prepend"></i>
+                                        <span>Tạo nhanh hóa đơn</span>
+                                    </button>
+                                </form>
+                                <a href="<?php echo home_url('/tao-hoa-don/'); ?>" class="btn btn-primary btn-icon-text">
+                                    <i class="ph ph-plus btn-icon-prepend"></i>
+                                    <span>Tạo hóa đơn mới</span>
+                                </a>
+                            </div>
                         <?php endif; ?>
                     </div>
 

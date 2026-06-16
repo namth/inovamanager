@@ -263,3 +263,13 @@ tr:last-child td:last-child {
     }
 }
 
+/* Adjust table columns when payment info is hidden on public invoice view */
+.payment-info-hidden .items-table th.col-discount,
+.payment-info-hidden .items-table th.col-after-discount,
+.payment-info-hidden .items-table th.col-total,
+.payment-info-hidden .items-table td.col-discount,
+.payment-info-hidden .items-table td.col-after-discount,
+.payment-info-hidden .items-table td.col-total {
+    display: none;
+}
+
