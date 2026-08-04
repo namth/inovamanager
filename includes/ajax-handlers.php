@@ -2783,7 +2783,81 @@ function delete_expense_declaration_callback() {
 }
 
 // Expense management
-add_action('wp_ajax_delete_expense', 'delete_expense_callback');
+add_action('wp_ajax_check_single_website_status', 'check_single_website_status_ajax');
+add_action('wp_ajax_nopriv_check_single_website_status', 'check_single_website_status_ajax');
+
+function check_single_website_status_ajax()
+{
+    if (!isset($_POST['website_id'])) {
+        wp_send_json_error(array('message' => 'Thiếu ID website'));
+    }
+
+    $website_id = intval($_POST['website_id']);
+    global $wpdb;
+    $websites_table = $wpdb->prefix . 'im_websites';
+
+    $website = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$websites_table} WHERE id = %d", $website_id));
+
+    if (!$website) {
+        wp_send_json_error(array('message' => 'Không tìm thấy thông tin website trong hệ thống'));
+    }
+
+    $domain = trim($website->name);
+    if (empty($domain)) {
+        wp_send_json_error(array('message' => 'Tên miền không hợp lệ'));
+    }
+
+    $clean_domain = preg_replace('#^https?://(www\.)?#', '', $domain);
+    $clean_domain = rtrim($clean_domain, '/');
+
+    // Ping satellite website status endpoint
+    $ping_url = "https://" . $clean_domain . "/wp-json/inova/v1/status";
+    $response = wp_remote_get($ping_url, array('timeout' => 8, 'sslverify' => false));
+
+    // Try HTTP fallback
+    if (is_wp_error($response)) {
+        $ping_url = "http://" . $clean_domain . "/wp-json/inova/v1/status";
+        $response = wp_remote_get($ping_url, array('timeout' => 8));
+    }
+
+    $is_online = false;
+    $error_msg = '';
+
+    if (!is_wp_error($response)) {
+        $http_code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if ($http_code === 200 && !empty($data['status']) && $data['status'] === true) {
+            $is_online = true;
+        } else {
+            $error_msg = 'HTTP Status Code: ' . $http_code;
+        }
+    } else {
+        $error_msg = $response->get_error_message();
+    }
+
+    if ($is_online) {
+        $now = current_time('mysql');
+        $wpdb->update(
+            $websites_table,
+            array('active_time' => $now),
+            array('id' => $website_id),
+            array('%s'),
+            array('%d')
+        );
+
+        wp_send_json_success(array(
+            'message' => 'Kiểm tra thành công, website đang hoạt động!',
+            'active_time' => $now,
+            'last_seen_text' => 'Vừa xong'
+        ));
+    } else {
+        wp_send_json_error(array(
+            'message' => 'Kiểm tra thất bại. Website không phản hồi: ' . $error_msg
+        ));
+    }
+}
 add_action('wp_ajax_update_expense_status', 'update_expense_status_callback');
 add_action('admin_post_edit_expense_post', 'edit_expense_post_callback');
 

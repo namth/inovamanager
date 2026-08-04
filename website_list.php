@@ -323,18 +323,26 @@ get_header();
                                                  $last_seen_text = 'Chưa kết nối';
                                              }
 
-                                             echo '<span class="website-status-dot me-2 bg-' . $status_color . '" title="' . $status_title . '"></span>';
+                                             echo '<span class="website-status-dot me-2 bg-' . $status_color . '" title="' . $status_title . '" data-website-id="' . $website->id . '"></span>';
                                              ?>
                                              <div>
-                                                 <h6 class="mb-0">
+                                                 <h6 class="mb-0 d-flex align-items-center flex-wrap">
                                                      <a href="<?php echo home_url('/website/?website_id=' . $website->id); ?>" class="nav-link">
                                                          <?php echo esc_html($website->name); ?>
                                                      </a>
+                                                     <?php if ($status_color === 'danger'): ?>
+                                                         <button type="button" 
+                                                                 class="btn btn-link p-0 ms-1 text-danger text-decoration-none shadow-none check-website-status-btn" 
+                                                                 data-website-id="<?php echo $website->id; ?>"
+                                                                 title="Kiểm tra kết nối lại với website">
+                                                             <i class="ph ph-arrows-clockwise"></i>
+                                                         </button>
+                                                     <?php endif; ?>
                                                      <?php if ($show_deleted): ?>
                                                          <span class="badge bg-danger ms-2">Đã xóa</span>
                                                      <?php endif; ?>
                                                  </h6>
-                                                 <small class="text-muted fst-italic d-block mt-1" style="font-size: 11px;">
+                                                 <small class="text-muted fst-italic d-block mt-1 last-seen-text" style="font-size: 11px;">
                                                      <?php echo esc_html($last_seen_text); ?>
                                                  </small>
                                              </div>
@@ -636,6 +644,78 @@ get_header();
 </div>
 
 <!-- Bulk renewal functionality is now handled by custom.js -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const checkBtns = document.querySelectorAll('.check-website-status-btn');
+
+    checkBtns.forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const websiteId = this.getAttribute('data-website-id');
+            const container = this.closest('tr');
+            const icon = this.querySelector('i');
+            const statusDot = container ? container.querySelector('.website-status-dot') : null;
+            const lastSeenEl = container ? container.querySelector('.last-seen-text') : null;
+
+            if (this.disabled) return;
+
+            // Start loading effect
+            this.disabled = true;
+            icon.className = 'ph ph-spinner spinner spin-animation';
+            icon.style.display = 'inline-block';
+
+            const formData = new FormData();
+            formData.append('action', 'check_single_website_status');
+            formData.append('website_id', websiteId);
+
+            fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    // Update UI elements
+                    if (statusDot) {
+                        statusDot.classList.remove('bg-danger');
+                        statusDot.classList.add('bg-success');
+                        statusDot.setAttribute('title', 'Website is up');
+                    }
+                    if (lastSeenEl && data.data.last_seen_text) {
+                        lastSeenEl.textContent = data.data.last_seen_text;
+                    }
+                    // Remove reload button on success
+                    this.remove();
+                } else {
+                    alert('❌ Kiểm tra thất bại: ' + (data.data ? data.data.message : 'Không thể kết nối tới website'));
+
+                    // Revert to original icon
+                    this.disabled = false;
+                    icon.className = 'ph ph-arrows-clockwise';
+                    icon.style.display = '';
+                }
+            })
+            .catch(err => {
+                alert('❌ Có lỗi xảy ra khi kết nối tới máy chủ!');
+
+                // Revert to original icon
+                this.disabled = false;
+                icon.className = 'ph ph-arrows-clockwise';
+                icon.style.display = '';
+            });
+        });
+    });
+});
+</script>
+<style>
+.spin-animation {
+    animation: spin 1s infinite linear;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+</style>
 
 <?php
 get_footer();

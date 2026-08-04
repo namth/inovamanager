@@ -53,8 +53,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_vat'])) {
             update_option('inova_webhook_url', sanitize_text_field($_POST['inova_webhook_url']));
             update_option('inova_webhook_enabled_renewal', isset($_POST['inova_webhook_enabled_renewal']) ? 1 : 0);
             update_option('inova_webhook_enabled_expiry', isset($_POST['inova_webhook_enabled_expiry']) ? 1 : 0);
+            update_option('inova_webhook_enabled_website_status', isset($_POST['inova_webhook_enabled_website_status']) ? 1 : 0);
+            update_option('inova_website_check_interval', max(5, intval($_POST['inova_website_check_interval'])));
 
-            $message = 'Cài đặt Webhook đã được lưu thành công!';
+            // Re-schedule cron when interval changes
+            if (function_exists('schedule_expiry_check_cron')) {
+                schedule_expiry_check_cron(true);
+            }
+
+            $message = 'Cài đặt Webhook & Cronjob đã được lưu thành công!';
             $message_type = 'success';
         }
     } else {
@@ -79,6 +86,8 @@ $payment_account_number_with_vat = get_option('payment_account_number_with_vat',
 $webhook_url = get_option('inova_webhook_url', 'https://ai.inova.io.vn/webhook-test/inova-manager');
 $webhook_enabled_renewal = get_option('inova_webhook_enabled_renewal', 1);
 $webhook_enabled_expiry = get_option('inova_webhook_enabled_expiry', 1);
+$webhook_enabled_website_status = get_option('inova_webhook_enabled_website_status', 1);
+$website_check_interval = get_option('inova_website_check_interval', 20);
 
 // Static banks list from Sepay
 $banks_list = array(
@@ -459,6 +468,14 @@ get_header();
                                             <small class="form-text text-muted">URL đầu cuối để nhận dữ liệu webhook (POST request)</small>
                                         </div>
 
+                                        <div class="mb-3">
+                                            <label for="inova_website_check_interval" class="form-label fw-bold">Chu kỳ kiểm tra trạng thái Website (phút) <span class="text-danger">*</span></label>
+                                            <input type="number" min="5" max="1440" class="form-control" id="inova_website_check_interval" name="inova_website_check_interval" 
+                                                   value="<?php echo esc_attr($website_check_interval); ?>" 
+                                                   required>
+                                            <small class="form-text text-muted">Khoảng thời gian (tính theo phút, mặc định: 20 phút) hệ thống tự động chạy cronjob quét kiểm tra active_time của các website.</small>
+                                        </div>
+
                                         <div class="card border-warning mb-4">
                                             <div class="card-header bg-light">
                                                 <h6 class="mb-0">
@@ -476,13 +493,23 @@ get_header();
                                                     </label>
                                                 </div>
 
-                                                <div class="d-flex gap-3">
+                                                <div class="d-flex gap-3 mb-2">
                                                     <input type="checkbox" id="inova_webhook_enabled_expiry" 
                                                            name="inova_webhook_enabled_expiry" value="1"
                                                            <?php checked($webhook_enabled_expiry, 1); ?>>
                                                     <label class="form-check-label" for="inova_webhook_enabled_expiry">
                                                         <strong>Kiểm tra dịch vụ hết hạn</strong>
                                                         <small class="d-block text-muted">Gửi dữ liệu khi cronjob inovamanager_check_expiry_daily kiểm tra hóa đơn hết hạn</small>
+                                                    </label>
+                                                </div>
+
+                                                <div class="d-flex gap-3">
+                                                    <input type="checkbox" id="inova_webhook_enabled_website_status" 
+                                                           name="inova_webhook_enabled_website_status" value="1"
+                                                           <?php checked($webhook_enabled_website_status, 1); ?>>
+                                                    <label class="form-check-label" for="inova_webhook_enabled_website_status">
+                                                        <strong>Cảnh báo Website ngừng hoạt động / Mất kết nối</strong>
+                                                        <small class="d-block text-muted">Gửi danh sách các website không phản hồi status hoặc quá thời gian active_time cho phép qua Webhook</small>
                                                     </label>
                                                 </div>
                                             </div>

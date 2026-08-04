@@ -1485,50 +1485,123 @@ function check_website_online_status()
 {
     global $wpdb;
 
-    // Check website status (over 1 day and over 2 days)
+    // Prevent timeout during long-running website checks
+    @set_time_limit(300);
+
     $websites_table = $wpdb->prefix . 'im_websites';
     $users_table = $wpdb->prefix . 'im_users';
 
     $current_time_mysql = current_time('mysql');
+    $interval_minutes = max(5, intval(get_option('inova_website_check_interval', 20)));
 
-    // Websites over 1 day (between 24h and 48h since last active_time)
-    $websites_over_1_day = $wpdb->get_results($wpdb->prepare("
+    // Get all active websites where active_time is older than interval_minutes
+    $outdated_websites = $wpdb->get_results($wpdb->prepare("
         SELECT w.*, u.name as owner_name, u.email as owner_email
-        FROM $websites_table w
-        LEFT JOIN $users_table u ON w.owner_user_id = u.id
-        WHERE w.active_time <= DATE_SUB(%s, INTERVAL 1 DAY)
-        AND w.active_time > DATE_SUB(%s, INTERVAL 2 DAY)
+        FROM {$websites_table} w
+        LEFT JOIN {$users_table} u ON w.owner_user_id = u.id
+        WHERE (w.active_time IS NULL OR w.active_time <= DATE_SUB(%s, INTERVAL %d MINUTE))
         AND (w.status IS NULL OR w.status != 'DELETED')
-    ", $current_time_mysql, $current_time_mysql));
+    ", $current_time_mysql, $interval_minutes));
 
-    // Websites over 2 days (between 48h and 72h since last active_time)
-    $websites_over_2_days = $wpdb->get_results($wpdb->prepare("
-        SELECT w.*, u.name as owner_name, u.email as owner_email
-        FROM $websites_table w
-        LEFT JOIN $users_table u ON w.owner_user_id = u.id
-        WHERE w.active_time <= DATE_SUB(%s, INTERVAL 2 DAY)
-        AND w.active_time > DATE_SUB(%s, INTERVAL 3 DAY)
-        AND (w.status IS NULL OR w.status != 'DELETED')
-    ", $current_time_mysql, $current_time_mysql));
-
-
-    if (!empty($websites_over_1_day) || !empty($websites_over_2_days)) {
-        trigger_website_online_status_webhook($websites_over_1_day, $websites_over_2_days);
+    if (empty($outdated_websites)) {
+        error_log("Website status check completed (no outdated websites) at " . current_time('Y-m-d H:i:s'));
+        return;
     }
 
-    error_log('Website status check completed at ' . current_time('Y-m-d H:i:s'));
+    $failed_websites = array();
+
+    foreach ($outdated_websites as $website) {
+        $domain = trim($website->name);
+        if (empty($domain)) {
+            continue;
+        }
+
+        // Clean domain (remove http/https prefix if any)
+        $clean_domain = preg_replace('#^https?://(www\.)?#', '', $domain);
+        $clean_domain = rtrim($clean_domain, '/');
+
+        // Ping satellite website status endpoint
+        $ping_url = "https://" . $clean_domain . "/wp-json/inova/v1/status";
+        $response = wp_remote_get($ping_url, array('timeout' => 5, 'sslverify' => false));
+
+        // Try HTTP fallback if HTTPS fails
+        if (is_wp_error($response)) {
+            $ping_url = "http://" . $clean_domain . "/wp-json/inova/v1/status";
+            $response = wp_remote_get($ping_url, array('timeout' => 5));
+        }
+
+        $is_online = false;
+        if (!is_wp_error($response)) {
+            $http_code = wp_remote_retrieve_response_code($response);
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body, true);
+
+            if ($http_code === 200 && !empty($data['status']) && $data['status'] === true) {
+                $is_online = true;
+            }
+        }
+
+        if ($is_online) {
+            // Update active_time in database
+            $wpdb->update(
+                $websites_table,
+                array('active_time' => current_time('mysql')),
+                array('id' => $website->id),
+                array('%s'),
+                array('%d')
+            );
+        } else {
+            // Failed to respond or offline -> add to alert list
+            $error_reason = is_wp_error($response) ? $response->get_error_message() : 'HTTP Code ' . wp_remote_retrieve_response_code($response);
+            $failed_websites[] = array(
+                'id' => intval($website->id),
+                'name' => $website->name,
+                'owner_name' => $website->owner_name,
+                'owner_email' => $website->owner_email,
+                'active_time' => $website->active_time,
+                'error_reason' => $error_reason,
+                'last_seen_diff' => $website->active_time ? human_time_diff(strtotime($website->active_time), current_time('timestamp')) : 'Unknown'
+            );
+        }
+    }
+
+    // Trigger Webhook alert if there are failed/offline websites
+    if (!empty($failed_websites) && get_option('inova_webhook_enabled_website_status', 1)) {
+        $status_data = array(
+            'check_interval_minutes' => $interval_minutes,
+            'total_checked' => count($outdated_websites),
+            'total_failed' => count($failed_websites),
+            'failed_websites' => $failed_websites
+        );
+        send_webhook_data($status_data, 'website_status_check');
+    }
+
+    error_log("Website status check completed. Checked: " . count($outdated_websites) . ", Failed: " . count($failed_websites) . " at " . current_time('Y-m-d H:i:s'));
 }
 
-function schedule_expiry_check_cron()
+function schedule_expiry_check_cron($force_reschedule = false)
 {
-    // Schedule for services expiry check
+    // Schedule for services expiry check (daily at 8:00 AM)
     if (!wp_next_scheduled('inovamanager_check_expiry_daily')) {
         wp_schedule_event(strtotime('08:00:00'), 'daily_8am', 'inovamanager_check_expiry_daily');
     }
 
-    // Schedule for website online status check
-    if (!wp_next_scheduled('inovamanager_check_website_status_daily')) {
-        wp_schedule_event(strtotime('08:05:00'), 'daily_8am', 'inovamanager_check_website_status_daily');
+    // Unschedule legacy daily website status check if present
+    $legacy_timestamp = wp_next_scheduled('inovamanager_check_website_status_daily');
+    if ($legacy_timestamp) {
+        wp_unschedule_event($legacy_timestamp, 'inovamanager_check_website_status_daily');
+    }
+
+    // Schedule for dynamic interval website online status check
+    $timestamp = wp_next_scheduled('inovamanager_check_website_status_cron');
+
+    if ($force_reschedule && $timestamp) {
+        wp_unschedule_event($timestamp, 'inovamanager_check_website_status_cron');
+        $timestamp = false;
+    }
+
+    if (!$timestamp) {
+        wp_schedule_event(time(), 'inova_website_interval', 'inovamanager_check_website_status_cron');
     }
 }
 
@@ -2876,6 +2949,13 @@ add_filter('cron_schedules', function ($schedules) {
         'interval' => 86400,
         'display' => 'Once Daily'
     ];
+
+    $interval_minutes = max(5, intval(get_option('inova_website_check_interval', 20)));
+    $schedules['inova_website_interval'] = [
+        'interval' => $interval_minutes * 60,
+        'display' => 'Every ' . $interval_minutes . ' Minutes'
+    ];
+
     return $schedules;
 });
 
@@ -2884,7 +2964,7 @@ add_action('init', 'schedule_expiry_check_cron');
 
 // Scheduled checks
 add_action('inovamanager_check_expiry_daily', 'check_and_send_expiry_emails');
-add_action('inovamanager_check_website_status_daily', 'check_website_online_status');
+add_action('inovamanager_check_website_status_cron', 'check_website_online_status');
 
 // Auto renewal scheduling
 add_action('wp', 'schedule_auto_renewal_invoices');
