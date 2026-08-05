@@ -55,6 +55,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_vat'])) {
             update_option('inova_webhook_enabled_expiry', isset($_POST['inova_webhook_enabled_expiry']) ? 1 : 0);
             update_option('inova_webhook_enabled_website_status', isset($_POST['inova_webhook_enabled_website_status']) ? 1 : 0);
             update_option('inova_website_check_interval', max(5, intval($_POST['inova_website_check_interval'])));
+            update_option('inova_webhook_log_retention_days', max(1, intval($_POST['inova_webhook_log_retention_days'])));
 
             // Re-schedule cron when interval changes
             if (function_exists('schedule_expiry_check_cron')) {
@@ -88,6 +89,7 @@ $webhook_enabled_renewal = get_option('inova_webhook_enabled_renewal', 1);
 $webhook_enabled_expiry = get_option('inova_webhook_enabled_expiry', 1);
 $webhook_enabled_website_status = get_option('inova_webhook_enabled_website_status', 1);
 $website_check_interval = get_option('inova_website_check_interval', 20);
+$webhook_log_retention_days = get_option('inova_webhook_log_retention_days', 30);
 
 // Static banks list from Sepay
 $banks_list = array(
@@ -468,12 +470,22 @@ get_header();
                                             <small class="form-text text-muted">URL đầu cuối để nhận dữ liệu webhook (POST request)</small>
                                         </div>
 
-                                        <div class="mb-3">
-                                            <label for="inova_website_check_interval" class="form-label fw-bold">Chu kỳ kiểm tra trạng thái Website (phút) <span class="text-danger">*</span></label>
-                                            <input type="number" min="5" max="1440" class="form-control" id="inova_website_check_interval" name="inova_website_check_interval" 
-                                                   value="<?php echo esc_attr($website_check_interval); ?>" 
-                                                   required>
-                                            <small class="form-text text-muted">Khoảng thời gian (tính theo phút, mặc định: 20 phút) hệ thống tự động chạy cronjob quét kiểm tra active_time của các website.</small>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label for="inova_website_check_interval" class="form-label fw-bold">Chu kỳ kiểm tra trạng thái Website (phút) <span class="text-danger">*</span></label>
+                                                <input type="number" min="5" max="1440" class="form-control" id="inova_website_check_interval" name="inova_website_check_interval" 
+                                                       value="<?php echo esc_attr($website_check_interval); ?>" 
+                                                       required>
+                                                <small class="form-text text-muted">Khoảng thời gian (tính theo phút, mặc định: 20 phút) hệ thống tự động kiểm tra active_time.</small>
+                                            </div>
+
+                                            <div class="col-md-6 mb-3">
+                                                <label for="inova_webhook_log_retention_days" class="form-label fw-bold">Thời gian lưu trữ nhật ký Log (ngày) <span class="text-danger">*</span></label>
+                                                <input type="number" min="1" max="365" class="form-control" id="inova_webhook_log_retention_days" name="inova_webhook_log_retention_days" 
+                                                       value="<?php echo esc_attr($webhook_log_retention_days); ?>" 
+                                                       required>
+                                                <small class="form-text text-muted">Hệ thống sẽ tự động xóa các bản ghi log Webhook cũ hơn số ngày này (mặc định: 30 ngày).</small>
+                                            </div>
                                         </div>
 
                                         <div class="card border-warning mb-4">
@@ -520,17 +532,80 @@ get_header();
                                             <ul class="mb-0 mt-2">
                                                 <li><strong>Renewal Invoice:</strong> invoice_id, invoice_link, customer_id, customer_name, total_amount, items (JSON)</li>
                                                 <li><strong>Expiry Check:</strong> services_expiring (array of domains, hostings, maintenances with details)</li>
+                                                <li><strong>Website Status Check:</strong> check_interval_minutes, total_checked, total_failed, failed_websites_markdown (Markdown format), failed_websites (array of name, last_seen_diff)</li>
                                             </ul>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div class="text-center">
+                                <div class="text-center mb-4">
                                     <button type="submit" class="btn btn-primary btn-lg">
                                         <i class="ph ph-floppy-disk me-2"></i>Lưu cấu hình Webhook
                                     </button>
                                 </div>
                             </form>
+
+                            <!-- Webhook Logs Table Section -->
+                            <div class="card border-dark">
+                                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0">
+                                        <i class="ph ph-list-bullets me-2"></i>Nhật ký thực thi Webhook (20 bản ghi mới nhất)
+                                    </h6>
+                                    <button type="button" id="clear-webhook-logs-btn" class="btn btn-sm btn-outline-light">
+                                        <i class="ph ph-trash me-1"></i>Xóa toàn bộ log
+                                    </button>
+                                </div>
+                                <div class="card-body p-0">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover align-middle mb-0" style="font-size: 13px;">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Thời gian</th>
+                                                    <th>Sự kiện</th>
+                                                    <th>Trạng thái</th>
+                                                    <th>Mã HTTP</th>
+                                                    <th>Chi tiết Payload / Phản hồi</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php
+                                                global $wpdb;
+                                                $logs_table = $wpdb->prefix . 'im_webhook_logs';
+                                                $recent_logs = $wpdb->get_results("SELECT * FROM {$logs_table} ORDER BY id DESC LIMIT 20");
+
+                                                if (empty($recent_logs)):
+                                                ?>
+                                                <tr>
+                                                    <td colspan="5" class="text-center text-muted py-4">Chưa có nhật ký Webhook nào được ghi nhận.</td>
+                                                </tr>
+                                                <?php else:
+                                                    foreach ($recent_logs as $log):
+                                                        $badge_class = ($log->status === 'SUCCESS') ? 'bg-success' : 'bg-danger';
+                                                ?>
+                                                <tr>
+                                                    <td class="text-nowrap"><?php echo esc_html($log->created_at); ?></td>
+                                                    <td><code><?php echo esc_html($log->event_type); ?></code></td>
+                                                    <td><span class="badge <?php echo $badge_class; ?>"><?php echo esc_html($log->status); ?></span></td>
+                                                    <td><?php echo $log->response_code ? esc_html($log->response_code) : '<span class="text-muted">N/A</span>'; ?></td>
+                                                    <td>
+                                                        <details>
+                                                            <summary class="text-primary cursor-pointer">Xem Payload / Response</summary>
+                                                            <div class="mt-2 p-2 bg-light rounded border">
+                                                                <strong>Payload:</strong>
+                                                                <pre class="mb-2 p-1 bg-white border rounded" style="max-height: 150px; font-size: 11px;"><?php echo esc_html($log->payload); ?></pre>
+                                                                <strong>Response Body:</strong>
+                                                                <pre class="mb-0 p-1 bg-white border rounded" style="max-height: 100px; font-size: 11px;"><?php echo esc_html($log->response_body ? $log->response_body : ($log->error_message ? $log->error_message : 'No response')); ?></pre>
+                                                            </div>
+                                                        </details>
+                                                    </td>
+                                                </tr>
+                                                <?php endforeach; endif; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -538,6 +613,37 @@ get_header();
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const clearBtn = document.getElementById('clear-webhook-logs-btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            if (confirm('Bạn có chắc chắn muốn xóa toàn bộ nhật ký Webhook?')) {
+                const formData = new FormData();
+                formData.append('action', 'clear_webhook_logs');
+
+                fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.data.message);
+                        window.location.reload();
+                    } else {
+                        alert('Lỗi: ' + data.data.message);
+                    }
+                })
+                .catch(err => {
+                    alert('Có lỗi xảy ra khi kết nối tới hệ thống!');
+                });
+            }
+        });
+    }
+});
+</script>
 
 <?php
 get_footer();

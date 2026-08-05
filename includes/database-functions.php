@@ -420,6 +420,25 @@ function CreateDatabaseBookOrder()
     ) {$charsetCollate};";
     dbDelta($createTable);
 
+    # 16. webhook_logs table - Nhật ký lưu vết gửi webhook
+    $webhookLogsTable = $wpdb->prefix . 'im_webhook_logs';
+    $createTable = "CREATE TABLE `{$webhookLogsTable}` (
+        `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        `event_type` varchar(50) NOT NULL,
+        `webhook_url` varchar(255) NOT NULL,
+        `payload` longtext NULL,
+        `response_code` int(11) NULL,
+        `response_body` text NULL,
+        `status` varchar(20) NOT NULL DEFAULT 'FAILED',
+        `error_message` text NULL,
+        `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`),
+        KEY `event_type` (`event_type`),
+        KEY `status` (`status`),
+        KEY `created_at` (`created_at`)
+    ) {$charsetCollate};";
+    dbDelta($createTable);
+
     # Initialize default email notification settings in WordPress options
     // Set global default for email notifications (can be overridden per user via user meta)
     if (!get_option('inova_email_notification_defaults')) {
@@ -1494,12 +1513,13 @@ function check_website_online_status()
     $current_time_mysql = current_time('mysql');
     $interval_minutes = max(5, intval(get_option('inova_website_check_interval', 20)));
 
-    // Get all active websites where active_time is older than interval_minutes
+    // Get all active websites where active_time IS NOT NULL and older than interval_minutes
     $outdated_websites = $wpdb->get_results($wpdb->prepare("
         SELECT w.*, u.name as owner_name, u.email as owner_email
         FROM {$websites_table} w
         LEFT JOIN {$users_table} u ON w.owner_user_id = u.id
-        WHERE (w.active_time IS NULL OR w.active_time <= DATE_SUB(%s, INTERVAL %d MINUTE))
+        WHERE w.active_time IS NOT NULL
+        AND w.active_time <= DATE_SUB(%s, INTERVAL %d MINUTE)
         AND (w.status IS NULL OR w.status != 'DELETED')
     ", $current_time_mysql, $interval_minutes));
 
@@ -1552,26 +1572,35 @@ function check_website_online_status()
             );
         } else {
             // Failed to respond or offline -> add to alert list
-            $error_reason = is_wp_error($response) ? $response->get_error_message() : 'HTTP Code ' . wp_remote_retrieve_response_code($response);
+            $last_seen_diff = $website->active_time ? human_time_diff(strtotime($website->active_time), current_time('timestamp')) : 'Không xác định';
             $failed_websites[] = array(
-                'id' => intval($website->id),
                 'name' => $website->name,
-                'owner_name' => $website->owner_name,
-                'owner_email' => $website->owner_email,
-                'active_time' => $website->active_time,
-                'error_reason' => $error_reason,
-                'last_seen_diff' => $website->active_time ? human_time_diff(strtotime($website->active_time), current_time('timestamp')) : 'Unknown'
+                'last_seen_diff' => $last_seen_diff
             );
         }
     }
 
     // Trigger Webhook alert if there are failed/offline websites
     if (!empty($failed_websites) && get_option('inova_webhook_enabled_website_status', 1)) {
+        // Build Markdown table / list format for failed websites
+        $markdown_content = "### ⚠️ Cảnh báo Website mất kết nối / Ngừng hoạt động\n\n";
+        $markdown_content .= "| Tên Website | Lần hoạt động cuối | \n";
+        $markdown_content .= "| :--- | :--- |\n";
+        foreach ($failed_websites as $fw) {
+            $markdown_content .= "| **" . $fw['name'] . "** | " . $fw['last_seen_diff'] . " trước |\n";
+        }
+
         $status_data = array(
             'check_interval_minutes' => $interval_minutes,
             'total_checked' => count($outdated_websites),
             'total_failed' => count($failed_websites),
-            'failed_websites' => $failed_websites
+            'failed_websites_markdown' => $markdown_content,
+            'failed_websites' => array_map(function ($fw) {
+                return array(
+                    'name' => $fw['name'],
+                    'last_seen_diff' => $fw['last_seen_diff']
+                );
+            }, $failed_websites)
         );
         send_webhook_data($status_data, 'website_status_check');
     }
@@ -1584,6 +1613,11 @@ function schedule_expiry_check_cron($force_reschedule = false)
     // Schedule for services expiry check (daily at 8:00 AM)
     if (!wp_next_scheduled('inovamanager_check_expiry_daily')) {
         wp_schedule_event(strtotime('08:00:00'), 'daily_8am', 'inovamanager_check_expiry_daily');
+    }
+
+    // Schedule for daily webhook logs cleanup (daily at 03:00 AM)
+    if (!wp_next_scheduled('inovamanager_cleanup_logs_daily')) {
+        wp_schedule_event(strtotime('03:00:00'), 'daily', 'inovamanager_cleanup_logs_daily');
     }
 
     // Unschedule legacy daily website status check if present
@@ -2731,7 +2765,9 @@ function get_service_options($type, $user_id)
 
 function send_webhook_data($data, $event_type = 'generic')
 {
+    global $wpdb;
     $webhook_url = get_option('inova_webhook_url', '');
+    $logs_table = $wpdb->prefix . 'im_webhook_logs';
 
     if (empty($webhook_url)) {
         error_log('Webhook URL not configured');
@@ -2745,6 +2781,8 @@ function send_webhook_data($data, $event_type = 'generic')
         'data' => $data
     );
 
+    $payload_json = json_encode($payload);
+
     // Send POST request to webhook
     $response = wp_remote_post($webhook_url, array(
         'method' => 'POST',
@@ -2753,21 +2791,67 @@ function send_webhook_data($data, $event_type = 'generic')
         'headers' => array(
             'Content-Type' => 'application/json',
         ),
-        'body' => json_encode($payload),
+        'body' => $payload_json,
     ));
 
+    $status = 'FAILED';
+    $status_code = null;
+    $response_body = null;
+    $error_message = null;
+
     if (is_wp_error($response)) {
-        error_log('Webhook send error: ' . $response->get_error_message());
-        return false;
+        $error_message = $response->get_error_message();
+        error_log('Webhook send error: ' . $error_message);
+    } else {
+        $status_code = wp_remote_retrieve_response_code($response);
+        $response_body = wp_remote_retrieve_body($response);
+
+        if ($status_code >= 200 && $status_code < 300) {
+            $status = 'SUCCESS';
+            error_log('Webhook sent successfully. Event: ' . $event_type);
+        } else {
+            $error_message = 'HTTP ' . $status_code;
+            error_log('Webhook error - Status: ' . $status_code . ', Response: ' . $response_body);
+        }
     }
 
-    $status_code = wp_remote_retrieve_response_code($response);
-    if ($status_code >= 200 && $status_code < 300) {
-        error_log('Webhook sent successfully. Event: ' . $event_type);
-        return true;
-    } else {
-        error_log('Webhook error - Status: ' . $status_code . ', Response: ' . wp_remote_retrieve_body($response));
-        return false;
+    // Insert log record into database
+    $wpdb->insert(
+        $logs_table,
+        array(
+            'event_type' => $event_type,
+            'webhook_url' => $webhook_url,
+            'payload' => $payload_json,
+            'response_code' => $status_code,
+            'response_body' => $response_body,
+            'status' => $status,
+            'error_message' => $error_message,
+            'created_at' => current_time('mysql')
+        ),
+        array('%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s')
+    );
+
+    return ($status === 'SUCCESS');
+}
+
+/**
+ * Cleanup old webhook logs based on retention settings
+ */
+function cleanup_old_webhook_logs()
+{
+    global $wpdb;
+    $logs_table = $wpdb->prefix . 'im_webhook_logs';
+
+    $retention_days = max(1, intval(get_option('inova_webhook_log_retention_days', 30)));
+    $current_time = current_time('mysql');
+
+    $deleted_count = $wpdb->query($wpdb->prepare("
+        DELETE FROM {$logs_table}
+        WHERE created_at < DATE_SUB(%s, INTERVAL %d DAY)
+    ", $current_time, $retention_days));
+
+    if ($deleted_count !== false) {
+        error_log("Cleaned up {$deleted_count} webhook logs older than {$retention_days} days.");
     }
 }
 
@@ -2965,6 +3049,7 @@ add_action('init', 'schedule_expiry_check_cron');
 // Scheduled checks
 add_action('inovamanager_check_expiry_daily', 'check_and_send_expiry_emails');
 add_action('inovamanager_check_website_status_cron', 'check_website_online_status');
+add_action('inovamanager_cleanup_logs_daily', 'cleanup_old_webhook_logs');
 
 // Auto renewal scheduling
 add_action('wp', 'schedule_auto_renewal_invoices');
