@@ -2859,20 +2859,20 @@ function check_single_website_status_ajax()
     }
 }
 
-add_action('wp_ajax_clear_webhook_logs', 'clear_webhook_logs_ajax');
-function clear_webhook_logs_ajax()
+add_action('wp_ajax_clear_website_status_logs', 'clear_website_status_logs_ajax');
+function clear_website_status_logs_ajax()
 {
     if (!current_user_can('manage_options') && !is_inova_admin()) {
         wp_send_json_error(array('message' => 'Không có quyền thực hiện'));
     }
 
     global $wpdb;
-    $logs_table = $wpdb->prefix . 'im_webhook_logs';
+    $logs_table = $wpdb->prefix . 'im_website_status_logs';
 
     $result = $wpdb->query("TRUNCATE TABLE {$logs_table}");
 
     if ($result !== false) {
-        wp_send_json_success(array('message' => 'Đã xóa toàn bộ nhật ký Webhook thành công!'));
+        wp_send_json_success(array('message' => 'Đã xóa toàn bộ nhật ký kiểm tra website thành công!'));
     } else {
         wp_send_json_error(array('message' => 'Có lỗi xảy ra khi xóa nhật ký'));
     }

@@ -420,24 +420,26 @@ function CreateDatabaseBookOrder()
     ) {$charsetCollate};";
     dbDelta($createTable);
 
-    # 16. webhook_logs table - Nhật ký lưu vết gửi webhook
-    $webhookLogsTable = $wpdb->prefix . 'im_webhook_logs';
-    $createTable = "CREATE TABLE `{$webhookLogsTable}` (
+    # 16. website_status_logs table - Nhật ký lưu vết kiểm tra trạng thái website
+    $websiteStatusLogsTable = $wpdb->prefix . 'im_website_status_logs';
+    $createTable = "CREATE TABLE `{$websiteStatusLogsTable}` (
         `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        `event_type` varchar(50) NOT NULL,
-        `webhook_url` varchar(255) NOT NULL,
-        `payload` longtext NULL,
-        `response_code` int(11) NULL,
-        `response_body` text NULL,
+        `website_id` bigint(20) UNSIGNED NULL,
+        `website_name` varchar(255) NOT NULL,
+        `ping_url` varchar(255) NOT NULL,
+        `http_code` int(11) NULL,
         `status` varchar(20) NOT NULL DEFAULT 'FAILED',
+        `plugin_version` varchar(20) NULL,
+        `response_body` text NULL,
         `error_message` text NULL,
         `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (`id`),
-        KEY `event_type` (`event_type`),
+        KEY `website_id` (`website_id`),
         KEY `status` (`status`),
         KEY `created_at` (`created_at`)
     ) {$charsetCollate};";
     dbDelta($createTable);
+    $wpdb->query("ALTER TABLE `{$websiteStatusLogsTable}` ADD COLUMN IF NOT EXISTS `plugin_version` varchar(20) NULL");
 
     # Initialize default email notification settings in WordPress options
     // Set global default for email notifications (can be overridden per user via user meta)
@@ -1509,6 +1511,7 @@ function check_website_online_status()
 
     $websites_table = $wpdb->prefix . 'im_websites';
     $users_table = $wpdb->prefix . 'im_users';
+    $logs_table = $wpdb->prefix . 'im_website_status_logs';
 
     $current_time_mysql = current_time('mysql');
     $interval_minutes = max(5, intval(get_option('inova_website_check_interval', 20)));
@@ -1528,13 +1531,16 @@ function check_website_online_status()
         return;
     }
 
-    $failed_websites = array();
+    $checked_count = 0;
+    $failed_count = 0;
 
     foreach ($outdated_websites as $website) {
         $domain = trim($website->name);
         if (empty($domain)) {
             continue;
         }
+
+        $checked_count++;
 
         // Clean domain (remove http/https prefix if any)
         $clean_domain = preg_replace('#^https?://(www\.)?#', '', $domain);
@@ -1551,13 +1557,21 @@ function check_website_online_status()
         }
 
         $is_online = false;
-        if (!is_wp_error($response)) {
+        $http_code = null;
+        $response_body = null;
+        $error_message = null;
+
+        if (is_wp_error($response)) {
+            $error_message = $response->get_error_message();
+        } else {
             $http_code = wp_remote_retrieve_response_code($response);
-            $body = wp_remote_retrieve_body($response);
-            $data = json_decode($body, true);
+            $response_body = wp_remote_retrieve_body($response);
+            $data = json_decode($response_body, true);
 
             if ($http_code === 200 && !empty($data['status']) && $data['status'] === true) {
                 $is_online = true;
+            } else {
+                $error_message = 'HTTP Status Code: ' . $http_code;
             }
         }
 
@@ -1571,41 +1585,30 @@ function check_website_online_status()
                 array('%d')
             );
         } else {
-            // Failed to respond or offline -> add to alert list
-            $last_seen_diff = $website->active_time ? human_time_diff(strtotime($website->active_time), current_time('timestamp')) : 'Không xác định';
-            $failed_websites[] = array(
-                'name' => $website->name,
-                'last_seen_diff' => $last_seen_diff
-            );
-        }
-    }
-
-    // Trigger Webhook alert if there are failed/offline websites
-    if (!empty($failed_websites) && get_option('inova_webhook_enabled_website_status', 1)) {
-        // Build Markdown table / list format for failed websites
-        $markdown_content = "### ⚠️ Cảnh báo Website mất kết nối / Ngừng hoạt động\n\n";
-        $markdown_content .= "| Tên Website | Lần hoạt động cuối | \n";
-        $markdown_content .= "| :--- | :--- |\n";
-        foreach ($failed_websites as $fw) {
-            $markdown_content .= "| **" . $fw['name'] . "** | " . $fw['last_seen_diff'] . " trước |\n";
+            $failed_count++;
         }
 
-        $status_data = array(
-            'check_interval_minutes' => $interval_minutes,
-            'total_checked' => count($outdated_websites),
-            'total_failed' => count($failed_websites),
-            'failed_websites_markdown' => $markdown_content,
-            'failed_websites' => array_map(function ($fw) {
-                return array(
-                    'name' => $fw['name'],
-                    'last_seen_diff' => $fw['last_seen_diff']
-                );
-            }, $failed_websites)
+        $plugin_version = (!empty($data['version'])) ? sanitize_text_field($data['version']) : null;
+
+        // Log every automatic cron ping attempt into im_website_status_logs
+        $wpdb->insert(
+            $logs_table,
+            array(
+                'website_id'     => $website->id,
+                'website_name'   => $website->name,
+                'ping_url'       => $ping_url,
+                'http_code'      => $http_code,
+                'status'         => $is_online ? 'SUCCESS' : 'FAILED',
+                'plugin_version' => $plugin_version,
+                'response_body'  => $response_body,
+                'error_message'  => $error_message,
+                'created_at'     => current_time('mysql')
+            ),
+            array('%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s')
         );
-        send_webhook_data($status_data, 'website_status_check');
     }
 
-    error_log("Website status check completed. Checked: " . count($outdated_websites) . ", Failed: " . count($failed_websites) . " at " . current_time('Y-m-d H:i:s'));
+    error_log("Website status check completed. Checked: {$checked_count}, Failed: {$failed_count} at " . current_time('Y-m-d H:i:s'));
 }
 
 function schedule_expiry_check_cron($force_reschedule = false)
@@ -2835,14 +2838,14 @@ function send_webhook_data($data, $event_type = 'generic')
 }
 
 /**
- * Cleanup old webhook logs based on retention settings
+ * Cleanup old website status logs based on retention settings
  */
-function cleanup_old_webhook_logs()
+function cleanup_old_website_status_logs()
 {
     global $wpdb;
-    $logs_table = $wpdb->prefix . 'im_webhook_logs';
+    $logs_table = $wpdb->prefix . 'im_website_status_logs';
 
-    $retention_days = max(1, intval(get_option('inova_webhook_log_retention_days', 30)));
+    $retention_days = max(1, intval(get_option('inova_website_log_retention_days', 30)));
     $current_time = current_time('mysql');
 
     $deleted_count = $wpdb->query($wpdb->prepare("
@@ -2851,7 +2854,7 @@ function cleanup_old_webhook_logs()
     ", $current_time, $retention_days));
 
     if ($deleted_count !== false) {
-        error_log("Cleaned up {$deleted_count} webhook logs older than {$retention_days} days.");
+        error_log("Cleaned up {$deleted_count} website status logs older than {$retention_days} days.");
     }
 }
 
@@ -3049,7 +3052,7 @@ add_action('init', 'schedule_expiry_check_cron');
 // Scheduled checks
 add_action('inovamanager_check_expiry_daily', 'check_and_send_expiry_emails');
 add_action('inovamanager_check_website_status_cron', 'check_website_online_status');
-add_action('inovamanager_cleanup_logs_daily', 'cleanup_old_webhook_logs');
+add_action('inovamanager_cleanup_logs_daily', 'cleanup_old_website_status_logs');
 
 // Auto renewal scheduling
 add_action('wp', 'schedule_auto_renewal_invoices');

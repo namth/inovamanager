@@ -1198,3 +1198,200 @@ add_action('wp', 'handle_virtual_page_request');
 add_action('wp_head', 'debug_page_template_info');
 add_action('admin_menu', 'add_template_management_menu');
 add_action('admin_bar_menu', 'add_template_info_to_admin_bar', 100);
+
+add_action('admin_menu', function() {
+    add_menu_page(
+        'Nhật ký Website',
+        'Nhật ký Website',
+        'manage_options',
+        'nhat-ky-website-admin',
+        'render_website_status_logs_admin_page',
+        'dashicons-list-view',
+        30
+    );
+});
+
+function render_website_status_logs_admin_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(__('Bạn không có quyền truy cập trang này.', 'inovamanager'));
+    }
+
+    global $wpdb;
+    $logs_table = $wpdb->prefix . 'im_website_status_logs';
+
+    $search_query = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
+    $status_filter = isset($_GET['status']) ? sanitize_text_field($_GET['status']) : '';
+
+    $where_conditions = array();
+    if (!empty($status_filter) && in_array(strtoupper($status_filter), array('SUCCESS', 'FAILED'))) {
+        $where_conditions[] = $wpdb->prepare("status = %s", strtoupper($status_filter));
+    }
+    if (!empty($search_query)) {
+        $search_like = '%' . $wpdb->esc_like($search_query) . '%';
+        $where_conditions[] = $wpdb->prepare("(website_name LIKE %s OR ping_url LIKE %s OR error_message LIKE %s)", $search_like, $search_like, $search_like);
+    }
+    $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
+
+    $items_per_page = 20;
+    $current_page = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+
+    $total_items = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$logs_table} {$where_clause}");
+    $total_pages = ceil($total_items / $items_per_page);
+    $offset = ($current_page - 1) * $items_per_page;
+
+    $logs = $wpdb->get_results("SELECT * FROM {$logs_table} {$where_clause} ORDER BY id DESC LIMIT {$items_per_page} OFFSET {$offset}");
+    ?>
+    <div class="wrap">
+        <h1 class="wp-heading-inline">Nhật ký kiểm tra trạng thái Website</h1>
+        <button type="button" id="clear-status-logs-btn" class="button button-link-delete" style="margin-left: 10px;">Xóa toàn bộ nhật ký</button>
+        <hr class="wp-header-end">
+
+        <p class="description">Lưu vết lịch sử kiểm tra định kỳ (Cronjob) gửi request ping tới các website vệ tinh.</p>
+
+        <form method="GET" action="" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center; margin-top: 10px;">
+            <input type="hidden" name="page" value="nhat-ky-website-admin">
+            <input type="search" name="s" value="<?php echo esc_attr($search_query); ?>" placeholder="Tìm tên website, URL ping..." style="width: 250px;">
+            <select name="status">
+                <option value="">-- Tất cả trạng thái --</option>
+                <option value="SUCCESS" <?php selected($status_filter, 'SUCCESS'); ?>>SUCCESS (Thành công)</option>
+                <option value="FAILED" <?php selected($status_filter, 'FAILED'); ?>>FAILED (Thất bại)</option>
+            </select>
+            <input type="submit" class="button button-secondary" value="Lọc danh sách">
+            <?php if (!empty($search_query) || !empty($status_filter)): ?>
+                <a href="<?php echo admin_url('admin.php?page=nhat-ky-website-admin'); ?>" class="button">Đặt lại</a>
+            <?php endif; ?>
+        </form>
+
+        <table class="wp-list-table widefat fixed striped table-view-list">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">ID</th>
+                    <th style="width: 160px;">Thời gian</th>
+                    <th>Tên Website</th>
+                    <th>Endpoint Ping</th>
+                    <th style="width: 100px;">Phiên bản</th>
+                    <th style="width: 110px;">Trạng thái</th>
+                    <th style="width: 100px;">Mã HTTP</th>
+                    <th>Chi tiết Phản hồi / Lỗi</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (empty($logs)): ?>
+                <tr>
+                    <td colspan="8" style="text-align: center; color: #666; padding: 20px;">Không có nhật ký kiểm tra website nào.</td>
+                </tr>
+                <?php else: ?>
+                    <?php foreach ($logs as $log): ?>
+                    <tr>
+                        <td><code>#<?php echo esc_html($log->id); ?></code></td>
+                        <td><?php echo esc_html($log->created_at); ?></td>
+                        <td><strong><?php echo esc_html($log->website_name); ?></strong></td>
+                        <td><code><?php echo esc_html($log->ping_url); ?></code></td>
+                        <td>
+                            <?php 
+                            $version = !empty($log->plugin_version) ? $log->plugin_version : '';
+                            if (empty($version) && !empty($log->response_body)) {
+                                $parsed_body = json_decode($log->response_body, true);
+                                if (is_array($parsed_body) && !empty($parsed_body['version'])) {
+                                    $version = $parsed_body['version'];
+                                }
+                            }
+                            ?>
+                            <?php if (!empty($version)): ?>
+                                <span style="background: #e7f5ea; color: #008a20; padding: 2px 6px; border-radius: 3px; font-weight: 600; font-size: 11px;">v<?php echo esc_html($version); ?></span>
+                            <?php else: ?>
+                                <span style="color: #999;">N/A</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if ($log->status === 'SUCCESS'): ?>
+                                <span style="color: #46b450; font-weight: bold;">✔ SUCCESS</span>
+                            <?php else: ?>
+                                <span style="color: #dc3232; font-weight: bold;">✖ FAILED</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if ($log->http_code == 200): ?>
+                                <span style="color: #46b450;">200 OK</span>
+                            <?php elseif ($log->http_code): ?>
+                                <span style="color: #dc3232;">HTTP <?php echo esc_html($log->http_code); ?></span>
+                            <?php else: ?>
+                                <span style="color: #999;">N/A</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <details>
+                                <summary style="cursor: pointer; color: #2271b1;">Xem chi tiết</summary>
+                                <div style="margin-top: 5px; padding: 8px; background: #f6f7f7; border: 1px solid #c3c4c7; border-radius: 4px;">
+                                    <?php if (!empty($log->error_message)): ?>
+                                        <strong style="color: #dc3232;">Lỗi:</strong>
+                                        <div style="color: #dc3232; margin-bottom: 5px; font-family: monospace; font-size: 12px;"><?php echo esc_html($log->error_message); ?></div>
+                                    <?php endif; ?>
+                                    <strong>Response Body:</strong>
+                                    <pre style="margin: 3px 0 0 0; padding: 5px; background: #fff; border: 1px solid #dcdcde; max-height: 150px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all;"><?php echo esc_html($log->response_body ? $log->response_body : 'No response body'); ?></pre>
+                                </div>
+                            </details>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
+
+        <?php if ($total_pages > 1): ?>
+        <div class="tablenav bottom">
+            <div class="tablenav-pages">
+                <span class="displaying-num"><?php echo $total_items; ?> bản ghi</span>
+                <span class="pagination-links">
+                    <?php
+                    $base_url = admin_url('admin.php?page=nhat-ky-website-admin');
+                    if (!empty($search_query)) $base_url = add_query_arg('s', $search_query, $base_url);
+                    if (!empty($status_filter)) $base_url = add_query_arg('status', $status_filter, $base_url);
+
+                    for ($i = 1; $i <= $total_pages; $i++) {
+                        $page_link = add_query_arg('paged', $i, $base_url);
+                        if ($i == $current_page) {
+                            echo '<span class="paging-input"><span class="current-page">' . $i . '</span></span> ';
+                        } else {
+                            echo '<a class="page-numbers" href="' . esc_url($page_link) . '">' . $i . '</a> ';
+                        }
+                    }
+                    ?>
+                </span>
+            </div>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const clearBtn = document.getElementById('clear-status-logs-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function() {
+                if (confirm('Bạn có chắc chắn muốn xóa TOÀN BỘ nhật ký kiểm tra trạng thái Website?')) {
+                    const formData = new FormData();
+                    formData.append('action', 'clear_website_status_logs');
+
+                    fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(data.data.message);
+                            window.location.reload();
+                        } else {
+                            alert('Lỗi: ' + data.data.message);
+                        }
+                    })
+                    .catch(err => {
+                        alert('Có lỗi xảy ra khi kết nối tới hệ thống!');
+                    });
+                }
+            });
+        }
+    });
+    </script>
+    <?php
+}
