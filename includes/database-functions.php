@@ -1533,6 +1533,7 @@ function check_website_online_status()
 
     $checked_count = 0;
     $failed_count = 0;
+    $failed_websites = array();
 
     foreach ($outdated_websites as $website) {
         $domain = trim($website->name);
@@ -1586,6 +1587,17 @@ function check_website_online_status()
             );
         } else {
             $failed_count++;
+            $failed_websites[] = array(
+                'id'             => intval($website->id),
+                'name'           => $website->name,
+                'owner_name'     => !empty($website->owner_name) ? $website->owner_name : 'N/A',
+                'owner_email'    => !empty($website->owner_email) ? $website->owner_email : 'N/A',
+                'ping_url'       => $ping_url,
+                'http_code'      => $http_code,
+                'error_message'  => $error_message,
+                'active_time'    => $website->active_time,
+                'last_seen_diff' => !empty($website->active_time) ? human_time_diff(strtotime($website->active_time), current_time('timestamp')) . ' trước' : 'Chưa từng hoạt động'
+            );
         }
 
         $plugin_version = (!empty($data['version'])) ? sanitize_text_field($data['version']) : null;
@@ -1609,6 +1621,11 @@ function check_website_online_status()
     }
 
     error_log("Website status check completed. Checked: {$checked_count}, Failed: {$failed_count} at " . current_time('Y-m-d H:i:s'));
+
+    // Trigger webhook if there are failed websites
+    if (!empty($failed_websites)) {
+        trigger_website_online_status_webhook($failed_websites, $checked_count, $failed_count, $interval_minutes);
+    }
 }
 
 function schedule_expiry_check_cron($force_reschedule = false)
@@ -2992,39 +3009,43 @@ function trigger_expiry_check_webhook($expiring_domains, $expiring_hostings, $ex
     }
 }
 
-function trigger_website_online_status_webhook($websites_over_1_day, $websites_over_2_days)
+function trigger_website_online_status_webhook($failed_websites, $total_checked = 0, $total_failed = 0, $interval_minutes = 20)
 {
     // Check if webhook is enabled for website status
     if (!get_option('inova_webhook_enabled_website_status', 1)) {
         return;
     }
 
+    if (empty($failed_websites)) {
+        return;
+    }
+
+    // Generate Markdown summary for notification messages (Telegram/Discord/n8n)
+    $markdown_lines = array();
+    $markdown_lines[] = "⚠️ **CẢNH BÁO WEBSITE MẤT KẾT NỐI / NGỪNG HOẠT ĐỘNG**";
+    $markdown_lines[] = "📊 **Tổng kiểm tra:** {$total_checked} | **Lỗi:** {$total_failed}";
+    $markdown_lines[] = "⏱️ **Chu kỳ:** {$interval_minutes} phút";
+    $markdown_lines[] = "---";
+
+    foreach ($failed_websites as $fw) {
+        $error_desc = !empty($fw['error_message']) ? $fw['error_message'] : ('HTTP Code ' . ($fw['http_code'] ?? 'Unknown'));
+        $markdown_lines[] = "• **{$fw['name']}** (ID: {$fw['id']})";
+        $markdown_lines[] = "  - Khách hàng: {$fw['owner_name']} ({$fw['owner_email']})";
+        $markdown_lines[] = "  - Lần cuối hoạt động: {$fw['last_seen_diff']}";
+        $markdown_lines[] = "  - Chi tiết lỗi: `{$error_desc}`";
+    }
+
+    $failed_websites_markdown = implode("\n", $markdown_lines);
+
     $status_data = array(
-        'over_1_day' => array_map(function ($w) {
-            return array(
-                'id' => intval($w->id),
-                'name' => $w->name,
-                'owner_name' => $w->owner_name,
-                'owner_email' => $w->owner_email,
-                'active_time' => $w->active_time,
-                'last_seen_diff' => human_time_diff(strtotime($w->active_time), current_time('timestamp'))
-            );
-        }, $websites_over_1_day),
-        'over_2_days' => array_map(function ($w) {
-            return array(
-                'id' => intval($w->id),
-                'name' => $w->name,
-                'owner_name' => $w->owner_name,
-                'owner_email' => $w->owner_email,
-                'active_time' => $w->active_time,
-                'last_seen_diff' => human_time_diff(strtotime($w->active_time), current_time('timestamp'))
-            );
-        }, $websites_over_2_days),
+        'check_interval_minutes'   => intval($interval_minutes),
+        'total_checked'            => intval($total_checked),
+        'total_failed'             => intval($total_failed),
+        'failed_websites_markdown' => $failed_websites_markdown,
+        'failed_websites'          => $failed_websites
     );
 
-    if (!empty($websites_over_1_day) || !empty($websites_over_2_days)) {
-        send_webhook_data($status_data, 'website_status_check');
-    }
+    send_webhook_data($status_data, 'website_status_check');
 }
 
 
