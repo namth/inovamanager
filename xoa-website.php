@@ -104,8 +104,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_delete'])) {
                     // Delete related invoice items
                     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
                     $wpdb->delete($invoice_items_table, array('service_type' => 'Domain', 'service_id' => $website->domain_id), array('%s', '%d'));
+                    
+                    // Remove domain reference from website on hard delete
+                    $wpdb->update(
+                        $websites_table,
+                        array('domain_id' => null),
+                        array('id' => $website_id),
+                        array('%d'),
+                        array('%d')
+                    );
                 } else {
-                    // Soft delete domain and detach from website
+                    // Soft delete domain: keep FK reference intact
                     $wpdb->update(
                         $domains_table,
                         array('status' => 'DELETED'),
@@ -114,15 +123,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_delete'])) {
                         array('%d')
                     );
                 }
-                
-                // Remove domain reference from website
-                $wpdb->update(
-                    $websites_table,
-                    array('domain_id' => null),
-                    array('id' => $website_id),
-                    array('%d'),
-                    array('%d')
-                );
             }
             
             // Handle hosting deletion/detachment
@@ -134,8 +134,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_delete'])) {
                     // Delete related invoice items
                     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
                     $wpdb->delete($invoice_items_table, array('service_type' => 'Hosting', 'service_id' => $website->hosting_id), array('%s', '%d'));
+                    
+                    // Remove hosting reference from website on hard delete
+                    $wpdb->update(
+                        $websites_table,
+                        array('hosting_id' => null),
+                        array('id' => $website_id),
+                        array('%d'),
+                        array('%d')
+                    );
                 } else {
-                    // Soft delete hosting and detach from website
+                    // Soft delete hosting: keep FK reference intact
                     $wpdb->update(
                         $hostings_table,
                         array('status' => 'DELETED'),
@@ -144,15 +153,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_delete'])) {
                         array('%d')
                     );
                 }
-                
-                // Remove hosting reference from website
-                $wpdb->update(
-                    $websites_table,
-                    array('hosting_id' => null),
-                    array('id' => $website_id),
-                    array('%d'),
-                    array('%d')
-                );
             }
             
             // Handle maintenance deletion/detachment
@@ -164,8 +164,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_delete'])) {
                     // Delete related invoice items
                     $invoice_items_table = $wpdb->prefix . 'im_invoice_items';
                     $wpdb->delete($invoice_items_table, array('service_type' => 'Maintenance', 'service_id' => $website->maintenance_package_id), array('%s', '%d'));
+                    
+                    // Remove maintenance reference from website on hard delete
+                    $wpdb->update(
+                        $websites_table,
+                        array('maintenance_package_id' => null),
+                        array('id' => $website_id),
+                        array('%d'),
+                        array('%d')
+                    );
                 } else {
-                    // Soft delete maintenance and detach from website
+                    // Soft delete maintenance: keep FK reference intact
                     $wpdb->update(
                         $maintenance_table,
                         array('status' => 'DELETED'),
@@ -174,15 +183,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['confirm_delete'])) {
                         array('%d')
                     );
                 }
-                
-                // Remove maintenance reference from website
-                $wpdb->update(
-                    $websites_table,
-                    array('maintenance_package_id' => null),
-                    array('id' => $website_id),
-                    array('%d'),
-                    array('%d')
-                );
             }
             
             // If deleting website (all services selected)
@@ -283,7 +283,7 @@ get_header();
                                             <div class="mb-3">
                                                 <div class="form-check">
                                                     <label class="form-check-label fw-bold" for="select_all_services">
-                                                        <input class="form-check-input" type="checkbox" id="select_all_services">
+                                                        <input class="form-check-input" type="checkbox" id="select_all_services" checked>
                                                         Chọn tất cả dịch vụ
                                                     </label>
                                                 </div>
@@ -301,7 +301,7 @@ get_header();
                                                             <input class="form-check service-checkbox ps-3" type="checkbox" 
                                                                 value="domain" 
                                                                 id="domain_service" 
-                                                                name="selected_domain">
+                                                                name="selected_domain" checked>
                                                             <label class="" for="domain_service">
                                                                     <div class="d-flex justify-content-between align-items-start">
                                                                         <div>
@@ -332,7 +332,7 @@ get_header();
                                                             <input class=" service-checkbox" type="checkbox" 
                                                                    value="hosting" 
                                                                    id="hosting_service" 
-                                                                   name="selected_hosting">
+                                                                   name="selected_hosting" checked>
                                                             <label class="form-check-label" for="hosting_service">
                                                                 <div class="d-flex justify-content-between align-items-start">
                                                                     <div>
@@ -364,7 +364,7 @@ get_header();
                                                             Dịch vụ Bảo trì
                                                         </h6>
                                                         <div class=" mb-2 ms-3 d-flex gap-2">
-                                                            <input class="service-checkbox" type="checkbox" value="maintenance" id="maintenance_service" name="selected_maintenance">
+                                                            <input class="service-checkbox" type="checkbox" value="maintenance" id="maintenance_service" name="selected_maintenance" checked>
                                                             <label class="form-check-label" for="maintenance_service">
                                                                 <div class="d-flex justify-content-between align-items-start">
                                                                     <div>
@@ -401,7 +401,7 @@ get_header();
                                                                     <input class="form-check-input service-checkbox" type="checkbox" 
                                                                            value="<?php echo $service->id; ?>" 
                                                                            id="service_<?php echo $service->id; ?>" 
-                                                                           name="selected_services[]">
+                                                                           name="selected_services[]" checked>
                                                                 </label>
                                                                 <div class="d-flex justify-content-between align-items-start">
                                                                     <div>
