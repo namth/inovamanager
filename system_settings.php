@@ -55,6 +55,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_vat'])) {
             update_option('inova_webhook_enabled_expiry', isset($_POST['inova_webhook_enabled_expiry']) ? 1 : 0);
             update_option('inova_webhook_enabled_website_status', isset($_POST['inova_webhook_enabled_website_status']) ? 1 : 0);
             update_option('inova_website_check_interval', max(5, intval($_POST['inova_website_check_interval'])));
+            update_option('inova_website_max_active_hours', max(1, intval($_POST['inova_website_max_active_hours'])));
             update_option('inova_webhook_log_retention_days', max(1, intval($_POST['inova_webhook_log_retention_days'])));
 
             // Re-schedule cron when interval changes
@@ -89,6 +90,7 @@ $webhook_enabled_renewal = get_option('inova_webhook_enabled_renewal', 1);
 $webhook_enabled_expiry = get_option('inova_webhook_enabled_expiry', 1);
 $webhook_enabled_website_status = get_option('inova_webhook_enabled_website_status', 1);
 $website_check_interval = get_option('inova_website_check_interval', 20);
+$website_max_active_hours = get_option('inova_website_max_active_hours', 6);
 $webhook_log_retention_days = get_option('inova_webhook_log_retention_days', 30);
 
 // Static banks list from Sepay
@@ -471,7 +473,7 @@ get_header();
                                         </div>
 
                                         <div class="row">
-                                            <div class="col-md-6 mb-3">
+                                            <div class="col-md-4 mb-3">
                                                 <label for="inova_website_check_interval" class="form-label fw-bold">Chu kỳ kiểm tra trạng thái Website (phút) <span class="text-danger">*</span></label>
                                                 <input type="number" min="5" max="1440" class="form-control" id="inova_website_check_interval" name="inova_website_check_interval" 
                                                        value="<?php echo esc_attr($website_check_interval); ?>" 
@@ -479,7 +481,15 @@ get_header();
                                                 <small class="form-text text-muted">Khoảng thời gian (tính theo phút, mặc định: 20 phút) hệ thống tự động kiểm tra active_time.</small>
                                             </div>
 
-                                            <div class="col-md-6 mb-3">
+                                            <div class="col-md-4 mb-3">
+                                                <label for="inova_website_max_active_hours" class="form-label fw-bold">Giới hạn active_time thông báo (giờ) <span class="text-danger">*</span></label>
+                                                <input type="number" min="1" max="720" class="form-control" id="inova_website_max_active_hours" name="inova_website_max_active_hours" 
+                                                       value="<?php echo esc_attr($website_max_active_hours); ?>" 
+                                                       required>
+                                                <small class="form-text text-muted">Bỏ qua thông báo Webhook cho website có active_time quá số giờ này (chặn trên, mặc định: 6 giờ).</small>
+                                            </div>
+
+                                            <div class="col-md-4 mb-3">
                                                 <label for="inova_webhook_log_retention_days" class="form-label fw-bold">Thời gian lưu trữ nhật ký Log (ngày) <span class="text-danger">*</span></label>
                                                 <input type="number" min="1" max="365" class="form-control" id="inova_webhook_log_retention_days" name="inova_webhook_log_retention_days" 
                                                        value="<?php echo esc_attr($webhook_log_retention_days); ?>" 
@@ -521,7 +531,7 @@ get_header();
                                                            <?php checked($webhook_enabled_website_status, 1); ?>>
                                                     <label class="form-check-label" for="inova_webhook_enabled_website_status">
                                                         <strong>Cảnh báo Website ngừng hoạt động / Mất kết nối</strong>
-                                                        <small class="d-block text-muted">Gửi danh sách các website không phản hồi status hoặc quá thời gian active_time cho phép qua Webhook</small>
+                                                        <small class="d-block text-muted">Gửi danh sách các website không phản hồi status hoặc trong khoảng thời gian active_time cho phép (không quá giới hạn giờ đã cấu hình) qua Webhook</small>
                                                     </label>
                                                 </div>
                                             </div>
@@ -532,7 +542,7 @@ get_header();
                                             <ul class="mb-0 mt-2">
                                                 <li><strong>Renewal Invoice:</strong> invoice_id, invoice_link, customer_id, customer_name, total_amount, items (JSON)</li>
                                                 <li><strong>Expiry Check:</strong> services_expiring (array of domains, hostings, maintenances with details)</li>
-                                                <li><strong>Website Status Check:</strong> check_interval_minutes, total_checked, total_failed, failed_websites_markdown (Markdown format), failed_websites (array of name, last_seen_diff)</li>
+                                                <li><strong>Website Status Check:</strong> check_interval_minutes, max_active_hours, total_checked, total_failed, failed_websites_markdown (Markdown format), failed_websites (array of name, last_seen_diff)</li>
                                             </ul>
                                         </div>
                                     </div>

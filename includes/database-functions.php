@@ -3020,14 +3020,42 @@ function trigger_website_online_status_webhook($failed_websites, $total_checked 
         return;
     }
 
+    // Get max active_time limit (upper bound in hours, default 6 hours)
+    $max_active_hours = max(1, intval(get_option('inova_website_max_active_hours', 6)));
+    $current_timestamp = current_time('timestamp');
+    $max_diff_seconds = $max_active_hours * 3600;
+
+    // Filter failed websites: exclude those with active_time older than max_active_hours (chặn trên)
+    $filtered_failed_websites = array();
+    foreach ($failed_websites as $fw) {
+        if (!empty($fw['active_time'])) {
+            $active_timestamp = strtotime($fw['active_time']);
+            $diff_seconds = $current_timestamp - $active_timestamp;
+            if ($diff_seconds > $max_diff_seconds) {
+                // Skip websites that have been inactive for longer than max_active_hours
+                continue;
+            }
+        } else {
+            // If active_time is missing/null, skip as well
+            continue;
+        }
+        $filtered_failed_websites[] = $fw;
+    }
+
+    if (empty($filtered_failed_websites)) {
+        return;
+    }
+
+    $filtered_failed_count = count($filtered_failed_websites);
+
     // Generate Markdown summary for notification messages (Telegram/Discord/n8n)
     $markdown_lines = array();
     $markdown_lines[] = "⚠️ **CẢNH BÁO WEBSITE MẤT KẾT NỐI / NGỪNG HOẠT ĐỘNG**";
-    $markdown_lines[] = "📊 **Tổng kiểm tra:** {$total_checked} | **Lỗi:** {$total_failed}";
-    $markdown_lines[] = "⏱️ **Chu kỳ:** {$interval_minutes} phút";
+    $markdown_lines[] = "📊 **Tổng kiểm tra:** {$total_checked} | **Lỗi cần thông báo:** {$filtered_failed_count}";
+    $markdown_lines[] = "⏱️ **Chu kỳ:** {$interval_minutes} phút | **Giới hạn active_time:** <= {$max_active_hours} giờ";
     $markdown_lines[] = "---";
 
-    foreach ($failed_websites as $fw) {
+    foreach ($filtered_failed_websites as $fw) {
         $error_desc = !empty($fw['error_message']) ? $fw['error_message'] : ('HTTP Code ' . ($fw['http_code'] ?? 'Unknown'));
         $markdown_lines[] = "• **{$fw['name']}** (ID: {$fw['id']})";
         $markdown_lines[] = "  - Khách hàng: {$fw['owner_name']} ({$fw['owner_email']})";
@@ -3039,10 +3067,11 @@ function trigger_website_online_status_webhook($failed_websites, $total_checked 
 
     $status_data = array(
         'check_interval_minutes'   => intval($interval_minutes),
+        'max_active_hours'         => intval($max_active_hours),
         'total_checked'            => intval($total_checked),
-        'total_failed'             => intval($total_failed),
+        'total_failed'             => intval($filtered_failed_count),
         'failed_websites_markdown' => $failed_websites_markdown,
-        'failed_websites'          => $failed_websites
+        'failed_websites'          => $filtered_failed_websites
     );
 
     send_webhook_data($status_data, 'website_status_check');
