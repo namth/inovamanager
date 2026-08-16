@@ -826,14 +826,7 @@ get_header('nologin');
                                 <div class="qr-info-row">
                                     <span class="qr-info-label">Số tài khoản:</span>
                                     <span class="qr-info-value">
-                                        <?php
-                                        // Nếu là doanh nghiệp có lấy hóa đơn đỏ (VAT) thì hiển thị số tài khoản với VAT
-                                        if ($invoice->requires_vat_invoice && get_option('payment_account_number_with_vat')) {
-                                            echo get_option('payment_account_number_with_vat');
-                                        } else {
-                                            echo get_option('payment_account_number');
-                                        }
-                                        ?>
+                                        <?php echo esc_html(get_payment_account_number($requires_vat_invoice, $invoice->payment_method)); ?>
                                     </span>
                                 </div>
                                 <div class="qr-info-row">

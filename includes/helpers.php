@@ -390,6 +390,22 @@ function generate_payment_qr_code($amount, $add_info = '', $requires_vat_invoice
     return $url;
 }
 
+function get_payment_account_number($requires_vat_invoice = 0, $payment_method = '')
+{
+    if (!$requires_vat_invoice || $payment_method === 'cash') {
+        $account_number = get_option('payment_account_number_no_vat');
+    } else {
+        $account_number = get_option('payment_account_number_with_vat');
+    }
+
+    if (empty($account_number)) {
+        $account_number = get_option('payment_account_number');
+    }
+
+    return $account_number;
+}
+
+
 function get_public_invoice_url($invoice_id)
 {
     global $wpdb;
