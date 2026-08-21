@@ -441,6 +441,27 @@ function CreateDatabaseBookOrder()
     dbDelta($createTable);
     $wpdb->query("ALTER TABLE `{$websiteStatusLogsTable}` ADD COLUMN IF NOT EXISTS `plugin_version` varchar(20) NULL");
 
+    # 17. plugin_activity_logs table - Nhật ký thay đổi trạng thái plugin trên các website
+    $pluginActivityLogsTable = $wpdb->prefix . 'im_plugin_activity_logs';
+    $createTable = "CREATE TABLE `{$pluginActivityLogsTable}` (
+        `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        `website_id` bigint(20) UNSIGNED NOT NULL,
+        `website_name` varchar(255) NULL,
+        `action` varchar(30) NOT NULL,
+        `plugin_slug` varchar(255) NOT NULL,
+        `plugin_name` varchar(255) NOT NULL,
+        `plugin_version` varchar(50) NULL,
+        `old_version` varchar(50) NULL,
+        `performed_by` varchar(255) NULL,
+        `ip_address` varchar(45) NULL,
+        `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`),
+        KEY `website_id` (`website_id`),
+        KEY `action` (`action`),
+        KEY `created_at` (`created_at`)
+    ) {$charsetCollate};";
+    dbDelta($createTable);
+
     # Initialize default email notification settings in WordPress options
     // Set global default for email notifications (can be overridden per user via user meta)
     if (!get_option('inova_email_notification_defaults')) {
@@ -1637,9 +1658,23 @@ function check_website_online_status()
 
     error_log("Website status check completed. Checked: {$checked_count}, Failed: {$failed_count} at " . current_time('Y-m-d H:i:s'));
 
-    // Trigger webhook if there are failed websites
-    if (!empty($failed_websites)) {
-        trigger_website_online_status_webhook($failed_websites, $checked_count, $failed_count, $interval_minutes);
+    // Check for recent plugin activity logs within interval
+    $plugin_logs_table = $wpdb->prefix . 'im_plugin_activity_logs';
+    $recent_plugin_logs = array();
+    
+    // Check if table exists before querying
+    if ($wpdb->get_var("SHOW TABLES LIKE '{$plugin_logs_table}'") === $plugin_logs_table) {
+        $recent_plugin_logs = $wpdb->get_results($wpdb->prepare("
+            SELECT *
+            FROM {$plugin_logs_table}
+            WHERE created_at >= DATE_SUB(%s, INTERVAL %d MINUTE)
+            ORDER BY created_at DESC
+        ", $current_time_mysql, $interval_minutes), ARRAY_A);
+    }
+
+    // Trigger webhook if there are failed websites OR recent plugin changes
+    if (!empty($failed_websites) || !empty($recent_plugin_logs)) {
+        trigger_website_online_status_webhook($failed_websites, $checked_count, $failed_count, $interval_minutes, $recent_plugin_logs);
     }
 }
 
@@ -2870,16 +2905,18 @@ function send_webhook_data($data, $event_type = 'generic')
 }
 
 /**
- * Cleanup old website status logs based on retention settings
+ * Cleanup old website status logs and plugin activity logs based on retention settings (default 30 days)
  */
 function cleanup_old_website_status_logs()
 {
     global $wpdb;
     $logs_table = $wpdb->prefix . 'im_website_status_logs';
+    $plugin_logs_table = $wpdb->prefix . 'im_plugin_activity_logs';
 
     $retention_days = max(1, intval(get_option('inova_website_log_retention_days', 30)));
     $current_time = current_time('mysql');
 
+    // 1. Cleanup website status logs
     $deleted_count = $wpdb->query($wpdb->prepare("
         DELETE FROM {$logs_table}
         WHERE created_at < DATE_SUB(%s, INTERVAL %d DAY)
@@ -2887,6 +2924,18 @@ function cleanup_old_website_status_logs()
 
     if ($deleted_count !== false) {
         error_log("Cleaned up {$deleted_count} website status logs older than {$retention_days} days.");
+    }
+
+    // 2. Cleanup plugin activity logs (30 days retention)
+    if ($wpdb->get_var("SHOW TABLES LIKE '{$plugin_logs_table}'") === $plugin_logs_table) {
+        $deleted_plugin_logs = $wpdb->query($wpdb->prepare("
+            DELETE FROM {$plugin_logs_table}
+            WHERE created_at < DATE_SUB(%s, INTERVAL %d DAY)
+        ", $current_time, $retention_days));
+
+        if ($deleted_plugin_logs !== false) {
+            error_log("Cleaned up {$deleted_plugin_logs} plugin activity logs older than {$retention_days} days.");
+        }
     }
 }
 
@@ -3024,14 +3073,10 @@ function trigger_expiry_check_webhook($expiring_domains, $expiring_hostings, $ex
     }
 }
 
-function trigger_website_online_status_webhook($failed_websites, $total_checked = 0, $total_failed = 0, $interval_minutes = 20)
+function trigger_website_online_status_webhook($failed_websites = array(), $total_checked = 0, $total_failed = 0, $interval_minutes = 20, $plugin_logs = array())
 {
     // Check if webhook is enabled for website status
     if (!get_option('inova_webhook_enabled_website_status', 1)) {
-        return;
-    }
-
-    if (empty($failed_websites)) {
         return;
     }
 
@@ -3042,40 +3087,114 @@ function trigger_website_online_status_webhook($failed_websites, $total_checked 
 
     // Filter failed websites: exclude those with active_time older than max_active_hours (chặn trên)
     $filtered_failed_websites = array();
-    foreach ($failed_websites as $fw) {
-        if (!empty($fw['active_time'])) {
-            $active_timestamp = strtotime($fw['active_time']);
-            $diff_seconds = $current_timestamp - $active_timestamp;
-            if ($diff_seconds > $max_diff_seconds) {
-                // Skip websites that have been inactive for longer than max_active_hours
+    if (!empty($failed_websites)) {
+        foreach ($failed_websites as $fw) {
+            if (!empty($fw['active_time'])) {
+                $active_timestamp = strtotime($fw['active_time']);
+                $diff_seconds = $current_timestamp - $active_timestamp;
+                if ($diff_seconds > $max_diff_seconds) {
+                    // Skip websites that have been inactive for longer than max_active_hours
+                    continue;
+                }
+            } else {
+                // If active_time is missing/null, skip as well
                 continue;
             }
-        } else {
-            // If active_time is missing/null, skip as well
-            continue;
+            $filtered_failed_websites[] = $fw;
         }
-        $filtered_failed_websites[] = $fw;
-    }
-
-    if (empty($filtered_failed_websites)) {
-        return;
     }
 
     $filtered_failed_count = count($filtered_failed_websites);
+    $has_plugin_changes = !empty($plugin_logs);
+
+    // If no failed websites and no plugin changes, nothing to notify
+    if (empty($filtered_failed_websites) && !$has_plugin_changes) {
+        return;
+    }
 
     // Generate Markdown summary for notification messages (Telegram/Discord/n8n)
     $markdown_lines = array();
-    $markdown_lines[] = "⚠️ **CẢNH BÁO WEBSITE MẤT KẾT NỐI / NGỪNG HOẠT ĐỘNG**";
-    $markdown_lines[] = "📊 **Tổng kiểm tra:** {$total_checked} | **Lỗi cần thông báo:** {$filtered_failed_count}";
-    $markdown_lines[] = "⏱️ **Chu kỳ:** {$interval_minutes} phút | **Giới hạn active_time:** <= {$max_active_hours} giờ";
+
+    if ($filtered_failed_count > 0 && $has_plugin_changes) {
+        $markdown_lines[] = "⚠️ **CẢNH BÁO GIÁM SÁT HỆ THỐNG WEBSITE & PLUGIN**";
+    } elseif ($has_plugin_changes) {
+        $markdown_lines[] = "🔌 **THÔNG BÁO: PHÁT HIỆN THAY ĐỔI PLUGIN TRÊN WEBSITE**";
+    } else {
+        $markdown_lines[] = "⚠️ **CẢNH BÁO WEBSITE MẤT KẾT NỐI / NGỪNG HOẠT ĐỘNG**";
+    }
+
+    $markdown_lines[] = "⏱️ **Chu kỳ:** {$interval_minutes} phút | **Thời gian:** " . current_time('Y-m-d H:i:s');
     $markdown_lines[] = "---";
 
-    foreach ($filtered_failed_websites as $fw) {
-        $error_desc = !empty($fw['error_message']) ? $fw['error_message'] : ('HTTP Code ' . ($fw['http_code'] ?? 'Unknown'));
-        $markdown_lines[] = "• **{$fw['name']}** (ID: {$fw['id']})";
-        $markdown_lines[] = "  - Khách hàng: {$fw['owner_name']} ({$fw['owner_email']})";
-        $markdown_lines[] = "  - Lần cuối hoạt động: {$fw['last_seen_diff']}";
-        $markdown_lines[] = "  - Chi tiết lỗi: `{$error_desc}`";
+    // 1. Format Plugin Changes Section
+    if ($has_plugin_changes) {
+        $plugin_count = count($plugin_logs);
+        $markdown_lines[] = "🔌 **CÁC THAY ĐỔI PLUGIN VỪA GHI NHẬN ({$plugin_count} sự kiện):**";
+        
+        // Group plugin logs by website_name
+        $grouped_logs = array();
+        foreach ($plugin_logs as $pl) {
+            $ws_key = !empty($pl['website_name']) ? $pl['website_name'] : ('Website ID ' . ($pl['website_id'] ?? 'Unknown'));
+            if (!isset($grouped_logs[$ws_key])) {
+                $grouped_logs[$ws_key] = array();
+            }
+            $grouped_logs[$ws_key][] = $pl;
+        }
+
+        foreach ($grouped_logs as $site_name => $logs) {
+            $markdown_lines[] = "• **{$site_name}**";
+            foreach ($logs as $log) {
+                $action_badge = 'ℹ️';
+                $action_label = $log['action'];
+                switch (strtoupper($log['action'])) {
+                    case 'ACTIVATED':
+                        $action_badge = '🟢';
+                        $action_label = 'Đã kích hoạt';
+                        break;
+                    case 'DEACTIVATED':
+                        $action_badge = '🔴';
+                        $action_label = 'Đã vô hiệu hóa (tắt)';
+                        break;
+                    case 'INSTALLED':
+                        $action_badge = '📦';
+                        $action_label = 'Đã cài mới';
+                        break;
+                    case 'UPDATED':
+                        $action_badge = '🔄';
+                        $old_v = !empty($log['old_version']) ? $log['old_version'] : '?';
+                        $new_v = !empty($log['plugin_version']) ? $log['plugin_version'] : '?';
+                        $action_label = "Đã cập nhật ({$old_v} ➔ {$new_v})";
+                        break;
+                    case 'DELETED':
+                        $action_badge = '🗑️';
+                        $action_label = 'Đã xóa';
+                        break;
+                }
+
+                $plugin_display = !empty($log['plugin_name']) ? $log['plugin_name'] : $log['plugin_slug'];
+                $performed_by = !empty($log['performed_by']) ? $log['performed_by'] : 'Hệ thống';
+                $ip_info = !empty($log['ip_address']) ? " (IP: {$log['ip_address']})" : '';
+
+                $markdown_lines[] = "  - {$action_badge} **{$action_label}:** `{$plugin_display}`";
+                $markdown_lines[] = "    *Thực hiện bởi:* `{$performed_by}`{$ip_info}";
+            }
+        }
+
+        if ($filtered_failed_count > 0) {
+            $markdown_lines[] = "---";
+        }
+    }
+
+    // 2. Format Failed Websites Section
+    if ($filtered_failed_count > 0) {
+        $markdown_lines[] = "⚠️ **WEBSITE MẤT KẾT NỐI (Tổng lỗi: {$filtered_failed_count}/{$total_checked}):**";
+        foreach ($filtered_failed_websites as $fw) {
+            $error_desc = !empty($fw['error_message']) ? $fw['error_message'] : ('HTTP Code ' . ($fw['http_code'] ?? 'Unknown'));
+            $markdown_lines[] = "• **{$fw['name']}** (ID: {$fw['id']})";
+            $markdown_lines[] = "  - Khách hàng: {$fw['owner_name']} ({$fw['owner_email']})";
+            $markdown_lines[] = "  - Lần cuối hoạt động: {$fw['last_seen_diff']}";
+            $markdown_lines[] = "  - Chi tiết lỗi: `{$error_desc}`";
+        }
     }
 
     $failed_websites_markdown = implode("\n", $markdown_lines);
@@ -3085,6 +3204,9 @@ function trigger_website_online_status_webhook($failed_websites, $total_checked 
         'max_active_hours'         => intval($max_active_hours),
         'total_checked'            => intval($total_checked),
         'total_failed'             => intval($filtered_failed_count),
+        'has_plugin_changes'       => $has_plugin_changes,
+        'plugin_changes_count'     => count($plugin_logs),
+        'plugin_changes'           => $plugin_logs,
         'failed_websites_markdown' => $failed_websites_markdown,
         'failed_websites'          => $filtered_failed_websites
     );

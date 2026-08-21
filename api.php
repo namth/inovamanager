@@ -56,6 +56,13 @@ function register_bookorder_api_routes()
         'permission_callback' => 'validate_api_key'
     ));
 
+    // Register route for logging plugin status changes
+    register_rest_route('bookorder/v1', '/log-plugin-change', array(
+        'methods' => 'POST',
+        'callback' => 'log_plugin_change_api',
+        'permission_callback' => 'validate_api_key'
+    ));
+
     // Register route for getting services expiring soon or expired
     register_rest_route('bookorder/v1', '/services-expiring', array(
         'methods' => 'GET',
@@ -973,6 +980,122 @@ function update_website_status_api($request)
             'success' => true,
             'active_time' => $updated_website->active_time,
             'message' => 'Status updated successfully'
+        ),
+        200
+    );
+}
+
+/**
+ * API callback function for logging plugin status changes from satellite websites
+ *
+ * @param WP_REST_Request $request The request object
+ * @return WP_REST_Response The response
+ */
+function log_plugin_change_api($request)
+{
+    global $wpdb;
+
+    $plugin_logs_table = $wpdb->prefix . 'im_plugin_activity_logs';
+    $websites_table = $wpdb->prefix . 'im_websites';
+
+    // Get input parameters
+    $website_id = isset($request['website_id']) ? intval($request['website_id']) : 0;
+    $domain = isset($request['domain']) ? sanitize_text_field($request['domain']) : '';
+    $action = isset($request['action']) ? sanitize_text_field($request['action']) : '';
+    $plugin_slug = isset($request['plugin_slug']) ? sanitize_text_field($request['plugin_slug']) : '';
+    $plugin_name = isset($request['plugin_name']) ? sanitize_text_field($request['plugin_name']) : '';
+    $plugin_version = isset($request['plugin_version']) ? sanitize_text_field($request['plugin_version']) : null;
+    $old_version = isset($request['old_version']) ? sanitize_text_field($request['old_version']) : null;
+    $performed_by = isset($request['performed_by']) ? sanitize_text_field($request['performed_by']) : null;
+    $ip_address = isset($request['ip_address']) ? sanitize_text_field($request['ip_address']) : null;
+
+    if (empty($action) || empty($plugin_slug)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Action and plugin_slug are required'
+            ),
+            400
+        );
+    }
+
+    // Resolve website_id and website_name
+    $website_name = '';
+    if ($website_id > 0) {
+        $website = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, name FROM {$websites_table} WHERE id = %d",
+            $website_id
+        ));
+        if ($website) {
+            $website_name = $website->name;
+        }
+    }
+
+    if (empty($website_name) && !empty($domain)) {
+        $clean_domain = preg_replace('#^https?://(www\.)?#', '', $domain);
+        $clean_domain = rtrim($clean_domain, '/');
+        $website = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, name FROM {$websites_table} WHERE name LIKE %s AND (status IS NULL OR status != 'DELETED') LIMIT 1",
+            '%' . $wpdb->esc_like($clean_domain) . '%'
+        ));
+        if ($website) {
+            $website_id = intval($website->id);
+            $website_name = $website->name;
+        } else {
+            $website_name = $domain;
+        }
+    }
+
+    if (empty($website_name)) {
+        $website_name = 'Website ID ' . $website_id;
+    }
+
+    // If client didn't supply IP, try to capture from request
+    if (empty($ip_address)) {
+        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            $ip_address = sanitize_text_field($_SERVER['HTTP_CF_CONNECTING_IP']);
+        } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $ip_list = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+            $ip_address = sanitize_text_field(trim($ip_list[0]));
+        } elseif (!empty($_SERVER['REMOTE_ADDR'])) {
+            $ip_address = sanitize_text_field($_SERVER['REMOTE_ADDR']);
+        }
+    }
+
+    // Insert log record
+    $insert_result = $wpdb->insert(
+        $plugin_logs_table,
+        array(
+            'website_id'     => $website_id,
+            'website_name'   => $website_name,
+            'action'         => strtoupper($action),
+            'plugin_slug'    => $plugin_slug,
+            'plugin_name'    => !empty($plugin_name) ? $plugin_name : $plugin_slug,
+            'plugin_version' => $plugin_version,
+            'old_version'    => $old_version,
+            'performed_by'   => $performed_by,
+            'ip_address'     => $ip_address,
+            'created_at'     => current_time('mysql')
+        ),
+        array('%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
+    );
+
+    if ($insert_result === false) {
+        error_log("Failed to insert plugin activity log: " . $wpdb->last_error);
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Failed to save log to database'
+            ),
+            500
+        );
+    }
+
+    return new WP_REST_Response(
+        array(
+            'success' => true,
+            'log_id'  => $wpdb->insert_id,
+            'message' => 'Plugin activity logged successfully'
         ),
         200
     );
