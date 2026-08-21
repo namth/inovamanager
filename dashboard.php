@@ -46,36 +46,39 @@ $one_month_ago = date('Y-m-d', strtotime('-1 month'));
 // Date 1 month from now
 $one_month_later = date('Y-m-d', strtotime('+1 month'));
 
-// Get domains expiring within 1 month (9 closest to expiry) with permission filtering
+// Get domains expiring within 1 month (9 closest to expiry) - chỉ lấy trạng thái ACTIVE (Đang hoạt động) và NEW (Chờ thanh toán)
 $soon_expiring_domains = $wpdb->get_results("
     SELECT d.*, u.name AS owner_name, u.user_code
     FROM $domains_table d
     LEFT JOIN $users_table u ON d.owner_user_id = u.id
     WHERE d.expiry_date BETWEEN '$one_month_ago' AND '$one_month_later'
+    AND d.status IN ('ACTIVE', 'NEW')
     {$domain_permission}
     ORDER BY d.expiry_date ASC
     LIMIT 9
 ");
 
-// Get hostings expiring within 1 month (9 closest to expiry) with permission filtering
+// Get hostings expiring within 1 month (9 closest to expiry) - chỉ lấy trạng thái ACTIVE (Đang hoạt động) và NEW (Chờ thanh toán)
 $soon_expiring_hostings = $wpdb->get_results("
     SELECT h.*, u.name AS owner_name, u.user_code, p.name AS product_name
     FROM $hostings_table h
     LEFT JOIN $users_table u ON h.owner_user_id = u.id
     LEFT JOIN {$wpdb->prefix}im_product_catalog p ON h.product_catalog_id = p.id
     WHERE h.expiry_date BETWEEN '$one_month_ago' AND '$one_month_later'
+    AND h.status IN ('ACTIVE', 'NEW')
     {$hosting_permission}
     ORDER BY h.expiry_date ASC
     LIMIT 9
 ");
 
-// Get maintenance packages expiring within 1 month (9 closest to expiry) with permission filtering
+// Get maintenance packages expiring within 1 month (9 closest to expiry) - chỉ lấy trạng thái ACTIVE (Đang hoạt động) và NEW (Chờ thanh toán)
 $soon_expiring_maintenance = $wpdb->get_results("
     SELECT m.*, u.name AS owner_name, u.user_code, p.name AS package_name
     FROM $maintenance_table m
     LEFT JOIN $users_table u ON m.owner_user_id = u.id
     LEFT JOIN {$wpdb->prefix}im_product_catalog p ON m.product_catalog_id = p.id
     WHERE m.expiry_date BETWEEN '$one_month_ago' AND '$one_month_later'
+    AND m.status IN ('ACTIVE', 'NEW')
     {$maintenance_permission}
     ORDER BY m.expiry_date ASC
     LIMIT 9
@@ -117,6 +120,31 @@ if (!empty($pending_invoices)) {
         }
         $invoice_items_map[$item->invoice_id][] = $item;
     }
+}
+
+// 1. Get failed website status logs (latest 8)
+$failed_website_logs = array();
+$status_logs_table = $wpdb->prefix . 'im_website_status_logs';
+if ($wpdb->get_var("SHOW TABLES LIKE '{$status_logs_table}'") === $status_logs_table) {
+    $failed_website_logs = $wpdb->get_results("
+        SELECT *
+        FROM {$status_logs_table}
+        WHERE status = 'FAILED'
+        ORDER BY id DESC
+        LIMIT 8
+    ");
+}
+
+// 2. Get recent plugin activity logs (latest 8)
+$recent_plugin_activity_logs = array();
+$plugin_logs_table = $wpdb->prefix . 'im_plugin_activity_logs';
+if ($wpdb->get_var("SHOW TABLES LIKE '{$plugin_logs_table}'") === $plugin_logs_table) {
+    $recent_plugin_activity_logs = $wpdb->get_results("
+        SELECT *
+        FROM {$plugin_logs_table}
+        ORDER BY id DESC
+        LIMIT 8
+    ");
 }
 
 get_header();
@@ -529,6 +557,157 @@ get_header();
                     <div class="p-4 text-center">
                         <i class="ph ph-check-circle text-success" style="font-size: 32px;"></i>
                         <p class="mt-2 text-muted">Không có hóa đơn chờ thanh toán</p>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Website Status & Plugin Activity Logs Row -->
+    <div class="row">
+        <!-- Box 1: Website Status Logs (Failed) -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100 border-danger">
+                <div class="card-header bg-light-danger d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0 text-danger">
+                        <i class="ph ph-warning-circle me-1"></i>
+                        Website mất kết nối / Lỗi (Failed)
+                    </h5>
+                    <a href="<?php echo admin_url('admin.php?page=nhat-ky-website-admin&status=FAILED'); ?>" class="btn btn-sm btn-danger">
+                        Xem tất cả
+                    </a>
+                </div>
+                <div class="card-body p-0">
+                    <?php if (!empty($failed_website_logs)): ?>
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr class="bg-light">
+                                    <th>Website</th>
+                                    <th>Chi tiết Lỗi / Mã HTTP</th>
+                                    <th style="width: 140px;">Thời gian</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($failed_website_logs as $flog): 
+                                    $err_text = !empty($flog->error_message) ? $flog->error_message : (!empty($flog->http_code) ? 'HTTP ' . $flog->http_code : 'Lỗi không xác định');
+                                ?>
+                                <tr>
+                                    <td>
+                                        <strong class="text-danger"><?php echo esc_html($flog->website_name); ?></strong>
+                                        <?php if (!empty($flog->website_id)): ?>
+                                            <br><small class="text-muted">ID: <?php echo esc_html($flog->website_id); ?></small>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <code style="font-size: 11px; color: #dc3545; word-break: break-all; display: block; max-width: 250px;">
+                                            <?php echo esc_html(mb_strimwidth($err_text, 0, 80, '...')); ?>
+                                        </code>
+                                    </td>
+                                    <td>
+                                        <span class="small text-muted d-block"><?php echo esc_html(date_i18n('d/m/Y H:i', strtotime($flog->created_at))); ?></span>
+                                        <small class="text-danger"><?php echo esc_html(human_time_diff(strtotime($flog->created_at), current_time('timestamp')) . ' trước'); ?></small>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php else: ?>
+                    <div class="p-4 text-center">
+                        <i class="ph ph-check-circle text-success" style="font-size: 32px;"></i>
+                        <p class="mt-2 text-muted">Tất cả website đều hoạt động ổn định, không có lỗi</p>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- Box 2: Plugin Activity Logs -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100 border-primary">
+                <div class="card-header bg-light-primary d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0 text-primary">
+                        <i class="ph ph-plugs-connected me-1"></i>
+                        Nhật ký thay đổi Plugin gần đây
+                    </h5>
+                    <a href="<?php echo admin_url('admin.php?page=nhat-ky-plugin-admin'); ?>" class="btn btn-sm btn-primary">
+                        Xem tất cả
+                    </a>
+                </div>
+                <div class="card-body p-0">
+                    <?php if (!empty($recent_plugin_activity_logs)): ?>
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr class="bg-light">
+                                    <th>Website</th>
+                                    <th style="width: 110px;">Hành động</th>
+                                    <th>Plugin & Phiên bản</th>
+                                    <th style="width: 140px;">Thời gian</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($recent_plugin_activity_logs as $plog): 
+                                    $badge_class = 'bg-secondary';
+                                    $label = $plog->action;
+                                    switch (strtoupper($plog->action)) {
+                                        case 'ACTIVATED':
+                                            $badge_class = 'bg-success';
+                                            $label = '🟢 Bật';
+                                            break;
+                                        case 'DEACTIVATED':
+                                            $badge_class = 'bg-danger';
+                                            $label = '🔴 Tắt';
+                                            break;
+                                        case 'INSTALLED':
+                                            $badge_class = 'bg-info text-dark';
+                                            $label = '📦 Cài mới';
+                                            break;
+                                        case 'UPDATED':
+                                            $badge_class = 'bg-warning text-dark';
+                                            $label = '🔄 Update';
+                                            break;
+                                        case 'DELETED':
+                                            $badge_class = 'bg-dark';
+                                            $label = '🗑️ Xóa';
+                                            break;
+                                    }
+                                ?>
+                                <tr>
+                                    <td>
+                                        <strong><?php echo esc_html($plog->website_name); ?></strong>
+                                    </td>
+                                    <td>
+                                        <span class="badge <?php echo $badge_class; ?>" style="font-size: 11px; padding: 4px 6px;">
+                                            <?php echo esc_html($label); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div class="fw-bold"><?php echo esc_html($plog->plugin_name); ?></div>
+                                        <?php if (strtoupper($plog->action) === 'UPDATED' && !empty($plog->old_version)): ?>
+                                            <small class="text-muted"><?php echo esc_html($plog->old_version); ?> ➔ <strong class="text-success"><?php echo esc_html($plog->plugin_version); ?></strong></small>
+                                        <?php elseif (!empty($plog->plugin_version)): ?>
+                                            <small class="text-muted">v<?php echo esc_html($plog->plugin_version); ?></small>
+                                        <?php endif; ?>
+                                        <?php if (!empty($plog->performed_by)): ?>
+                                            <div class="small text-muted" style="font-size: 11px;"><i class="ph ph-user"></i> <?php echo esc_html($plog->performed_by); ?></div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <span class="small text-muted d-block"><?php echo esc_html(date_i18n('d/m/Y H:i', strtotime($plog->created_at))); ?></span>
+                                        <small class="text-muted"><?php echo esc_html(human_time_diff(strtotime($plog->created_at), current_time('timestamp')) . ' trước'); ?></small>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php else: ?>
+                    <div class="p-4 text-center">
+                        <i class="ph ph-check-circle text-success" style="font-size: 32px;"></i>
+                        <p class="mt-2 text-muted">Chưa có thay đổi plugin nào được ghi nhận</p>
                     </div>
                     <?php endif; ?>
                 </div>

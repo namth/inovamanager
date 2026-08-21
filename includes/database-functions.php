@@ -3080,6 +3080,13 @@ function trigger_website_online_status_webhook($failed_websites = array(), $tota
         return;
     }
 
+    // Exclude notifications during quiet hours: 00:00 to 06:00 AM (0h00 - 6h00 sáng)
+    $current_hour = intval(current_time('G'));
+    if ($current_hour >= 0 && $current_hour < 6) {
+        error_log("Website status check notification skipped during quiet hours (00:00 - 06:00). Current hour: {$current_hour}");
+        return;
+    }
+
     // Get max active_time limit (upper bound in hours, default 6 hours)
     $max_active_hours = max(1, intval(get_option('inova_website_max_active_hours', 6)));
     $current_timestamp = current_time('timestamp');
