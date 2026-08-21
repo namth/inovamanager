@@ -1216,14 +1216,35 @@ add_action('admin_menu', 'add_template_management_menu');
 add_action('admin_bar_menu', 'add_template_info_to_admin_bar', 100);
 
 add_action('admin_menu', function() {
+    // Menu cha: Nhật ký Website
     add_menu_page(
-        'Nhật ký Website',
-        'Nhật ký Website',
+        'Nhật ký Hệ thống',
+        'Nhật ký Hệ thống',
         'manage_options',
         'nhat-ky-website-admin',
         'render_website_status_logs_admin_page',
         'dashicons-list-view',
         30
+    );
+
+    // Submenu 1: Trạng thái Website
+    add_submenu_page(
+        'nhat-ky-website-admin',
+        'Trạng thái Website',
+        'Trạng thái Website',
+        'manage_options',
+        'nhat-ky-website-admin',
+        'render_website_status_logs_admin_page'
+    );
+
+    // Submenu 2: Thay đổi Plugin
+    add_submenu_page(
+        'nhat-ky-website-admin',
+        'Thay đổi Plugin',
+        'Thay đổi Plugin',
+        'manage_options',
+        'nhat-ky-plugin-admin',
+        'render_plugin_activity_logs_admin_page'
     );
 });
 
@@ -1387,6 +1408,219 @@ function render_website_status_logs_admin_page() {
                 if (confirm('Bạn có chắc chắn muốn xóa TOÀN BỘ nhật ký kiểm tra trạng thái Website?')) {
                     const formData = new FormData();
                     formData.append('action', 'clear_website_status_logs');
+
+                    fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(data.data.message);
+                            window.location.reload();
+                        } else {
+                            alert('Lỗi: ' + data.data.message);
+                        }
+                    })
+                    .catch(err => {
+                        alert('Có lỗi xảy ra khi kết nối tới hệ thống!');
+                    });
+                }
+            });
+        }
+    });
+    </script>
+    <?php
+}
+
+/**
+ * Render Plugin Activity Logs Admin Page
+ */
+function render_plugin_activity_logs_admin_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(__('Bạn không có quyền truy cập trang này.', 'inovamanager'));
+    }
+
+    global $wpdb;
+    $logs_table = $wpdb->prefix . 'im_plugin_activity_logs';
+
+    // Ensure table exists
+    if ($wpdb->get_var("SHOW TABLES LIKE '{$logs_table}'") !== $logs_table) {
+        echo '<div class="wrap"><h1>Nhật ký Thay đổi Plugin</h1><p>Bảng dữ liệu chưa được khởi tạo. Vui lòng tải lại trang sau ít phút.</p></div>';
+        return;
+    }
+
+    $search_query = isset($_GET['s']) ? sanitize_text_field($_GET['s']) : '';
+    $action_filter = isset($_GET['act']) ? sanitize_text_field($_GET['act']) : '';
+
+    $where_conditions = array();
+    if (!empty($action_filter) && in_array(strtoupper($action_filter), array('ACTIVATED', 'DEACTIVATED', 'INSTALLED', 'UPDATED', 'DELETED'))) {
+        $where_conditions[] = $wpdb->prepare("action = %s", strtoupper($action_filter));
+    }
+    if (!empty($search_query)) {
+        $search_like = '%' . $wpdb->esc_like($search_query) . '%';
+        $where_conditions[] = $wpdb->prepare("(website_name LIKE %s OR plugin_name LIKE %s OR plugin_slug LIKE %s OR performed_by LIKE %s OR ip_address LIKE %s)", $search_like, $search_like, $search_like, $search_like, $search_like);
+    }
+    $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
+
+    $items_per_page = 20;
+    $current_page = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
+
+    $total_items = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$logs_table} {$where_clause}");
+    $total_pages = ceil($total_items / $items_per_page);
+    $offset = ($current_page - 1) * $items_per_page;
+
+    $logs = $wpdb->get_results("SELECT * FROM {$logs_table} {$where_clause} ORDER BY id DESC LIMIT {$items_per_page} OFFSET {$offset}");
+    ?>
+    <div class="wrap">
+        <h1 class="wp-heading-inline">Nhật ký Thay đổi Plugin trên các Website</h1>
+        <button type="button" id="clear-plugin-logs-btn" class="button button-link-delete" style="margin-left: 10px;">Xóa toàn bộ nhật ký plugin</button>
+        <hr class="wp-header-end">
+
+        <p class="description">Lưu vết tất cả các thao tác thay đổi plugin (Kích hoạt, Tắt, Cài mới, Cập nhật, Xóa) từ các website vệ tinh gửi về trong 30 ngày.</p>
+
+        <form method="GET" action="" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center; margin-top: 10px;">
+            <input type="hidden" name="page" value="nhat-ky-plugin-admin">
+            <input type="search" name="s" value="<?php echo esc_attr($search_query); ?>" placeholder="Tìm website, plugin, người thao tác, IP..." style="width: 300px;">
+            <select name="act">
+                <option value="">-- Tất cả hành động --</option>
+                <option value="ACTIVATED" <?php selected($action_filter, 'ACTIVATED'); ?>>🟢 Kích hoạt (Activated)</option>
+                <option value="DEACTIVATED" <?php selected($action_filter, 'DEACTIVATED'); ?>>🔴 Vô hiệu hóa (Deactivated)</option>
+                <option value="INSTALLED" <?php selected($action_filter, 'INSTALLED'); ?>>📦 Cài mới (Installed)</option>
+                <option value="UPDATED" <?php selected($action_filter, 'UPDATED'); ?>>🔄 Cập nhật (Updated)</option>
+                <option value="DELETED" <?php selected($action_filter, 'DELETED'); ?>>🗑️ Xóa (Deleted)</option>
+            </select>
+            <input type="submit" class="button button-secondary" value="Lọc danh sách">
+            <?php if (!empty($search_query) || !empty($action_filter)): ?>
+                <a href="<?php echo admin_url('admin.php?page=nhat-ky-plugin-admin'); ?>" class="button">Đặt lại</a>
+            <?php endif; ?>
+        </form>
+
+        <table class="wp-list-table widefat fixed striped table-view-list">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">ID</th>
+                    <th style="width: 150px;">Thời gian</th>
+                    <th style="width: 200px;">Website</th>
+                    <th style="width: 130px;">Hành động</th>
+                    <th>Tên Plugin & Slug</th>
+                    <th style="width: 130px;">Phiên bản</th>
+                    <th style="width: 200px;">Người thực hiện</th>
+                    <th style="width: 120px;">Địa chỉ IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (empty($logs)): ?>
+                <tr>
+                    <td colspan="8" style="text-align: center; color: #666; padding: 20px;">Không có nhật ký thay đổi plugin nào.</td>
+                </tr>
+                <?php else: ?>
+                    <?php foreach ($logs as $log): ?>
+                    <tr>
+                        <td><strong>#<?php echo esc_html($log->id); ?></strong></td>
+                        <td>
+                            <?php echo esc_html(date_i18n('d/m/Y H:i:s', strtotime($log->created_at))); ?>
+                            <br><small style="color: #666;"><?php echo esc_html(human_time_diff(strtotime($log->created_at), current_time('timestamp')) . ' trước'); ?></small>
+                        </td>
+                        <td>
+                            <strong><?php echo esc_html($log->website_name); ?></strong>
+                            <?php if (!empty($log->website_id)): ?>
+                                <br><small style="color: #666;">ID: <?php echo esc_html($log->website_id); ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php
+                            $badge_bg = '#72aee6';
+                            $badge_text = '#fff';
+                            $label = $log->action;
+                            switch (strtoupper($log->action)) {
+                                case 'ACTIVATED':
+                                    $badge_bg = '#d1e7dd';
+                                    $badge_text = '#0f5132';
+                                    $label = '🟢 Kích hoạt';
+                                    break;
+                                case 'DEACTIVATED':
+                                    $badge_bg = '#f8d7da';
+                                    $badge_text = '#842029';
+                                    $label = '🔴 Vô hiệu hóa';
+                                    break;
+                                case 'INSTALLED':
+                                    $badge_bg = '#cff4fc';
+                                    $badge_text = '#055160';
+                                    $label = '📦 Cài mới';
+                                    break;
+                                case 'UPDATED':
+                                    $badge_bg = '#fff3cd';
+                                    $badge_text = '#664d03';
+                                    $label = '🔄 Cập nhật';
+                                    break;
+                                case 'DELETED':
+                                    $badge_bg = '#f8d7da';
+                                    $badge_text = '#842029';
+                                    $label = '🗑️ Đã xóa';
+                                    break;
+                            }
+                            ?>
+                            <span style="display: inline-block; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; background-color: <?php echo $badge_bg; ?>; color: <?php echo $badge_text; ?>;">
+                                <?php echo esc_html($label); ?>
+                            </span>
+                        </td>
+                        <td>
+                            <strong><?php echo esc_html($log->plugin_name); ?></strong>
+                            <br><code style="font-size: 11px; color: #555;"><?php echo esc_html($log->plugin_slug); ?></code>
+                        </td>
+                        <td>
+                            <?php if (strtoupper($log->action) === 'UPDATED' && !empty($log->old_version)): ?>
+                                <span style="color: #888; text-decoration: line-through;"><?php echo esc_html($log->old_version); ?></span> ➔ <strong><?php echo esc_html($log->plugin_version); ?></strong>
+                            <?php else: ?>
+                                <strong><?php echo esc_html($log->plugin_version ? $log->plugin_version : 'N/A'); ?></strong>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <code><?php echo esc_html($log->performed_by ? $log->performed_by : 'Hệ thống'); ?></code>
+                        </td>
+                        <td>
+                            <code><?php echo esc_html($log->ip_address ? $log->ip_address : 'N/A'); ?></code>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
+
+        <?php if ($total_pages > 1): ?>
+        <div class="tablenav bottom">
+            <div class="tablenav-pages">
+                <span class="displaying-num"><?php echo $total_items; ?> bản ghi</span>
+                <span class="pagination-links">
+                    <?php
+                    $base_url = admin_url('admin.php?page=nhat-ky-plugin-admin');
+                    if (!empty($search_query)) $base_url = add_query_arg('s', $search_query, $base_url);
+                    if (!empty($action_filter)) $base_url = add_query_arg('act', $action_filter, $base_url);
+
+                    for ($i = 1; $i <= $total_pages; $i++) {
+                        $page_link = add_query_arg('paged', $i, $base_url);
+                        if ($i == $current_page) {
+                            echo '<span class="paging-input"><span class="current-page">' . $i . '</span></span> ';
+                        } else {
+                            echo '<a class="page-numbers" href="' . esc_url($page_link) . '">' . $i . '</a> ';
+                        }
+                    }
+                    ?>
+                </span>
+            </div>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const clearBtn = document.getElementById('clear-plugin-logs-btn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function() {
+                if (confirm('Bạn có chắc chắn muốn xóa TOÀN BỘ nhật ký thay đổi plugin?')) {
+                    const formData = new FormData();
+                    formData.append('action', 'clear_plugin_activity_logs');
 
                     fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
                         method: 'POST',

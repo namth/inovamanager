@@ -3063,6 +3063,25 @@ function clear_website_status_logs_ajax()
         wp_send_json_error(array('message' => 'Có lỗi xảy ra khi xóa nhật ký'));
     }
 }
+
+add_action('wp_ajax_clear_plugin_activity_logs', 'clear_plugin_activity_logs_ajax');
+function clear_plugin_activity_logs_ajax()
+{
+    if (!current_user_can('manage_options') && !is_inova_admin()) {
+        wp_send_json_error(array('message' => 'Không có quyền thực hiện'));
+    }
+
+    global $wpdb;
+    $logs_table = $wpdb->prefix . 'im_plugin_activity_logs';
+
+    $result = $wpdb->query("TRUNCATE TABLE {$logs_table}");
+
+    if ($result !== false) {
+        wp_send_json_success(array('message' => 'Đã xóa toàn bộ nhật ký thay đổi plugin thành công!'));
+    } else {
+        wp_send_json_error(array('message' => 'Có lỗi xảy ra khi xóa nhật ký'));
+    }
+}
 add_action('wp_ajax_update_expense_status', 'update_expense_status_callback');
 add_action('admin_post_edit_expense_post', 'edit_expense_post_callback');
 
