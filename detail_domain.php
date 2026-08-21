@@ -102,12 +102,12 @@ get_header();
                         <?php endif; ?>
 
                         <?php if (!is_inova_admin() && $domain->managed_by_inova == 0): ?>
-                        <!-- Customers can manually renew domains NOT managed by INOVA -->
-                        <button type="button" class="btn btn-success btn-icon-text d-flex align-items-center renew-domain-manual-btn"
+                        <!-- Customers can check & sync WHOIS for domains NOT managed by INOVA -->
+                        <button type="button" class="btn btn-primary btn-icon-text d-flex align-items-center check-whois-domain-btn renew-domain-btn"
                             data-domain-id="<?php echo $domain->id; ?>"
                             data-domain-name="<?php echo esc_attr($domain->domain_name); ?>"
                             data-expiry-date="<?php echo esc_attr($domain->expiry_date); ?>">
-                            <i class="ph ph-clock-clockwise me-1"></i> Gia hạn thêm 1 năm
+                            <i class="ph ph-arrows-clockwise me-1"></i> Kiểm tra & đồng bộ WHOIS
                         </button>
                         <?php endif; ?>
                     </div>

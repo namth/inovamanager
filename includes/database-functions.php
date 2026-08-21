@@ -1567,12 +1567,27 @@ function check_website_online_status()
         } else {
             $http_code = wp_remote_retrieve_response_code($response);
             $response_body = wp_remote_retrieve_body($response);
-            $data = json_decode($response_body, true);
 
-            if ($http_code === 200 && !empty($data['status']) && $data['status'] === true) {
+            // Clean response body: strip UTF-8 BOM, hidden control chars, whitespace
+            $clean_body = preg_replace('/^[\xEF\xBB\xBF\s\r\n\t]+/u', '', trim($response_body));
+            $clean_body = trim($clean_body, "\xEF\xBB\xBF \t\n\r\0\x0B");
+            $data = json_decode($clean_body, true);
+
+            $is_status_true = false;
+            if (is_array($data) && isset($data['status'])) {
+                $is_status_true = ($data['status'] === true || $data['status'] === 'true' || $data['status'] === 1 || $data['status'] === '1');
+            }
+
+            if (intval($http_code) === 200 && $is_status_true) {
                 $is_online = true;
             } else {
-                $error_message = 'HTTP Status Code: ' . $http_code;
+                if (intval($http_code) === 200 && empty($data)) {
+                    $error_message = 'Phản hồi không phải JSON hợp lệ (có thể do UTF-8 BOM hoặc PHP Warning/Notice)';
+                } elseif (intval($http_code) === 200 && !$is_status_true) {
+                    $error_message = !empty($data['message']) ? $data['message'] : 'Website vệ tinh trả về status = false';
+                } else {
+                    $error_message = 'HTTP Status Code: ' . $http_code;
+                }
             }
         }
 

@@ -368,30 +368,30 @@ get_header();
                                               <?php endif; ?>
 
                                               <?php if (is_inova_admin()): ?>
-                                              <!-- Admin can renew all domains -->
-                                              <button type="button" class="btn btn-sm btn-icon p-0 renew-domain-btn"
-                                                  data-domain-id="<?php echo $domain->id; ?>"
-                                                  data-domain-name="<?php echo esc_attr($domain->domain_name); ?>"
-                                                  data-expiry-date="<?php echo esc_attr($domain->expiry_date); ?>"
-                                                  title="Gia hạn thêm 1 năm">
-                                                  <i class="ph ph-clock-clockwise text-success btn-icon-prepend fa-150p"></i>
-                                              </button>
-                                              <?php else: ?>
-                                              <!-- User can renew if they created it and domain is not managed by INOVA -->
-                                              <?php 
-                                              $current_user_id = get_current_user_id();
-                                              $can_renew_domain = ($domain->create_by == $current_user_id && $domain->managed_by_inova == 0);
-                                              if ($can_renew_domain): 
-                                              ?>
-                                              <button type="button" class="btn btn-sm btn-icon p-0 renew-domain-btn"
-                                                  data-domain-id="<?php echo $domain->id; ?>"
-                                                  data-domain-name="<?php echo esc_attr($domain->domain_name); ?>"
-                                                  data-expiry-date="<?php echo esc_attr($domain->expiry_date); ?>"
-                                                  title="Gia hạn thêm 1 năm">
-                                                  <i class="ph ph-clock-clockwise text-success btn-icon-prepend fa-150p"></i>
-                                              </button>
-                                              <?php endif; ?>
-                                              <?php endif; ?>
+                                               <!-- Admin can check/sync WHOIS for all domains -->
+                                               <button type="button" class="btn btn-sm btn-icon p-0 renew-domain-btn check-whois-domain-btn"
+                                                   data-domain-id="<?php echo $domain->id; ?>"
+                                                   data-domain-name="<?php echo esc_attr($domain->domain_name); ?>"
+                                                   data-expiry-date="<?php echo esc_attr($domain->expiry_date); ?>"
+                                                   title="Kiểm tra & đồng bộ WHOIS">
+                                                   <i class="ph ph-arrows-clockwise text-primary btn-icon-prepend fa-150p"></i>
+                                               </button>
+                                               <?php else: ?>
+                                               <!-- User can check/sync WHOIS if they created it and domain is not managed by INOVA -->
+                                               <?php 
+                                               $current_user_id = get_current_user_id();
+                                               $can_renew_domain = ($domain->create_by == $current_user_id && $domain->managed_by_inova == 0);
+                                               if ($can_renew_domain): 
+                                               ?>
+                                               <button type="button" class="btn btn-sm btn-icon p-0 renew-domain-btn check-whois-domain-btn"
+                                                   data-domain-id="<?php echo $domain->id; ?>"
+                                                   data-domain-name="<?php echo esc_attr($domain->domain_name); ?>"
+                                                   data-expiry-date="<?php echo esc_attr($domain->expiry_date); ?>"
+                                                   title="Kiểm tra & đồng bộ WHOIS">
+                                                   <i class="ph ph-arrows-clockwise text-primary btn-icon-prepend fa-150p"></i>
+                                               </button>
+                                               <?php endif; ?>
+                                               <?php endif; ?>
 
                                               <?php if (is_inova_admin()): ?>
                                               <?php if (empty($domain->website_name)): ?>

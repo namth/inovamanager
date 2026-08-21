@@ -31,9 +31,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_vat'])) {
             update_option('cloudflare_account_id', sanitize_text_field($_POST['cloudflare_account_id']));
             $message = 'Cài đặt Cloudflare đã được lưu thành công!';
             $message_type = 'success';
-        } elseif ($action === 'save_apilayer_settings') {
-            update_option('apilayer_whois_api_key', sanitize_text_field($_POST['apilayer_whois_api_key']));
-            $message = 'Cài đặt APILayer WHOIS đã được lưu thành công!';
+        } elseif ($action === 'save_apilayer_settings' || $action === 'save_whois_settings') {
+            if (isset($_POST['apilayer_whois_api_key'])) {
+                update_option('apilayer_whois_api_key', sanitize_text_field($_POST['apilayer_whois_api_key']));
+            }
+            if (isset($_POST['bkns_whois_api_key'])) {
+                update_option('bkns_whois_api_key', sanitize_text_field($_POST['bkns_whois_api_key']));
+            }
+            $message = 'Cài đặt WHOIS đã được lưu thành công!';
             $message_type = 'success';
         } elseif ($action === 'save_payment_settings') {
             // Save payment settings for both account types
@@ -77,6 +82,7 @@ $vat_rates = get_current_vat_rates();
 $cloudflare_api_token = get_option('cloudflare_api_token', '');
 $cloudflare_account_id = get_option('cloudflare_account_id', '');
 $apilayer_whois_api_key = get_option('apilayer_whois_api_key', '');
+$bkns_whois_api_key = get_option('bkns_whois_api_key', '');
 
 // Get payment settings for both account types
 $payment_bank_code_no_vat = get_option('payment_bank_code_no_vat', '');
@@ -192,8 +198,8 @@ get_header();
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="apilayer-tab" data-bs-toggle="tab" data-bs-target="#apilayer" type="button" role="tab" aria-controls="apilayer" aria-selected="false">
-                                <i class="ph ph-key me-2"></i>APILayer WHOIS API
+                            <button class="nav-link" id="whois-tab" data-bs-toggle="tab" data-bs-target="#whois" type="button" role="tab" aria-controls="whois" aria-selected="false">
+                                <i class="ph ph-globe me-2"></i>Cài đặt WHOIS
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
@@ -299,18 +305,48 @@ get_header();
                             </form>
                         </div>
 
-                        <!-- APILayer WHOIS Settings Tab -->
-                        <div class="tab-pane fade" id="apilayer" role="tabpanel" aria-labelledby="apilayer-tab">
+                        <!-- WHOIS Settings Tab -->
+                        <div class="tab-pane fade" id="whois" role="tabpanel" aria-labelledby="whois-tab">
                             <form method="post">
                                 <?php wp_nonce_field('system_settings_action', 'system_settings_nonce'); ?>
-                                <input type="hidden" name="update_vat" value="save_apilayer_settings">
-                                <p class="card-text">Nhập API Key của APILayer WHOIS để tự động lấy thông tin domain.</p>
-                                <div class="mb-3">
-                                    <label for="apilayer_whois_api_key" class="form-label fw-bold">APILayer WHOIS API Key</label>
-                                    <input type="password" class="form-control" id="apilayer_whois_api_key" name="apilayer_whois_api_key" value="<?php echo esc_attr($apilayer_whois_api_key); ?>" placeholder="Nhập API Key của bạn">
-                                    <small class="form-text text-muted">API này được sử dụng ở trang "Thêm mới Domain" để lấy ngày đăng ký/hết hạn.</small>
+                                <input type="hidden" name="update_vat" value="save_whois_settings">
+                                <p class="card-text text-muted mb-4">Cấu hình API Key tra cứu thông tin tên miền tự động khi thêm mới hoặc chỉnh sửa tên miền trong hệ thống.</p>
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <div class="card h-100 border">
+                                            <div class="card-header bg-light">
+                                                <h6 class="mb-0 fw-bold"><i class="ph ph-globe me-2 text-primary"></i>BKNS WHOIS API <span class="badge bg-primary text-white ms-1">Tên miền .VN</span></h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label for="bkns_whois_api_key" class="form-label fw-bold">BKNS API Key (X-API-Key)</label>
+                                                    <input type="password" class="form-control" id="bkns_whois_api_key" name="bkns_whois_api_key" value="<?php echo esc_attr($bkns_whois_api_key); ?>" placeholder="Nhập API Key BKNS (X-API-Key)">
+                                                    <small class="form-text text-muted">Dành cho tên miền quốc gia Việt Nam (<code>.vn</code>, <code>.com.vn</code>, <code>.edu.vn</code>,...). Dữ liệu trực tiếp từ VNNIC qua BKNS Whois API (<a href="https://whois.bkns.vn/vi/docs" target="_blank" rel="noopener">Xem tài liệu</a>).</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-6 mb-3">
+                                        <div class="card h-100 border">
+                                            <div class="card-header bg-light">
+                                                <h6 class="mb-0 fw-bold"><i class="ph ph-globe-hemisphere-west me-2 text-secondary"></i>APILayer WHOIS API <span class="badge bg-secondary text-white ms-1">Tên miền Quốc Tế</span></h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <label for="apilayer_whois_api_key" class="form-label fw-bold">APILayer API Key (apikey)</label>
+                                                    <input type="password" class="form-control" id="apilayer_whois_api_key" name="apilayer_whois_api_key" value="<?php echo esc_attr($apilayer_whois_api_key); ?>" placeholder="Nhập API Key APILayer">
+                                                    <small class="form-text text-muted">Dành cho các tên miền quốc tế (<code>.com</code>, <code>.net</code>, <code>.org</code>,...).</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <button type="submit" class="btn btn-info"><i class="ph ph-floppy-disk"></i> Lưu cài đặt APILayer</button>
+
+                                <div class="mt-3">
+                                    <button type="submit" class="btn btn-info"><i class="ph ph-floppy-disk me-1"></i> Lưu cài đặt WHOIS</button>
+                                </div>
                             </form>
                         </div>
 

@@ -489,9 +489,25 @@ jQuery(document).ready(function($) {
                         foundData = true;
                     }
 
+                    // Append summary to notes field if available
+                    if (response.data.summary_note) {
+                        const $notes = $('#notes');
+                        if ($notes.length) {
+                            const currentNote = $notes.val().trim();
+                            if (currentNote) {
+                                if (!currentNote.includes(response.data.summary_note)) {
+                                    $notes.val(currentNote + '\n' + response.data.summary_note);
+                                }
+                            } else {
+                                $notes.val(response.data.summary_note);
+                            }
+                        }
+                    }
+
                     // Show success notification
                     if (foundData) {
-                        $statusDiv.html('<div class="alert alert-success"><i class="ph ph-check-circle me-1"></i>Đã tra cứu thành công thông tin WHOIS!</div>');
+                        const providerText = response.data.provider ? ' (' + response.data.provider + ')' : '';
+                        $statusDiv.html('<div class="alert alert-success"><i class="ph ph-check-circle me-1"></i>Đã tra cứu thành công thông tin WHOIS' + providerText + '!</div>');
                     } else {
                         $statusDiv.html('<div class="alert alert-warning"><i class="ph ph-warning me-1"></i>Không tìm thấy thông tin ngày đăng ký/hết hạn.</div>');
                     }
@@ -504,12 +520,10 @@ jQuery(document).ready(function($) {
                 $registrationDate.prop('disabled', false);
                 $expiryDate.prop('disabled', false);
 
-                // If no data was returned, clear the fields
-                if (!response.success || !response.data || !response.data.registration_date) {
-                    $registrationDate.val('');
-                }
-                if (!response.success || !response.data || !response.data.expiry_date) {
-                    $expiryDate.val('');
+                // If lookup failed, clear loading placeholders if any
+                if (!response.success) {
+                    if ($registrationDate.val() === 'Đang tải...') $registrationDate.val('');
+                    if ($expiryDate.val() === 'Đang tải...') $expiryDate.val('');
                 }
             },
             error: function(jqXHR, textStatus, errorThrown) {

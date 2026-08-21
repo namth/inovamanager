@@ -470,21 +470,118 @@ function get_customer_services_ajax()
     exit;
 }
 
-function fetch_domain_info_from_apilayer()
+/**
+ * Internal helper to lookup domain WHOIS information
+ * Routes .vn domains to BKNS API v2, and international domains to APILayer
+ *
+ * @param string $domain
+ * @return array
+ */
+function im_lookup_domain_whois_internal($domain)
 {
-    $domain = sanitize_text_field($_POST['domain']);
+    $domain = sanitize_text_field($domain);
+    $domain = preg_replace('#^https?://#i', '', trim($domain));
+    $domain = trim($domain, '/');
 
     if (empty($domain)) {
-        wp_send_json_error(array('message' => 'Domain name is required'));
-        return;
+        return array('success' => false, 'message' => 'Tên miền không được để trống.');
     }
 
-    // Get APILayer WHOIS API Key from options
+    $is_vn_domain = (bool) preg_match('/\.vn$/i', $domain);
+
+    if ($is_vn_domain) {
+        // === BKNS WHOIS API for .VN domains ===
+        $bkns_api_key = get_option('bkns_whois_api_key');
+
+        if (empty($bkns_api_key)) {
+            return array('success' => false, 'message' => 'BKNS WHOIS API Key (.VN) chưa được cấu hình trong Cài đặt hệ thống.');
+        }
+
+        $api_url = 'https://whois.bkns.vn/api/v2/whois?domain=' . urlencode($domain);
+
+        $response = wp_remote_get($api_url, array(
+            'headers' => array(
+                'X-API-Key' => $bkns_api_key,
+                'Accept'    => 'application/json',
+            ),
+            'timeout' => 15
+        ));
+
+        if (is_wp_error($response)) {
+            return array('success' => false, 'message' => 'Không thể kết nối tới BKNS WHOIS API: ' . $response->get_error_message());
+        }
+
+        $response_code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if (empty($data)) {
+            return array('success' => false, 'message' => 'Phản hồi không hợp lệ từ BKNS WHOIS API.');
+        }
+
+        if ($response_code !== 200) {
+            $error_message = 'Lỗi tra cứu BKNS WHOIS';
+            if (!empty($data['error']['message'])) {
+                $error_message .= ': ' . $data['error']['message'];
+            } elseif (!empty($data['message'])) {
+                $error_message .= ': ' . $data['message'];
+            }
+            return array('success' => false, 'message' => $error_message);
+        }
+
+        $registration_date = null;
+        $expiry_date = null;
+        $registrant = '';
+        $registrar = '';
+        $status = $data['status'] ?? '';
+
+        if (!empty($data['data'])) {
+            $domain_data = $data['data'];
+
+            if (!empty($domain_data['dates']['created'])) {
+                $registration_date = date('Y-m-d', strtotime($domain_data['dates']['created']));
+            }
+            if (!empty($domain_data['dates']['expiry'])) {
+                $expiry_date = date('Y-m-d', strtotime($domain_data['dates']['expiry']));
+            }
+            if (!empty($domain_data['registrant']['name'])) {
+                $registrant = trim($domain_data['registrant']['name']);
+            }
+            if (!empty($domain_data['registrar']['name'])) {
+                $registrar = trim($domain_data['registrar']['name']);
+            }
+        }
+
+        $summary_parts = [];
+        if (!empty($registrant)) {
+            $summary_parts[] = 'Chủ sở hữu: ' . $registrant;
+        }
+        if (!empty($registrar)) {
+            $summary_parts[] = 'Nhà đăng ký: ' . $registrar;
+        }
+        if (!empty($status)) {
+            $summary_parts[] = 'Trạng thái: ' . $status;
+        }
+        $summary_note = implode(' | ', $summary_parts);
+
+        return array(
+            'success'           => true,
+            'provider'          => 'BKNS (.VN)',
+            'registration_date' => $registration_date,
+            'expiry_date'       => $expiry_date,
+            'registrant'        => $registrant,
+            'registrar'         => $registrar,
+            'status'            => $status,
+            'summary_note'      => $summary_note,
+            'raw_data'          => $data
+        );
+    }
+
+    // === APILayer WHOIS API for International domains ===
     $api_key = get_option('apilayer_whois_api_key');
 
     if (empty($api_key)) {
-        wp_send_json_error(array('message' => 'APILayer WHOIS API Key chưa được cấu hình trong Cài đặt hệ thống.'));
-        return;
+        return array('success' => false, 'message' => 'APILayer WHOIS API Key chưa được cấu hình trong Cài đặt hệ thống.');
     }
 
     $api_url = 'https://api.apilayer.com/whois/query?domain=' . urlencode($domain);
@@ -497,34 +594,31 @@ function fetch_domain_info_from_apilayer()
     ));
 
     if (is_wp_error($response)) {
-        wp_send_json_error(array('message' => 'Failed to fetch domain information: ' . $response->get_error_message()));
-        return;
+        return array('success' => false, 'message' => 'Không thể kết nối tới APILayer WHOIS: ' . $response->get_error_message());
     }
 
     $body = wp_remote_retrieve_body($response);
     $data = json_decode($body, true);
 
     if (empty($data)) {
-        wp_send_json_error(array('message' => 'Invalid response from API'));
-        return;
+        return array('success' => false, 'message' => 'Phản hồi không hợp lệ từ API');
     }
 
-    // Extract registration and expiry dates
     $registration_date = null;
     $expiry_date = null;
+    $registrant = '';
+    $registrar = '';
+    $status = '';
 
-    // APILayer WHOIS returns dates in 'result' object
     if (isset($data['result'])) {
         $result = $data['result'];
 
-        // Try different possible field names for registration date
         if (isset($result['created_date'])) {
             $registration_date = date('Y-m-d', strtotime($result['created_date']));
         } elseif (isset($result['creation_date'])) {
             $registration_date = date('Y-m-d', strtotime($result['creation_date']));
         }
 
-        // Try different possible field names for expiry date
         if (isset($result['expiry_date'])) {
             $expiry_date = date('Y-m-d', strtotime($result['expiry_date']));
         } elseif (isset($result['expiration_date'])) {
@@ -532,13 +626,59 @@ function fetch_domain_info_from_apilayer()
         } elseif (isset($result['registry_expiry_date'])) {
             $expiry_date = date('Y-m-d', strtotime($result['registry_expiry_date']));
         }
+
+        if (!empty($result['registrar_name'])) {
+            $registrar = trim($result['registrar_name']);
+        } elseif (!empty($result['registrar'])) {
+            $registrar = is_string($result['registrar']) ? trim($result['registrar']) : '';
+        }
+
+        if (!empty($result['org_name'])) {
+            $registrant = trim($result['org_name']);
+        } elseif (!empty($result['registrant'])) {
+            $registrant = is_string($result['registrant']) ? trim($result['registrant']) : '';
+        }
+
+        if (!empty($result['status'])) {
+            $status = is_array($result['status']) ? implode(', ', $result['status']) : (string)$result['status'];
+        }
     }
 
-    wp_send_json_success(array(
+    $summary_parts = [];
+    if (!empty($registrant)) {
+        $summary_parts[] = 'Chủ sở hữu: ' . $registrant;
+    }
+    if (!empty($registrar)) {
+        $summary_parts[] = 'Nhà đăng ký: ' . $registrar;
+    }
+    if (!empty($status)) {
+        $summary_parts[] = 'Trạng thái: ' . $status;
+    }
+    $summary_note = implode(' | ', $summary_parts);
+
+    return array(
+        'success'           => true,
+        'provider'          => 'APILayer (Quốc tế)',
         'registration_date' => $registration_date,
-        'expiry_date' => $expiry_date,
-        'raw_data' => $data // For debugging
-    ));
+        'expiry_date'       => $expiry_date,
+        'registrant'        => $registrant,
+        'registrar'         => $registrar,
+        'status'            => $status,
+        'summary_note'      => $summary_note,
+        'raw_data'          => $data
+    );
+}
+
+function fetch_domain_info_from_apilayer()
+{
+    $domain = sanitize_text_field($_POST['domain'] ?? '');
+    $res = im_lookup_domain_whois_internal($domain);
+
+    if (!$res['success']) {
+        wp_send_json_error(array('message' => $res['message']));
+    } else {
+        wp_send_json_success($res);
+    }
 }
 
 function update_email_notification_setting_callback()
@@ -2179,62 +2319,91 @@ function update_expense_status_callback() {
     }
     
     /**
-    * Renew domain for 1 more year
-    * AJAX handler for domain renewal
-    */
-    function renew_domain_one_year_ajax() {
-    check_ajax_referer('renew_domain_nonce', 'nonce');
-    
-    $domain_id = intval($_POST['domain_id']);
-    
-    if (!$domain_id) {
-        wp_send_json_error(array('message' => 'Domain ID không hợp lệ.'));
-        return;
-    }
-    
-    global $wpdb;
-    $domains_table = $wpdb->prefix . 'im_domains';
-    
-    // Get current domain data
-    $domain = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM $domains_table WHERE id = %d",
-        $domain_id
-    ));
-    
-    if (!$domain) {
-        wp_send_json_error(array('message' => 'Không tìm thấy tên miền.'));
-        return;
-    }
-    
-    // Calculate new expiry date (add 1 year)
-    $current_expiry = $domain->expiry_date;
-    $new_expiry = date('Y-m-d', strtotime($current_expiry . ' +1 year'));
-    
-    // Update expiry date
-    $update_result = $wpdb->update(
-        $domains_table,
-        array('expiry_date' => $new_expiry),
-        array('id' => $domain_id),
-        array('%s'),
-        array('%d')
-    );
-    
-    if ($update_result === false) {
-        wp_send_json_error(array(
-            'message' => 'Không thể cập nhật ngày hết hạn. SQL Error: ' . $wpdb->last_error
+     * Check and sync domain WHOIS info (renewal date, expiry date, status)
+     * AJAX handler for domain WHOIS sync
+     */
+    function check_and_sync_domain_whois_ajax() {
+        check_ajax_referer('renew_domain_nonce', 'nonce');
+        
+        $domain_id = intval($_POST['domain_id'] ?? 0);
+        
+        if (!$domain_id) {
+            wp_send_json_error(array('message' => 'Domain ID không hợp lệ.'));
+            return;
+        }
+        
+        global $wpdb;
+        $domains_table = $wpdb->prefix . 'im_domains';
+        
+        // Get current domain data
+        $domain = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $domains_table WHERE id = %d",
+            $domain_id
         ));
-        return;
-    }
-    
-    // Log the renewal
-    error_log("Domain Renewal: Domain ID {$domain_id} ({$domain->domain_name}) renewed from {$current_expiry} to {$new_expiry}");
-    
-    wp_send_json_success(array(
-        'message' => 'Đã gia hạn thành công tên miền ' . $domain->domain_name,
-        'old_expiry_date' => $current_expiry,
-        'new_expiry_date' => $new_expiry,
-        'domain_name' => $domain->domain_name
-    ));
+        
+        if (!$domain) {
+            wp_send_json_error(array('message' => 'Không tìm thấy tên miền.'));
+            return;
+        }
+
+        // Lookup WHOIS using internal routing (BKNS for .vn, APILayer for international)
+        $lookup_res = im_lookup_domain_whois_internal($domain->domain_name);
+
+        if (!$lookup_res['success']) {
+            wp_send_json_error(array('message' => $lookup_res['message']));
+            return;
+        }
+
+        $new_expiry = $lookup_res['expiry_date'];
+        $new_reg = $lookup_res['registration_date'];
+
+        if (empty($new_expiry)) {
+            wp_send_json_error(array('message' => 'Không tìm thấy thông tin ngày hết hạn từ WHOIS cho tên miền ' . $domain->domain_name));
+            return;
+        }
+
+        $update_data = array(
+            'expiry_date' => $new_expiry
+        );
+
+        if (!empty($new_reg) && empty($domain->registration_date)) {
+            $update_data['registration_date'] = $new_reg;
+        }
+
+        // If domain was expired and new expiry date is in the future, reactivate
+        if ($domain->status === 'EXPIRED' && strtotime($new_expiry) >= strtotime('today')) {
+            $update_data['status'] = 'ACTIVE';
+        }
+
+        $update_result = $wpdb->update(
+            $domains_table,
+            $update_data,
+            array('id' => $domain_id)
+        );
+
+        if ($update_result === false) {
+            wp_send_json_error(array(
+                'message' => 'Không thể cập nhật ngày hết hạn vào cơ sở dữ liệu. SQL Error: ' . $wpdb->last_error
+            ));
+            return;
+        }
+
+        $is_changed = ($domain->expiry_date !== $new_expiry);
+
+        wp_send_json_success(array(
+            'message'          => 'Đã tra cứu và cập nhật WHOIS thành công!',
+            'domain_id'        => $domain_id,
+            'domain_name'      => $domain->domain_name,
+            'provider'         => $lookup_res['provider'],
+            'old_expiry_date'  => $domain->expiry_date,
+            'new_expiry_date'  => $new_expiry,
+            'is_updated'       => $is_changed,
+            'registration_date'=> $new_reg,
+            'registrant'       => $lookup_res['registrant'] ?? '',
+            'registrar'        => $lookup_res['registrar'] ?? '',
+            'status'           => $lookup_res['status'] ?? '',
+            'summary_note'     => $lookup_res['summary_note'] ?? ''
+        ));
     }
     
     
@@ -2267,8 +2436,10 @@ add_action('wp_ajax_nopriv_get_customer_services', 'get_customer_services_ajax')
 add_action('wp_ajax_fetch_domain_info', 'fetch_domain_info_from_apilayer');
 add_action('wp_ajax_nopriv_fetch_domain_info', 'fetch_domain_info_from_apilayer');
 
-add_action('wp_ajax_renew_domain_one_year', 'renew_domain_one_year_ajax');
-add_action('wp_ajax_nopriv_renew_domain_one_year', 'renew_domain_one_year_ajax');
+add_action('wp_ajax_check_and_sync_domain_whois', 'check_and_sync_domain_whois_ajax');
+add_action('wp_ajax_nopriv_check_and_sync_domain_whois', 'check_and_sync_domain_whois_ajax');
+add_action('wp_ajax_renew_domain_one_year', 'check_and_sync_domain_whois_ajax');
+add_action('wp_ajax_nopriv_renew_domain_one_year', 'check_and_sync_domain_whois_ajax');
 
 // Email notifications
 add_action('wp_ajax_update_email_notification_setting', 'update_email_notification_setting_callback');
@@ -2826,12 +2997,27 @@ function check_single_website_status_ajax()
     if (!is_wp_error($response)) {
         $http_code = wp_remote_retrieve_response_code($response);
         $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
 
-        if ($http_code === 200 && !empty($data['status']) && $data['status'] === true) {
+        // Clean response body: strip UTF-8 BOM, hidden control chars, whitespace
+        $clean_body = preg_replace('/^[\xEF\xBB\xBF\s\r\n\t]+/u', '', trim($body));
+        $clean_body = trim($clean_body, "\xEF\xBB\xBF \t\n\r\0\x0B");
+        $data = json_decode($clean_body, true);
+
+        $is_status_true = false;
+        if (is_array($data) && isset($data['status'])) {
+            $is_status_true = ($data['status'] === true || $data['status'] === 'true' || $data['status'] === 1 || $data['status'] === '1');
+        }
+
+        if (intval($http_code) === 200 && $is_status_true) {
             $is_online = true;
         } else {
-            $error_msg = 'HTTP Status Code: ' . $http_code;
+            if (intval($http_code) === 200 && empty($data)) {
+                $error_msg = 'Phản hồi không phải JSON hợp lệ (có thể do UTF-8 BOM hoặc PHP Warning/Notice)';
+            } elseif (intval($http_code) === 200 && !$is_status_true) {
+                $error_msg = !empty($data['message']) ? $data['message'] : 'Website vệ tinh trả về status = false';
+            } else {
+                $error_msg = 'HTTP Status Code: ' . $http_code;
+            }
         }
     } else {
         $error_msg = $response->get_error_message();

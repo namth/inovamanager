@@ -146,6 +146,13 @@ function register_bookorder_api_routes()
         'callback' => 'update_user_api',
         'permission_callback' => 'validate_api_key'
     ));
+
+    // Register route for checking domain WHOIS and auto-syncing system domains
+    register_rest_route('bookorder/v1', '/check-domain-whois', array(
+        'methods' => 'POST',
+        'callback' => 'check_domain_whois_api',
+        'permission_callback' => 'validate_api_key'
+    ));
 }
 add_action('rest_api_init', 'register_bookorder_api_routes');
 
@@ -1043,9 +1050,18 @@ function check_website_status_api($request)
 
     $http_code = wp_remote_retrieve_response_code($response);
     $body = wp_remote_retrieve_body($response);
-    $data = json_decode($body, true);
 
-    if ($http_code === 200 && !empty($data['status']) && $data['status'] === true) {
+    // Clean response body: strip UTF-8 BOM, hidden control chars, whitespace
+    $clean_body = preg_replace('/^[\xEF\xBB\xBF\s\r\n\t]+/u', '', trim($body));
+    $clean_body = trim($clean_body, "\xEF\xBB\xBF \t\n\r\0\x0B");
+    $data = json_decode($clean_body, true);
+
+    $is_status_true = false;
+    if (is_array($data) && isset($data['status'])) {
+        $is_status_true = ($data['status'] === true || $data['status'] === 'true' || $data['status'] === 1 || $data['status'] === '1');
+    }
+
+    if (intval($http_code) === 200 && $is_status_true) {
         // Website is active! Update active_time using the same logic as update_website_status_api
         $current_time = current_time('mysql');
         $update_result = $wpdb->update(
@@ -2480,3 +2496,120 @@ function get_managed_websites_api($request)
         200
     );
 }
+
+/**
+ * API handler to check WHOIS information for any domain
+ * and auto-update expiry date if domain exists in the system database
+ *
+ * @param WP_REST_Request $request
+ * @return WP_REST_Response
+ */
+function check_domain_whois_api($request)
+{
+    $params = $request->get_json_params();
+    if (empty($params)) {
+        $params = $request->get_params();
+    }
+
+    $raw_domain = isset($params['domain']) ? sanitize_text_field($params['domain']) : '';
+    $clean_domain = preg_replace('#^https?://#i', '', trim($raw_domain));
+    $clean_domain = trim($clean_domain, '/');
+
+    if (empty($clean_domain)) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => 'Tham số domain là bắt buộc và không được để trống.'
+            ),
+            400
+        );
+    }
+
+    if (!function_exists('im_lookup_domain_whois_internal')) {
+        require_once get_template_directory() . '/includes/ajax-handlers.php';
+    }
+
+    $lookup_res = im_lookup_domain_whois_internal($clean_domain);
+
+    if (!$lookup_res['success']) {
+        return new WP_REST_Response(
+            array(
+                'success' => false,
+                'message' => $lookup_res['message'],
+                'domain'  => $clean_domain
+            ),
+            400
+        );
+    }
+
+    global $wpdb;
+    $domains_table = $wpdb->prefix . 'im_domains';
+
+    // Search for domain in system database
+    $domain_row = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$domains_table} WHERE domain_name = %s LIMIT 1",
+        $clean_domain
+    ));
+
+    $is_in_system = !empty($domain_row);
+    $is_updated = false;
+    $domain_id = $is_in_system ? intval($domain_row->id) : null;
+    $old_expiry = $is_in_system ? $domain_row->expiry_date : null;
+    $new_expiry = $lookup_res['expiry_date'];
+    $current_status = $is_in_system ? $domain_row->status : null;
+
+    if ($is_in_system && !empty($new_expiry)) {
+        $update_data = array();
+
+        if ($domain_row->expiry_date !== $new_expiry) {
+            $update_data['expiry_date'] = $new_expiry;
+            $is_updated = true;
+        }
+
+        if (!empty($lookup_res['registration_date']) && empty($domain_row->registration_date)) {
+            $update_data['registration_date'] = $lookup_res['registration_date'];
+        }
+
+        // If domain was marked EXPIRED and new expiry date is in future, reactivate
+        if ($domain_row->status === 'EXPIRED' && strtotime($new_expiry) >= strtotime('today')) {
+            $update_data['status'] = 'ACTIVE';
+            $current_status = 'ACTIVE';
+        }
+
+        if (!empty($update_data)) {
+            $wpdb->update(
+                $domains_table,
+                $update_data,
+                array('id' => $domain_id)
+            );
+        }
+    }
+
+    $response_data = array(
+        'success'   => true,
+        'message'   => $is_in_system 
+            ? ($is_updated ? 'Tra cứu WHOIS thành công và đã cập nhật ngày hết hạn mới vào hệ thống.' : 'Tra cứu WHOIS thành công (thông tin khớp với hệ thống).')
+            : 'Tra cứu WHOIS thành công (tên miền không thuộc hệ thống quản lý).',
+        'domain'    => $clean_domain,
+        'provider'  => $lookup_res['provider'],
+        'whois_data'=> array(
+            'registration_date' => $lookup_res['registration_date'],
+            'expiry_date'       => $lookup_res['expiry_date'],
+            'registrant'        => $lookup_res['registrant'] ?? '',
+            'registrar'         => $lookup_res['registrar'] ?? '',
+            'status'            => $lookup_res['status'] ?? '',
+            'summary_note'      => $lookup_res['summary_note'] ?? ''
+        ),
+        'system_domain' => array(
+            'is_in_system'   => $is_in_system,
+            'domain_id'      => $domain_id,
+            'is_updated'     => $is_updated,
+            'old_expiry_date'=> $old_expiry,
+            'new_expiry_date'=> $new_expiry,
+            'current_status' => $current_status
+        )
+    );
+
+    return new WP_REST_Response($response_data, 200);
+}
+

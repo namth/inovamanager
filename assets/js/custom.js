@@ -864,32 +864,24 @@ jQuery(document).ready(function($) {
     }
 
     /**
-     * ===================================================================
-     * DOMAIN RENEWAL - Single Domain (+1 Year)
-     * ===================================================================
-     * File: domain_list.php
+     * File: domain_list.php, detail_domain.php
      *
-     * Handle quick renewal for individual domains
-     * - Click renew icon in actions column
-     * - Adds 1 year to current expiry date
-     * - Shows confirmation with old/new dates
-     * - Auto reloads page after success
+     * Handle WHOIS lookup & sync for individual domains
+     * - Checks expiry & registration info from WHOIS (BKNS for .vn, APILayer for international)
+     * - Syncs expiry date in database
+     * - Silently updates / reloads on success, only alerts on failure
      */
-    $(document).on('click', '.renew-domain-btn', function() {
+    $(document).on('click', '.check-whois-domain-btn, .renew-domain-btn, .renew-domain-manual-btn', function(e) {
+        e.preventDefault();
         const $button = $(this);
         const domainId = $button.data('domain-id');
-        const domainName = $button.data('domain-name');
-        const expiryDate = $button.data('expiry-date');
-
-        // Confirm renewal
-        if (!confirm(`Bạn có chắc muốn gia hạn tên miền "${domainName}" thêm 1 năm?\n\nNgày hết hạn hiện tại: ${formatDate(expiryDate)}\nNgày hết hạn mới: ${formatDate(addYears(expiryDate, 1))}`)) {
-            return;
-        }
 
         // Show loading state
         const originalIcon = $button.find('i').attr('class');
         $button.prop('disabled', true);
-        $button.find('i').attr('class', 'ph ph-spinner ph-spin text-success btn-icon-prepend fa-150p');
+        $button.find('i').attr('class', 'ph ph-spinner ph-spin text-primary btn-icon-prepend fa-150p');
+
+        const nonce = $button.closest('table').data('renew-nonce') || $('table[data-renew-nonce]').data('renew-nonce') || '';
 
         // Send AJAX request
         $.ajax({
@@ -897,17 +889,23 @@ jQuery(document).ready(function($) {
             type: 'POST',
             dataType: 'json',
             data: {
-                action: 'renew_domain_one_year',
+                action: 'check_and_sync_domain_whois',
                 domain_id: domainId,
-                nonce: $button.closest('table').data('renew-nonce') || ''
+                nonce: nonce
             },
             success: function(response) {
-                if (response.success) {
-                    // Reload page to show updated data
-                    location.reload();
+                if (response.success && response.data) {
+                    if (response.data.is_updated) {
+                        // Reload page to reflect updated dates
+                        location.reload();
+                    } else {
+                        // Reset button state silently
+                        $button.prop('disabled', false);
+                        $button.find('i').attr('class', originalIcon);
+                    }
                 } else {
-                    // Show error message
-                    alert('❌ Lỗi: ' + (response.data.message || 'Không thể gia hạn tên miền'));
+                    // Show error message only on failure
+                    alert('❌ Lỗi: ' + (response.data && response.data.message ? response.data.message : 'Không thể kiểm tra thông tin WHOIS'));
 
                     // Reset button
                     $button.prop('disabled', false);
