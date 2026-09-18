@@ -113,6 +113,12 @@ $user_type = get_inova_user_type();
             </a>
         </li>
         <li class="nav-item">
+            <a class="nav-link" href="<?php echo home_url('/bao-cao-doanh-thu/'); ?>">
+                <i class="menu-icon ph ph-table"></i>
+                <span class="menu-title">Báo cáo doanh thu dịch vụ</span>
+            </a>
+        </li>
+        <li class="nav-item">
             <a class="nav-link" href="<?php echo home_url('/danh-sach-doi-tac/'); ?>">
                 <i class="menu-icon ph ph-users-three"></i>
                 <span class="menu-title">Đối tác</span>

@@ -769,6 +769,8 @@ function get_virtual_page_template_mapping()
         'thong-ke-doanh-thu' => 'revenue_stats.php',
         'revenue-statistics' => 'revenue_stats.php',
         'thong-ke' => 'revenue_stats.php',
+        'bao-cao-doanh-thu' => 'service_revenue_report.php',
+        'service-revenue' => 'service_revenue_report.php',
 
         // Cart Management
         'gio-hang' => 'cart.php',
@@ -1203,6 +1205,7 @@ add_filter('query_vars', function($vars) {
     $vars[] = 'date_to';
     $vars[] = 'paged';
     $vars[] = 'month';
+    $vars[] = 'service_type';
     return $vars;
 });
 
