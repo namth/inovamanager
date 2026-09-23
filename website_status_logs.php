@@ -58,9 +58,15 @@ get_header();
                             <p class="text-muted mb-0 font-size-13">Lưu vết kết quả kiểm tra tự động định kỳ (Cronjob) gửi request tới website vệ tinh</p>
                         </div>
                         <div>
-                            <button type="button" id="clear-status-logs-btn" class="btn btn-danger btn-sm">
-                                <i class="ph ph-trash me-1"></i>Xóa toàn bộ nhật ký
-                            </button>
+                            <?php $retention_days = max(1, intval(get_option('inova_website_log_retention_days', get_option('inova_webhook_log_retention_days', 7)))); ?>
+                            <div class="d-flex gap-2">
+                                <button type="button" id="cleanup-expired-logs-btn" class="btn btn-warning btn-sm">
+                                    <i class="ph ph-broom me-1"></i>Dọn dẹp log quá hạn (<?php echo $retention_days; ?> ngày)
+                                </button>
+                                <button type="button" id="clear-status-logs-btn" class="btn btn-danger btn-sm">
+                                    <i class="ph ph-trash me-1"></i>Xóa toàn bộ nhật ký
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -211,8 +217,52 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    const cleanupBtn = document.getElementById('cleanup-expired-logs-btn');
+    if (cleanupBtn) {
+        cleanupBtn.addEventListener('click', function() {
+            if (confirm('Bạn có chắc chắn muốn dọn dẹp các bản ghi log cũ hơn <?php echo $retention_days; ?> ngày?')) {
+                const originalHtml = cleanupBtn.innerHTML;
+                cleanupBtn.disabled = true;
+                cleanupBtn.innerHTML = '<i class="ph ph-spinner spinner spin-animation me-1"></i>Đang dọn dẹp...';
+
+                const formData = new FormData();
+                formData.append('action', 'cleanup_expired_logs');
+
+                fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.data.message);
+                        window.location.reload();
+                    } else {
+                        alert('Lỗi: ' + (data.data ? data.data.message : 'Không thể thực hiện'));
+                        cleanupBtn.disabled = false;
+                        cleanupBtn.innerHTML = originalHtml;
+                    }
+                })
+                .catch(err => {
+                    alert('Có lỗi xảy ra khi kết nối tới hệ thống!');
+                    cleanupBtn.disabled = false;
+                    cleanupBtn.innerHTML = originalHtml;
+                });
+            }
+        });
+    }
 });
 </script>
+<style>
+.spin-animation {
+    animation: spin 1s infinite linear;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+</style>
 
 <?php
 get_footer();

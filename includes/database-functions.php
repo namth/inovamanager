@@ -1681,13 +1681,31 @@ function check_website_online_status()
 function schedule_expiry_check_cron($force_reschedule = false)
 {
     // Schedule for services expiry check (daily at 8:00 AM)
-    if (!wp_next_scheduled('inovamanager_check_expiry_daily')) {
-        wp_schedule_event(strtotime('08:00:00'), 'daily_8am', 'inovamanager_check_expiry_daily');
+    $expiry_timestamp = wp_next_scheduled('inovamanager_check_expiry_daily');
+    if ($force_reschedule && $expiry_timestamp) {
+        wp_unschedule_event($expiry_timestamp, 'inovamanager_check_expiry_daily');
+        $expiry_timestamp = false;
+    }
+    if (!$expiry_timestamp) {
+        $time_8am = strtotime('08:00:00');
+        if ($time_8am <= time()) {
+            $time_8am += DAY_IN_SECONDS;
+        }
+        wp_schedule_event($time_8am, 'daily', 'inovamanager_check_expiry_daily');
     }
 
-    // Schedule for daily webhook logs cleanup (daily at 03:00 AM)
-    if (!wp_next_scheduled('inovamanager_cleanup_logs_daily')) {
-        wp_schedule_event(strtotime('03:00:00'), 'daily', 'inovamanager_cleanup_logs_daily');
+    // Schedule for daily logs cleanup (daily at 03:00 AM)
+    $cleanup_timestamp = wp_next_scheduled('inovamanager_cleanup_logs_daily');
+    if ($force_reschedule && $cleanup_timestamp) {
+        wp_unschedule_event($cleanup_timestamp, 'inovamanager_cleanup_logs_daily');
+        $cleanup_timestamp = false;
+    }
+    if (!$cleanup_timestamp) {
+        $time_3am = strtotime('03:00:00');
+        if ($time_3am <= time()) {
+            $time_3am += DAY_IN_SECONDS;
+        }
+        wp_schedule_event($time_3am, 'daily', 'inovamanager_cleanup_logs_daily');
     }
 
     // Unschedule legacy daily website status check if present
@@ -2905,28 +2923,42 @@ function send_webhook_data($data, $event_type = 'generic')
 }
 
 /**
- * Cleanup old website status logs and plugin activity logs based on retention settings (default 30 days)
+ * Cleanup old website status logs, plugin activity logs, and webhook logs based on retention settings (default 7 days)
+ *
+ * @return array Deleted counts summary
  */
 function cleanup_old_website_status_logs()
 {
     global $wpdb;
     $logs_table = $wpdb->prefix . 'im_website_status_logs';
     $plugin_logs_table = $wpdb->prefix . 'im_plugin_activity_logs';
+    $webhook_logs_table = $wpdb->prefix . 'im_webhook_logs';
 
-    $retention_days = max(1, intval(get_option('inova_website_log_retention_days', 30)));
+    $retention_days = max(1, intval(get_option('inova_website_log_retention_days', get_option('inova_webhook_log_retention_days', 7))));
     $current_time = current_time('mysql');
 
-    // 1. Cleanup website status logs
-    $deleted_count = $wpdb->query($wpdb->prepare("
-        DELETE FROM {$logs_table}
-        WHERE created_at < DATE_SUB(%s, INTERVAL %d DAY)
-    ", $current_time, $retention_days));
+    $results = array(
+        'retention_days' => $retention_days,
+        'website_status_logs' => 0,
+        'plugin_activity_logs' => 0,
+        'webhook_logs' => 0,
+        'total' => 0
+    );
 
-    if ($deleted_count !== false) {
-        error_log("Cleaned up {$deleted_count} website status logs older than {$retention_days} days.");
+    // 1. Cleanup website status logs
+    if ($wpdb->get_var("SHOW TABLES LIKE '{$logs_table}'") === $logs_table) {
+        $deleted_count = $wpdb->query($wpdb->prepare("
+            DELETE FROM {$logs_table}
+            WHERE created_at < DATE_SUB(%s, INTERVAL %d DAY)
+        ", $current_time, $retention_days));
+
+        if ($deleted_count !== false) {
+            $results['website_status_logs'] = intval($deleted_count);
+            error_log("Cleaned up {$deleted_count} website status logs older than {$retention_days} days.");
+        }
     }
 
-    // 2. Cleanup plugin activity logs (30 days retention)
+    // 2. Cleanup plugin activity logs
     if ($wpdb->get_var("SHOW TABLES LIKE '{$plugin_logs_table}'") === $plugin_logs_table) {
         $deleted_plugin_logs = $wpdb->query($wpdb->prepare("
             DELETE FROM {$plugin_logs_table}
@@ -2934,9 +2966,43 @@ function cleanup_old_website_status_logs()
         ", $current_time, $retention_days));
 
         if ($deleted_plugin_logs !== false) {
+            $results['plugin_activity_logs'] = intval($deleted_plugin_logs);
             error_log("Cleaned up {$deleted_plugin_logs} plugin activity logs older than {$retention_days} days.");
         }
     }
+
+    // 3. Cleanup webhook logs
+    if ($wpdb->get_var("SHOW TABLES LIKE '{$webhook_logs_table}'") === $webhook_logs_table) {
+        $deleted_webhook_logs = $wpdb->query($wpdb->prepare("
+            DELETE FROM {$webhook_logs_table}
+            WHERE created_at < DATE_SUB(%s, INTERVAL %d DAY)
+        ", $current_time, $retention_days));
+
+        if ($deleted_webhook_logs !== false) {
+            $results['webhook_logs'] = intval($deleted_webhook_logs);
+            error_log("Cleaned up {$deleted_webhook_logs} webhook logs older than {$retention_days} days.");
+        }
+    }
+
+    $results['total'] = $results['website_status_logs'] + $results['plugin_activity_logs'] + $results['webhook_logs'];
+    return $results;
+}
+
+/**
+ * Throttle check to automatically run daily log cleanup on incoming heartbeats/requests.
+ * Runs at most once every 24 hours.
+ */
+function maybe_run_daily_log_cleanup()
+{
+    $transient_key = 'inova_daily_log_cleanup_done';
+    if (get_transient($transient_key)) {
+        return false;
+    }
+
+    // Set transient for 24 hours immediately to avoid race condition
+    set_transient($transient_key, time(), DAY_IN_SECONDS);
+
+    return cleanup_old_website_status_logs();
 }
 
 function prepare_invoice_webhook_data($invoice_id, $customer_id)

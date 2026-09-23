@@ -3073,7 +3073,6 @@ function clear_plugin_activity_logs_ajax()
 
     global $wpdb;
     $logs_table = $wpdb->prefix . 'im_plugin_activity_logs';
-
     $result = $wpdb->query("TRUNCATE TABLE {$logs_table}");
 
     if ($result !== false) {
@@ -3082,6 +3081,38 @@ function clear_plugin_activity_logs_ajax()
         wp_send_json_error(array('message' => 'Có lỗi xảy ra khi xóa nhật ký'));
     }
 }
+
+add_action('wp_ajax_cleanup_expired_logs', 'cleanup_expired_logs_ajax');
+function cleanup_expired_logs_ajax()
+{
+    if (!current_user_can('manage_options') && !is_inova_admin()) {
+        wp_send_json_error(array('message' => 'Không có quyền thực hiện'));
+    }
+
+    if (!function_exists('cleanup_old_website_status_logs')) {
+        wp_send_json_error(array('message' => 'Hàm dọn dẹp log không tồn tại'));
+    }
+
+    $results = cleanup_old_website_status_logs();
+
+    $retention_days = $results['retention_days'];
+    $total = $results['total'];
+
+    $msg = sprintf(
+        'Đã dọn dẹp thành công %s bản ghi log cũ hơn %d ngày (Trạng thái Website: %d, Thay đổi Plugin: %d, Webhook: %d)',
+        number_format_i18n($total),
+        $retention_days,
+        $results['website_status_logs'],
+        $results['plugin_activity_logs'],
+        $results['webhook_logs']
+    );
+
+    wp_send_json_success(array(
+        'message' => $msg,
+        'details' => $results
+    ));
+}
+
 add_action('wp_ajax_update_expense_status', 'update_expense_status_callback');
 add_action('admin_post_edit_expense_post', 'edit_expense_post_callback');
 

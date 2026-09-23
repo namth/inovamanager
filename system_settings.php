@@ -61,7 +61,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_vat'])) {
             update_option('inova_webhook_enabled_website_status', isset($_POST['inova_webhook_enabled_website_status']) ? 1 : 0);
             update_option('inova_website_check_interval', max(5, intval($_POST['inova_website_check_interval'])));
             update_option('inova_website_max_active_hours', max(1, intval($_POST['inova_website_max_active_hours'])));
-            update_option('inova_webhook_log_retention_days', max(1, intval($_POST['inova_webhook_log_retention_days'])));
+            $retention_days = max(1, intval($_POST['inova_webhook_log_retention_days']));
+            update_option('inova_webhook_log_retention_days', $retention_days);
+            update_option('inova_website_log_retention_days', $retention_days);
 
             // Re-schedule cron when interval changes
             if (function_exists('schedule_expiry_check_cron')) {
@@ -97,7 +99,7 @@ $webhook_enabled_expiry = get_option('inova_webhook_enabled_expiry', 1);
 $webhook_enabled_website_status = get_option('inova_webhook_enabled_website_status', 1);
 $website_check_interval = get_option('inova_website_check_interval', 20);
 $website_max_active_hours = get_option('inova_website_max_active_hours', 6);
-$webhook_log_retention_days = get_option('inova_webhook_log_retention_days', 30);
+$webhook_log_retention_days = get_option('inova_website_log_retention_days', get_option('inova_webhook_log_retention_days', 7));
 
 // Static banks list from Sepay
 $banks_list = array(
@@ -530,7 +532,7 @@ get_header();
                                                 <input type="number" min="1" max="365" class="form-control" id="inova_webhook_log_retention_days" name="inova_webhook_log_retention_days" 
                                                        value="<?php echo esc_attr($webhook_log_retention_days); ?>" 
                                                        required>
-                                                <small class="form-text text-muted">Hệ thống sẽ tự động xóa các bản ghi log Webhook cũ hơn số ngày này (mặc định: 30 ngày).</small>
+                                                <small class="form-text text-muted">Hệ thống sẽ tự động xóa các bản ghi nhật ký kiểm tra trạng thái website, thay đổi plugin và webhook cũ hơn số ngày này (mặc định: 7 ngày).</small>
                                             </div>
                                         </div>
 

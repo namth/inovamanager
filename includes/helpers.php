@@ -1282,8 +1282,9 @@ function render_website_status_logs_admin_page() {
     $logs = $wpdb->get_results("SELECT * FROM {$logs_table} {$where_clause} ORDER BY id DESC LIMIT {$items_per_page} OFFSET {$offset}");
     ?>
     <div class="wrap">
-        <h1 class="wp-heading-inline">Nhật ký kiểm tra trạng thái Website</h1>
-        <button type="button" id="clear-status-logs-btn" class="button button-link-delete" style="margin-left: 10px;">Xóa toàn bộ nhật ký</button>
+        <?php $retention_days = max(1, intval(get_option('inova_website_log_retention_days', get_option('inova_webhook_log_retention_days', 7)))); ?>
+        <button type="button" id="cleanup-expired-logs-btn" class="button button-secondary" style="margin-left: 10px;">Dọn dẹp log quá hạn (<?php echo $retention_days; ?> ngày)</button>
+        <button type="button" id="clear-status-logs-btn" class="button button-link-delete" style="margin-left: 5px;">Xóa toàn bộ nhật ký</button>
         <hr class="wp-header-end">
 
         <p class="description">Lưu vết lịch sử kiểm tra định kỳ (Cronjob) gửi request ping tới các website vệ tinh.</p>
@@ -1427,6 +1428,41 @@ function render_website_status_logs_admin_page() {
                     })
                     .catch(err => {
                         alert('Có lỗi xảy ra khi kết nối tới hệ thống!');
+                    });
+                }
+            });
+        }
+
+        const cleanupBtn = document.getElementById('cleanup-expired-logs-btn');
+        if (cleanupBtn) {
+            cleanupBtn.addEventListener('click', function() {
+                if (confirm('Bạn có chắc chắn muốn dọn dẹp các bản ghi log cũ hơn <?php echo $retention_days; ?> ngày?')) {
+                    const originalText = cleanupBtn.textContent;
+                    cleanupBtn.disabled = true;
+                    cleanupBtn.textContent = 'Đang dọn dẹp...';
+
+                    const formData = new FormData();
+                    formData.append('action', 'cleanup_expired_logs');
+
+                    fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(data.data.message);
+                            window.location.reload();
+                        } else {
+                            alert('Lỗi: ' + (data.data ? data.data.message : 'Không rõ lỗi'));
+                            cleanupBtn.disabled = false;
+                            cleanupBtn.textContent = originalText;
+                        }
+                    })
+                    .catch(err => {
+                        alert('Có lỗi xảy ra khi kết nối tới hệ thống!');
+                        cleanupBtn.disabled = false;
+                        cleanupBtn.textContent = originalText;
                     });
                 }
             });

@@ -975,6 +975,11 @@ function update_website_status_api($request)
         $website_id
     ));
 
+    // Opportunistically run daily log cleanup if 24h elapsed since last cleanup
+    if (function_exists('maybe_run_daily_log_cleanup')) {
+        maybe_run_daily_log_cleanup();
+    }
+
     return new WP_REST_Response(
         array(
             'success' => true,
