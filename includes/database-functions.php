@@ -1523,6 +1523,71 @@ function check_and_send_expiry_emails()
     error_log('Expiry notification emails check completed at ' . current_time('Y-m-d H:i:s'));
 }
 
+/**
+ * Helper to ping a satellite website's status endpoint
+ *
+ * @param string $domain Domain name
+ * @return array Result array with is_online, ping_url, http_code, response_body, error_message, data
+ */
+function inova_ping_satellite_status($domain)
+{
+    $clean_domain = preg_replace('#^https?://(www\.)?#', '', trim($domain));
+    $clean_domain = rtrim($clean_domain, '/');
+
+    $ping_url = "https://" . $clean_domain . "/wp-json/inova/v1/status";
+    $response = wp_remote_get($ping_url, array('timeout' => 5, 'sslverify' => false));
+
+    // Fallback to HTTP if HTTPS fails
+    if (is_wp_error($response)) {
+        $ping_url = "http://" . $clean_domain . "/wp-json/inova/v1/status";
+        $response = wp_remote_get($ping_url, array('timeout' => 5));
+    }
+
+    $is_online = false;
+    $http_code = null;
+    $response_body = null;
+    $error_message = null;
+    $data = null;
+
+    if (is_wp_error($response)) {
+        $error_message = $response->get_error_message();
+    } else {
+        $http_code = wp_remote_retrieve_response_code($response);
+        $response_body = wp_remote_retrieve_body($response);
+
+        // Clean response body: strip UTF-8 BOM, hidden control chars, whitespace
+        $clean_body = preg_replace('/^[\xEF\xBB\xBF\s\r\n\t]+/u', '', trim($response_body));
+        $clean_body = trim($clean_body, "\xEF\xBB\xBF \t\n\r\0\x0B");
+        $data = json_decode($clean_body, true);
+
+        $is_status_true = false;
+        if (is_array($data) && isset($data['status'])) {
+            $is_status_true = ($data['status'] === true || $data['status'] === 'true' || $data['status'] === 1 || $data['status'] === '1');
+        }
+
+        if (intval($http_code) === 200 && $is_status_true) {
+            $is_online = true;
+        } else {
+            if (intval($http_code) === 200 && empty($data)) {
+                $error_message = 'Phản hồi không phải JSON hợp lệ (có thể do UTF-8 BOM hoặc PHP Warning/Notice)';
+            } elseif (intval($http_code) === 200 && !$is_status_true) {
+                $error_message = !empty($data['message']) ? $data['message'] : 'Website vệ tinh trả về status = false';
+            } else {
+                $error_message = 'HTTP Status Code: ' . $http_code;
+            }
+        }
+    }
+
+    return array(
+        'is_online'      => $is_online,
+        'ping_url'       => $ping_url,
+        'http_code'      => $http_code,
+        'response_body'  => $response_body,
+        'error_message'  => $error_message,
+        'data'           => $data
+    );
+}
+
 function check_website_online_status()
 {
     global $wpdb;
@@ -1563,54 +1628,25 @@ function check_website_online_status()
         }
 
         $checked_count++;
-
-        // Clean domain (remove http/https prefix if any)
-        $clean_domain = preg_replace('#^https?://(www\.)?#', '', $domain);
-        $clean_domain = rtrim($clean_domain, '/');
-
-        // Ping satellite website status endpoint
-        $ping_url = "https://" . $clean_domain . "/wp-json/inova/v1/status";
-        $response = wp_remote_get($ping_url, array('timeout' => 5, 'sslverify' => false));
-
-        // Try HTTP fallback if HTTPS fails
-        if (is_wp_error($response)) {
-            $ping_url = "http://" . $clean_domain . "/wp-json/inova/v1/status";
-            $response = wp_remote_get($ping_url, array('timeout' => 5));
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(60);
         }
 
-        $is_online = false;
-        $http_code = null;
-        $response_body = null;
-        $error_message = null;
+        // Lần kiểm tra 1
+        $ping_result = inova_ping_satellite_status($domain);
 
-        if (is_wp_error($response)) {
-            $error_message = $response->get_error_message();
-        } else {
-            $http_code = wp_remote_retrieve_response_code($response);
-            $response_body = wp_remote_retrieve_body($response);
-
-            // Clean response body: strip UTF-8 BOM, hidden control chars, whitespace
-            $clean_body = preg_replace('/^[\xEF\xBB\xBF\s\r\n\t]+/u', '', trim($response_body));
-            $clean_body = trim($clean_body, "\xEF\xBB\xBF \t\n\r\0\x0B");
-            $data = json_decode($clean_body, true);
-
-            $is_status_true = false;
-            if (is_array($data) && isset($data['status'])) {
-                $is_status_true = ($data['status'] === true || $data['status'] === 'true' || $data['status'] === 1 || $data['status'] === '1');
-            }
-
-            if (intval($http_code) === 200 && $is_status_true) {
-                $is_online = true;
-            } else {
-                if (intval($http_code) === 200 && empty($data)) {
-                    $error_message = 'Phản hồi không phải JSON hợp lệ (có thể do UTF-8 BOM hoặc PHP Warning/Notice)';
-                } elseif (intval($http_code) === 200 && !$is_status_true) {
-                    $error_message = !empty($data['message']) ? $data['message'] : 'Website vệ tinh trả về status = false';
-                } else {
-                    $error_message = 'HTTP Status Code: ' . $http_code;
-                }
-            }
+        // Nếu kiểm tra lần 1 không thành công, thử lại ngay tại chỗ sau 3 giây (tránh lỗi ngẫu nhiên/timeout tích tắc)
+        if (!$ping_result['is_online']) {
+            sleep(3);
+            $ping_result = inova_ping_satellite_status($domain);
         }
+
+        $is_online = $ping_result['is_online'];
+        $ping_url = $ping_result['ping_url'];
+        $http_code = $ping_result['http_code'];
+        $response_body = $ping_result['response_body'];
+        $error_message = $ping_result['error_message'];
+        $data = $ping_result['data'];
 
         if ($is_online) {
             // Update active_time in database
@@ -1623,17 +1659,34 @@ function check_website_online_status()
             );
         } else {
             $failed_count++;
-            $failed_websites[] = array(
-                'id'             => intval($website->id),
-                'name'           => $website->name,
-                'owner_name'     => !empty($website->owner_name) ? $website->owner_name : 'N/A',
-                'owner_email'    => !empty($website->owner_email) ? $website->owner_email : 'N/A',
-                'ping_url'       => $ping_url,
-                'http_code'      => $http_code,
-                'error_message'  => $error_message,
-                'active_time'    => $website->active_time,
-                'last_seen_diff' => !empty($website->active_time) ? human_time_diff(strtotime($website->active_time), current_time('timestamp')) . ' trước' : 'Chưa từng hoạt động'
-            );
+
+            // Kiểm tra log lần quét trước đó của website này để xác định có phải lỗi liên tiếp 2 chu kỳ hay không
+            $last_log = $wpdb->get_row($wpdb->prepare("
+                SELECT status, http_code, created_at
+                FROM {$logs_table}
+                WHERE website_id = %d
+                ORDER BY id DESC
+                LIMIT 1
+            ", $website->id));
+
+            $is_consecutive_failure = ($last_log && $last_log->status === 'FAILED');
+
+            // Chỉ đưa vào danh sách gửi Webhook cảnh báo nếu gặp lỗi liên tiếp 2 chu kỳ trở lên (tránh báo động giả)
+            if ($is_consecutive_failure) {
+                $failed_websites[] = array(
+                    'id'             => intval($website->id),
+                    'name'           => $website->name,
+                    'owner_name'     => !empty($website->owner_name) ? $website->owner_name : 'N/A',
+                    'owner_email'    => !empty($website->owner_email) ? $website->owner_email : 'N/A',
+                    'ping_url'       => $ping_url,
+                    'http_code'      => $http_code,
+                    'error_message'  => $error_message,
+                    'active_time'    => $website->active_time,
+                    'last_seen_diff' => !empty($website->active_time) ? human_time_diff(strtotime($website->active_time), current_time('timestamp')) . ' trước' : 'Chưa từng hoạt động'
+                );
+            } else {
+                error_log("Website {$website->name} (ID: {$website->id}) vừa phát hiện lỗi lần đầu, hoãn cảnh báo webhook để chờ chu kỳ quét kế tiếp xác nhận.");
+            }
         }
 
         $plugin_version = (!empty($data['version'])) ? sanitize_text_field($data['version']) : null;
