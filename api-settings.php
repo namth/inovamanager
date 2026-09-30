@@ -144,6 +144,107 @@ get_header();
                             </div>
                         </div>
 
+                        <!-- MCP Server for AI Agents -->
+                        <div class="col-md-8 col-lg-6 mt-4">
+                            <div class="card border-primary">
+                                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                    <h4 class="mb-1 mt-1"><i class="ph ph-robot me-2"></i> MCP Server for AI Agents</h4>
+                                    <span class="badge bg-success">Active (17 Tools)</span>
+                                </div>
+                                <div class="card-body">
+                                    <p class="card-text">
+                                        Chuẩn giao thức <strong>Model Context Protocol (MCP)</strong> cho phép các AI Agents (Cursor, Claude Desktop, Antigravity, Cline...) tự động nhận diện và gọi các nghiệp vụ của Inova Manager.
+                                    </p>
+
+                                    <!-- Direct JSON-RPC Endpoint -->
+                                    <div class="form-group mb-3">
+                                        <label class="fw-bold">JSON-RPC / Streamable HTTP Endpoint (Khuyên dùng):</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" value="<?php echo esc_url(rest_url('inova-mcp/v1/rpc')); ?>" readonly>
+                                            <button class="btn btn-secondary d-flex align-items-center" type="button" onclick="copyEndpoint(this)">
+                                                <i class="ph ph-copy"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- SSE Endpoint -->
+                                    <div class="form-group mb-3">
+                                        <label class="fw-bold">SSE Endpoint (Server-Sent Events):</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" value="<?php echo esc_url(rest_url('inova-mcp/v1/sse')); ?>" readonly>
+                                            <button class="btn btn-secondary d-flex align-items-center" type="button" onclick="copyEndpoint(this)">
+                                                <i class="ph ph-copy"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Stdio script path -->
+                                    <div class="form-group mb-3">
+                                        <label class="fw-bold">Local Stdio Script (Claude Desktop / CLI):</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" value="<?php echo esc_attr(get_template_directory() . '/mcp-stdio.php'); ?>" readonly>
+                                            <button class="btn btn-secondary d-flex align-items-center" type="button" onclick="copyEndpoint(this)">
+                                                <i class="ph ph-copy"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Cursor Config Sample -->
+                                    <div class="mb-3">
+                                        <label class="fw-bold">Cấu hình cho Cursor (<code>.cursor/mcp.json</code>):</label>
+                                        <pre class="bg-light p-3 border rounded text-dark" style="font-size: 12px;"><code>{
+  "mcpServers": {
+    "inova-manager": {
+      "url": "<?php echo esc_url(rest_url('inova-mcp/v1/rpc')); ?>",
+      "headers": {
+        "X-API-KEY": "<?php echo esc_js($current_api_key ?: 'YOUR_API_KEY'); ?>"
+      }
+    }
+  }
+}</code></pre>
+                                    </div>
+
+                                    <!-- Claude Desktop Config Sample -->
+                                    <div class="mb-3">
+                                        <label class="fw-bold">Cấu hình cho Claude Desktop (<code>claude_desktop_config.json</code>):</label>
+                                        <pre class="bg-light p-3 border rounded text-dark" style="font-size: 12px;"><code>{
+  "mcpServers": {
+    "inova-manager": {
+      "command": "php",
+      "args": [
+        "<?php echo esc_js(get_template_directory() . '/mcp-stdio.php'); ?>"
+      ]
+    }
+  }
+}</code></pre>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="fw-bold">Danh sách 17 MCP Tools đã sẵn sàng:</label>
+                                        <div class="d-flex flex-wrap gap-1 mt-1">
+                                            <span class="badge bg-light text-dark border">inova_search_partners</span>
+                                            <span class="badge bg-light text-dark border">inova_import_partner</span>
+                                            <span class="badge bg-light text-dark border">inova_update_partner</span>
+                                            <span class="badge bg-light text-dark border">inova_add_contact</span>
+                                            <span class="badge bg-light text-dark border">inova_get_services_expiring</span>
+                                            <span class="badge bg-light text-dark border">inova_get_pending_invoices</span>
+                                            <span class="badge bg-light text-dark border">inova_update_invoice_status</span>
+                                            <span class="badge bg-light text-dark border">inova_create_bulk_invoice</span>
+                                            <span class="badge bg-light text-dark border">inova_get_domain_info</span>
+                                            <span class="badge bg-light text-dark border">inova_get_website_info</span>
+                                            <span class="badge bg-light text-dark border">inova_update_domain_info</span>
+                                            <span class="badge bg-light text-dark border">inova_update_website_info</span>
+                                            <span class="badge bg-light text-dark border">inova_check_website_status</span>
+                                            <span class="badge bg-light text-dark border">inova_partner_managed_users</span>
+                                            <span class="badge bg-light text-dark border">inova_get_websites_expiry_info</span>
+                                            <span class="badge bg-light text-dark border">inova_list_managed_websites</span>
+                                            <span class="badge bg-light text-dark border">inova_check_domain_whois</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- New endpoints documentation -->
                         <div class="col-md-8 col-lg-6 mt-4">
                             <div class="card">

@@ -23,6 +23,7 @@ require_once get_template_directory() . '/includes/helpers.php';
 require_once get_template_directory() . '/includes/database-functions.php';
 require_once get_template_directory() . '/includes/ajax-handlers.php';
 require_once get_template_directory() . '/includes/api-endpoints.php';
+require_once get_template_directory() . '/includes/mcp-server.php';
 
 /* ===== FLUSH REWRITE RULES ON THEME ACTIVATION ===== */
 /* Ensures virtual page URLs work correctly after adding new pages */
