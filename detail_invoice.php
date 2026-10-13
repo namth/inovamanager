@@ -949,10 +949,11 @@ get_header();
                                          <?php foreach ($items as $item): ?>
                                          <tr>
                                              <td>
-                                                 <div class="d-flex align-items-center justify-content-between">
-                                                     <span class="fw-bold item-title-text" id="item-title-<?php echo $item->id; ?>"><?php echo esc_html($item->service_title ?: $item->description); ?></span>
+                                                 <div class="fw-bold">
+                                                     <span class="item-title-text" id="item-title-<?php echo $item->id; ?>"><?php echo esc_html($item->service_title ?: $item->description); ?></span>
                                                      <?php if ($can_edit_invoice): ?>
-                                                         <button type="button" class="btn btn-xs btn-link text-primary p-0 ms-2 edit-invoice-item" 
+                                                         <button type="button" class="btn btn-link text-warning p-0 ms-1 edit-invoice-item border-0 bg-transparent" 
+                                                                 style="line-height: 1; vertical-align: middle; font-size: 13px;"
                                                                  data-item-id="<?php echo $item->id; ?>"
                                                                  data-item-name="<?php echo esc_attr($item->service_title ?: $item->description); ?>"
                                                                  title="Sửa tên sản phẩm / dịch vụ">
@@ -1030,13 +1031,7 @@ get_header();
                                              <?php endif; ?>
                                              
                                              <?php if ($can_edit_invoice && !in_array($invoice->status, ['paid', 'pending_vat'])): ?>
-                                             <td class="text-center text-nowrap">
-                                                 <button type="button" class="btn btn-sm btn-outline-primary edit-invoice-item me-1" 
-                                                         data-item-id="<?php echo $item->id; ?>"
-                                                         data-item-name="<?php echo esc_attr($item->service_title ?: $item->description); ?>"
-                                                         title="Sửa tên sản phẩm / dịch vụ">
-                                                     <i class="ph ph-pencil-simple"></i>
-                                                 </button>
+                                             <td class="text-center">
                                                  <button type="button" class="btn btn-sm btn-danger delete-invoice-item" 
                                                          data-item-id="<?php echo $item->id; ?>"
                                                          data-item-name="<?php echo esc_attr($item->service_title ?: $item->description); ?>"
