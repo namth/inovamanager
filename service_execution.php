@@ -33,15 +33,37 @@ if ($service_id) {
         exit;
     }
 
-    // Get related invoices
+    // Get related invoices with service item breakdown
     $invoices = $wpdb->get_results($wpdb->prepare("
-        SELECT i.* FROM $invoice_table i
+        SELECT i.*, ii.item_total as service_item_amount, ii.description as service_item_desc
+        FROM $invoice_table i
         INNER JOIN $invoice_items_table ii ON i.id = ii.invoice_id
         WHERE ii.service_type = 'website_service' AND ii.service_id = %d
         ORDER BY i.created_at ASC
     ", $service_id));
 
     $invoice = !empty($invoices) ? $invoices[0] : null;
+
+    // Calculate total service value from quotation
+    $total_service_value = 0;
+    if ($service->pricing_type === 'DAILY') {
+        $total_service_value = floatval($service->estimated_manday) * floatval($service->daily_rate);
+    } elseif ($service->pricing_type === 'FIXED') {
+        $total_service_value = floatval($service->fixed_price);
+    }
+
+    $total_invoiced = 0;
+    $total_paid = 0;
+    $unpaid_invoice = null;
+    foreach ($invoices as $inv) {
+        $total_invoiced += floatval($inv->service_item_amount);
+        if (in_array(strtolower($inv->status), ['paid', 'pending_vat'])) {
+            $total_paid += floatval($inv->service_item_amount);
+        } elseif (!$unpaid_invoice) {
+            $unpaid_invoice = $inv;
+        }
+    }
+    $remaining_uninvoiced = max(0, $total_service_value - $total_invoiced);
 
     // Get all tasks for this service
     $tasks = $wpdb->get_results($wpdb->prepare("
@@ -82,8 +104,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $wpdb->query('START TRANSACTION');
 
         try {
-            // Determine dynamic status based on VAT requirement
-            $new_status = (intval($invoice->requires_vat_invoice) === 1) ? 'pending_vat' : 'paid';
+            $target_invoice_id = !empty($_POST['invoice_id']) ? intval($_POST['invoice_id']) : ($invoice ? $invoice->id : 0);
+            $target_invoice = $wpdb->get_row($wpdb->prepare("SELECT * FROM $invoice_table WHERE id = %d", $target_invoice_id));
+            $requires_vat = $target_invoice ? intval($target_invoice->requires_vat_invoice) : 0;
+            $new_status = ($requires_vat === 1) ? 'pending_vat' : 'paid';
 
             // Update invoice status
             $invoice_update = $wpdb->update(
@@ -96,7 +120,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     'notes' => $payment_notes,
                     'updated_at' => current_time('mysql')
                 ),
-                array('id' => $invoice->id)
+                array('id' => $target_invoice_id)
             );
 
             // Update service status to IN_PROGRESS and set start_date
@@ -446,146 +470,142 @@ get_header();
                             </div>
                         </div>
 
-                        <!-- Invoice Status -->
-                        <?php if (!empty($invoices)): ?>
-                            <div class="row mb-4">
-                                <div class="col-12">
-                                    <?php if (count($invoices) > 1): ?>
-                                        <!-- Multiple invoices (partial payment) -->
-                                        <div class="card border-info">
-                                            <div class="card-header bg-info text-white">
-                                                <h5 class="mb-0">
-                                                    <i class="ph ph-receipt me-2"></i>
-                                                    Thông tin hóa đơn (Thanh toán theo giai đoạn)
+                        <!-- Invoice Status & Financial Overview -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <div class="card border-primary">
+                                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0 text-white">
+                                            <i class="ph ph-receipt me-2"></i>
+                                            Thông tin hóa đơn & Tiến độ thanh toán
+                                        </h5>
+                                        <div>
+                                            <a href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>" class="btn btn-sm btn-light text-primary fw-bold">
+                                                <i class="ph ph-plus-circle me-1"></i>Lập hóa đơn đợt thanh toán
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <!-- Financial KPI Overview -->
+                                        <div class="row mb-3 g-2">
+                                            <div class="col-md-3 col-6 text-center border-end">
+                                                <small class="text-muted d-block">Tổng giá trị dịch vụ</small>
+                                                <h5 class="fw-bold text-dark mb-0"><?php echo number_format($total_service_value); ?> VNĐ</h5>
+                                            </div>
+                                            <div class="col-md-3 col-6 text-center border-end">
+                                                <small class="text-muted d-block">Đã lập hóa đơn</small>
+                                                <h5 class="fw-bold text-primary mb-0">
+                                                    <?php echo number_format($total_invoiced); ?> VNĐ
+                                                    <?php if ($total_service_value > 0): ?>
+                                                        <small class="text-muted" style="font-size: 0.75rem;">(<?php echo round(($total_invoiced / $total_service_value) * 100); ?>%)</small>
+                                                    <?php endif; ?>
                                                 </h5>
                                             </div>
-                                            <div class="card-body">
-                                                <div class="row">
-                                                    <?php foreach ($invoices as $index => $inv): ?>
-                                                        <div class="col-md-6 mb-3">
+                                            <div class="col-md-3 col-6 text-center border-end">
+                                                <small class="text-muted d-block">Đã thanh toán (Thực thu)</small>
+                                                <h5 class="fw-bold text-success mb-0"><?php echo number_format($total_paid); ?> VNĐ</h5>
+                                            </div>
+                                            <div class="col-md-3 col-6 text-center">
+                                                <small class="text-muted d-block">Còn lại chưa lập HĐ</small>
+                                                <h5 class="fw-bold <?php echo $remaining_uninvoiced > 0 ? 'text-warning' : 'text-muted'; ?> mb-0">
+                                                    <?php echo number_format($remaining_uninvoiced); ?> VNĐ
+                                                </h5>
+                                            </div>
+                                        </div>
+
+                                        <?php if (empty($invoices)): ?>
+                                            <div class="alert alert-warning mb-0 d-flex flex-wrap justify-content-between align-items-center">
+                                                <div>
+                                                    <i class="ph ph-shield-check me-2 fs-5"></i>
+                                                    <strong>Trạng thái bảo lãnh công nợ:</strong> Dịch vụ đang được triển khai trước mà chưa phát sinh hóa đơn.
+                                                    <div class="small mt-1 text-muted">Bạn có thể tạo hóa đơn tạm ứng (ví dụ 30% khởi động) hoặc chia nhỏ theo từng đợt bàn giao.</div>
+                                                </div>
+                                                <a href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>" class="btn btn-sm btn-primary text-nowrap mt-2 mt-md-0">
+                                                    <i class="ph ph-plus me-1"></i>Lập hóa đơn đợt 1
+                                                </a>
+                                            </div>
+                                        <?php else: ?>
+                                            <div class="table-responsive">
+                                                <table class="table table-hover align-middle mb-0">
+                                                    <thead class="table-light">
+                                                        <tr>
+                                                            <th>Đợt / Mã HĐ</th>
+                                                            <th>Hạng mục thanh toán</th>
+                                                            <th>Ngày HĐ</th>
+                                                            <th>Hạn TT</th>
+                                                            <th>Số tiền</th>
+                                                            <th>Trạng thái</th>
+                                                            <th>Thao tác</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <?php foreach ($invoices as $index => $inv): ?>
                                                             <?php
-                                                            $card_class = 'warning';
+                                                            $inv_status_class = 'warning';
+                                                            $inv_status_text = 'Chưa thanh toán';
                                                             if ($inv->status === 'paid') {
-                                                                $card_class = 'success';
+                                                                $inv_status_class = 'success';
+                                                                $inv_status_text = 'Đã thanh toán';
                                                             } elseif ($inv->status === 'pending_vat') {
-                                                                $card_class = 'info';
+                                                                $inv_status_class = 'info';
+                                                                $inv_status_text = 'Chờ xuất VAT';
                                                             } elseif ($inv->status === 'pending_completion') {
-                                                                $card_class = 'secondary';
+                                                                $inv_status_class = 'secondary';
+                                                                $inv_status_text = 'Chờ hoàn thành';
                                                             }
                                                             ?>
-                                                            <div class="card border-<?php echo $card_class; ?>">
-                                                                <div class="card-header bg-<?php echo $card_class; ?> text-white">
-                                                                    <h6 class="mb-0">Hóa đơn <?php echo $index + 1; ?>
-                                                                        (<?php echo $index == 0 ? '50% trước' : '50% sau'; ?>)</h6>
-                                                                </div>
-                                                                <div class="card-body">
-                                                                    <p><strong>Mã:</strong>
-                                                                        <?php echo esc_html($inv->invoice_code); ?></p>
-                                                                    <p><strong>Tổng tiền:</strong>
-                                                                        <?php echo number_format($inv->total_amount); ?> VNĐ</p>
-                                                                    <p><strong>Trạng thái:</strong>
-                                                                        <span
-                                                                            class="badge bg-<?php echo $card_class; ?> border-radius-9 text-<?php echo $card_class === 'warning' ? 'dark' : 'white'; ?>">
-                                                                            <?php
-                                                                            if ($inv->status === 'paid')
-                                                                                echo 'Đã thanh toán';
-                                                                            elseif ($inv->status === 'pending_vat')
-                                                                                echo 'Chờ xuất hóa đơn';
-                                                                            elseif ($inv->status === 'pending_completion')
-                                                                                echo 'Chờ hoàn thành';
-                                                                            else
-                                                                                echo 'Chưa thanh toán';
-                                                                            ?>
-                                                                        </span>
-                                                                    </p>
-                                                                    <?php if ($inv->payment_date): ?>
-                                                                        <p><strong>Ngày thanh toán:</strong>
-                                                                            <?php echo date('d/m/Y H:i', strtotime($inv->payment_date)); ?>
-                                                                        </p>
-                                                                    <?php endif; ?>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    <?php endforeach; ?>
-                                                </div>
+                                                            <tr>
+                                                                <td>
+                                                                    <span class="badge bg-light text-dark border me-1">Đợt <?php echo $index + 1; ?></span>
+                                                                    <strong><?php echo esc_html($inv->invoice_code); ?></strong>
+                                                                </td>
+                                                                <td>
+                                                                    <small class="text-muted"><?php echo esc_html($inv->service_item_desc ?: $service->title); ?></small>
+                                                                </td>
+                                                                <td><?php echo date('d/m/Y', strtotime($inv->invoice_date)); ?></td>
+                                                                <td><?php echo date('d/m/Y', strtotime($inv->due_date)); ?></td>
+                                                                <td><strong class="text-primary"><?php echo number_format($inv->total_amount); ?> VNĐ</strong></td>
+                                                                <td>
+                                                                    <span class="badge bg-<?php echo $inv_status_class; ?> text-<?php echo $inv_status_class === 'warning' ? 'dark' : 'white'; ?>">
+                                                                        <?php echo $inv_status_text; ?>
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <a href="<?php echo home_url('/chi-tiet-hoa-don/?invoice_id=' . $inv->id); ?>" class="btn btn-sm btn-outline-primary" title="Xem chi tiết hóa đơn">
+                                                                        <i class="ph ph-eye me-1"></i>Xem HĐ
+                                                                    </a>
+                                                                </td>
+                                                            </tr>
+                                                        <?php endforeach; ?>
+                                                    </tbody>
+                                                </table>
                                             </div>
-                                        </div>
-                                    <?php else: ?>
-                                        <!-- Single invoice (full payment) -->
-                                        <?php $invoice = $invoices[0]; ?>
-                                        <?php
-                                        $invoice_card_class = 'warning';
-                                        $invoice_status_text = 'Chưa thanh toán';
-                                        if ($invoice->status === 'paid') {
-                                            $invoice_card_class = 'success';
-                                            $invoice_status_text = 'Đã thanh toán';
-                                        } elseif ($invoice->status === 'pending_vat') {
-                                            $invoice_card_class = 'info';
-                                            $invoice_status_text = 'Chờ xuất hóa đơn';
-                                        }
-                                        ?>
-                                        <div class="card border-<?php echo $invoice_card_class; ?>">
-                                            <div class="card-header bg-<?php echo $invoice_card_class; ?> text-white">
-                                                <h5 class="mb-0">
-                                                    <i class="ph ph-receipt me-2"></i>
-                                                    Thông tin hóa đơn
-                                                </h5>
-                                            </div>
-                                            <div class="card-body">
-                                                <div class="row">
-                                                    <div class="col-md-6">
-                                                        <p><strong>Mã hóa đơn:</strong>
-                                                            <?php echo esc_html($invoice->invoice_code); ?></p>
-                                                        <p><strong>Ngày hóa đơn:</strong>
-                                                            <?php echo date('d/m/Y', strtotime($invoice->invoice_date)); ?></p>
-                                                        <p><strong>Hạn thanh toán:</strong>
-                                                            <?php echo date('d/m/Y', strtotime($invoice->due_date)); ?></p>
-                                                    </div>
-                                                    <div class="col-md-6">
-                                                        <p><strong>Tổng tiền:</strong>
-                                                            <?php echo number_format($invoice->total_amount); ?> VNĐ</p>
-                                                        <p><strong>Đã thanh toán:</strong>
-                                                            <?php echo number_format($invoice->paid_amount); ?> VNĐ</p>
-                                                        <p><strong>Trạng thái:</strong>
-                                                            <span
-                                                                class="badge bg-<?php echo $invoice_card_class; ?> border-radius-9 text-<?php echo $invoice_card_class === 'warning' ? 'dark' : 'white'; ?>">
-                                                                <?php echo $invoice_status_text; ?>
-                                                            </span>
-                                                        </p>
-                                                        <?php if ($invoice->payment_date): ?>
-                                                            <p><strong>Ngày thanh toán:</strong>
-                                                                <?php echo date('d/m/Y H:i', strtotime($invoice->payment_date)); ?>
-                                                            </p>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    <?php endif; ?>
+                                        <?php endif; ?>
+                                    </div>
                                 </div>
                             </div>
-                        <?php endif; ?>
+                        </div>
 
                         <div class="row">
-                            <!-- Payment Confirmation (if not paid) -->
-                            <?php if ($invoice && !in_array(strtolower($invoice->status), ['paid', 'pending_vat'])): ?>
+                            <!-- Payment Confirmation (if has unpaid invoice) -->
+                            <?php if ($unpaid_invoice): ?>
                                 <div class="col-md-6">
                                     <div class="card">
                                         <div class="card-header bg-warning text-dark">
                                             <h5 class="mb-1 mt-1">
                                                 <i class="ph ph-credit-card me-2"></i>
-                                                Xác nhận thanh toán
+                                                Xác nhận thanh toán (Mã: <?php echo esc_html($unpaid_invoice->invoice_code); ?>)
                                             </h5>
                                         </div>
                                         <div class="card-body">
                                             <div class="alert alert-warning">
                                                 <i class="ph ph-warning me-2"></i>
-                                                <strong>Chưa thanh toán!</strong><br>
-                                                Cần xác nhận thanh toán để bắt đầu thực hiện công việc.
+                                                <strong>Hóa đơn chờ thanh toán:</strong> <strong><?php echo esc_html($unpaid_invoice->invoice_code); ?></strong> (Số tiền: <strong><?php echo number_format($unpaid_invoice->total_amount); ?> VNĐ</strong>).
                                             </div>
 
                                             <form method="post" action="">
                                                 <?php wp_nonce_field('confirm_payment', 'confirm_payment'); ?>
+                                                <input type="hidden" name="invoice_id" value="<?php echo esc_attr($unpaid_invoice->id); ?>">
 
                                                 <div class="form-group mb-3">
                                                     <label for="payment_date" class="fw-bold">Ngày thanh toán <span
@@ -611,10 +631,10 @@ get_header();
                                                     <label for="payment_amount" class="fw-bold">Số tiền thanh toán <span
                                                             class="text-danger">*</span></label>
                                                     <input type="number" class="form-control" id="payment_amount"
-                                                        name="payment_amount" value="<?php echo $invoice->total_amount; ?>"
+                                                        name="payment_amount" value="<?php echo $unpaid_invoice->total_amount; ?>"
                                                         min="1" required>
                                                     <small class="form-text text-muted">Tổng hóa đơn:
-                                                        <?php echo number_format($invoice->total_amount); ?> VNĐ</small>
+                                                        <?php echo number_format($unpaid_invoice->total_amount); ?> VNĐ</small>
                                                 </div>
 
                                                 <div class="form-group mb-3">
@@ -635,7 +655,7 @@ get_header();
                             <!-- Progress Tracking -->
                             <?php if (in_array($service->status, ['IN_PROGRESS', 'PENDING'])): ?>
                                 <div
-                                    class="col-md-<?php echo ($invoice && !in_array(strtolower($invoice->status), ['paid', 'pending_vat'])) ? '6' : '8'; ?>">
+                                    class="col-md-<?php echo ($unpaid_invoice) ? '6' : '12'; ?>">
                                     <div class="card">
                                         <div class="card-header bg-primary text-white">
                                             <h5 class="mb-1 mt-1">
@@ -731,10 +751,14 @@ get_header();
                                 <a href="<?php echo home_url('/danh-sach-dich-vu/'); ?>" class="btn btn-light">
                                     <i class="ph ph-arrow-left me-2"></i>Quay lại danh sách
                                 </a>
+                                <a href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>"
+                                    class="btn btn-outline-success ms-2">
+                                    <i class="ph ph-receipt me-2"></i>Lập hóa đơn đợt thanh toán
+                                </a>
                                 <?php if ($invoice): ?>
                                     <a href="<?php echo home_url('/chi-tiet-hoa-don/?invoice_id=' . $invoice->id); ?>"
                                         class="btn btn-outline-primary ms-2">
-                                        <i class="ph ph-receipt me-2"></i>Xem hóa đơn
+                                        <i class="ph ph-eye me-2"></i>Xem hóa đơn
                                     </a>
                                 <?php endif; ?>
                                 <?php if ($service->status === 'PENDING' || (!$service->pricing_type)): ?>

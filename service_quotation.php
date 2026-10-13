@@ -156,6 +156,13 @@ get_header();
                         <p class="card-description">Giai đoạn 2: Báo giá & duyệt yêu cầu</p>
                         
                         <!-- Display messages -->
+                        <?php if (isset($_GET['msg']) && $_GET['msg'] === 'created'): ?>
+                            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                                <i class="ph ph-check-circle me-2"></i>
+                                <strong>Tạo yêu cầu thành công!</strong> Yêu cầu dịch vụ <strong><?php echo esc_html($service->service_code); ?></strong> đã được khởi tạo. Bạn có thể tiến hành thiết lập báo giá & phân công ngay bên dưới.
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        <?php endif; ?>
                         <?php if (isset($message)) echo $message; ?>
                         <?php if (isset($error_message)) echo $error_message; ?>
 

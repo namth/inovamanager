@@ -81,12 +81,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $result = $wpdb->insert($table_name, $insert_data);
 
             if ($result !== false) {
-                $message = '<div class="alert alert-success"><strong>Thành công!</strong> Yêu cầu dịch vụ đã được gửi với mã số: ' . $service_code . '</div>';
+                $new_service_id = $wpdb->insert_id;
+                $submit_action = isset($_POST['submit_action']) ? sanitize_text_field($_POST['submit_action']) : 'quote';
+
+                if ($submit_action === 'list') {
+                    wp_redirect(home_url('/service-list/?msg=created&service_code=' . urlencode($service_code)));
+                    exit;
+                } else {
+                    wp_redirect(home_url('/bao-gia/?service_id=' . $new_service_id . '&msg=created'));
+                    exit;
+                }
             } else {
                 $error_message = '<div class="alert alert-danger"><strong>Lỗi!</strong> Không thể gửi yêu cầu dịch vụ.</div>';
-            }            } else {
-                $error_message = '<div class="alert alert-danger"><strong>Lỗi!</strong> Vui lòng điền đầy đủ thông tin bắt buộc (Website, Tiêu đề yêu cầu, Người yêu cầu).</div>';
             }
+        } else {
+            $error_message = '<div class="alert alert-danger"><strong>Lỗi!</strong> Vui lòng điền đầy đủ thông tin bắt buộc (Website, Tiêu đề yêu cầu, Người yêu cầu).</div>';
+        }
     }
 }
 
@@ -229,11 +239,14 @@ get_header();
 
                             <div class="row">
                                 <div class="col-12">
-                                    <button type="submit" class="btn btn-primary me-2">
-                                        <i class="ph ph-paper-plane me-2"></i>Gửi yêu cầu
+                                    <button type="submit" name="submit_action" value="quote" class="btn btn-primary me-2">
+                                        <i class="ph ph-calculator me-2"></i>Gửi & Lập báo giá ngay
+                                    </button>
+                                    <button type="submit" name="submit_action" value="list" class="btn btn-outline-primary me-2">
+                                        <i class="ph ph-list me-2"></i>Gửi & Về danh sách
                                     </button>
                                     <a href="<?php echo home_url('/service-list/'); ?>" class="btn btn-light">
-                                        <i class="ph ph-arrow-left me-2"></i>Quay lại
+                                        <i class="ph ph-arrow-left me-2"></i>Hủy
                                     </a>
                                 </div>
                             </div>

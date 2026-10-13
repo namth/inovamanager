@@ -697,13 +697,18 @@ function get_virtual_page_template_mapping()
         // Service Management
         'service-list' => 'service_list.php',
         'services' => 'service_list.php',
+        'danh-sach-dich-vu' => 'service_list.php',
         'addnew-service' => 'addnew_services.php',
         'add-service' => 'addnew_services.php',
         'service-request' => 'service_request.php',
         'service-quotation' => 'service_quotation.php',
+        'bao-gia' => 'service_quotation.php',
         'service-execution' => 'service_execution.php',
+        'processing' => 'service_execution.php',
         'service-completion' => 'service_completion.php',
+        'completion' => 'service_completion.php',
         'service-invoice' => 'service_invoice.php',
+        'tao-hoa-don' => 'service_invoice.php',
 
         // Product Catalog Management
         'product-catalog-list' => 'product_catalog_list.php',

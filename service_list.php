@@ -126,6 +126,15 @@ get_header();
                             </div>
                         </div>
 
+                        <?php if (isset($_GET['msg']) && $_GET['msg'] === 'created'): ?>
+                            <?php $created_code = isset($_GET['service_code']) ? sanitize_text_field($_GET['service_code']) : ''; ?>
+                            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                                <i class="ph ph-check-circle me-2"></i>
+                                <strong>Gửi yêu cầu thành công!</strong> Yêu cầu dịch vụ <?php echo $created_code ? 'với mã <strong>' . esc_html($created_code) . '</strong>' : ''; ?> đã được tiếp nhận và đưa vào danh sách chờ xử lý.
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        <?php endif; ?>
+
                         <!-- Statistics Cards -->
                         <div class="row mb-4">
                             <div class="col-md-2">

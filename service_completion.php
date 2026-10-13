@@ -31,19 +31,47 @@ if ($service_id) {
         exit;
     }
 
-    // Get related invoices to check for second payment
+    // Calculate total service value
+    $total_service_value = ($service->pricing_type === 'DAILY') ? ((float)$service->estimated_manday * (float)$service->daily_rate) : (float)$service->fixed_price;
+
+    // Get all related invoices with their service item amount
     $invoices = $wpdb->get_results($wpdb->prepare("
-        SELECT i.* FROM $invoice_table i
-        INNER JOIN $invoice_items_table ii ON i.id = ii.invoice_id
-        WHERE ii.service_type = 'website_service' AND ii.service_id = %d
+        SELECT i.*, 
+               COALESCE((
+                   SELECT SUM(ii.amount) 
+                   FROM $invoice_items_table ii 
+                   WHERE ii.invoice_id = i.id 
+                     AND ii.service_type = 'website_service' 
+                     AND ii.service_id = %d
+               ), i.total_amount) as service_charged_amount,
+               (
+                   SELECT ii.description 
+                   FROM $invoice_items_table ii 
+                   WHERE ii.invoice_id = i.id 
+                     AND ii.service_type = 'website_service' 
+                     AND ii.service_id = %d
+                   LIMIT 1
+               ) as service_item_desc
+        FROM $invoice_table i
+        INNER JOIN $invoice_items_table ii_join ON i.id = ii_join.invoice_id
+        WHERE ii_join.service_type = 'website_service' AND ii_join.service_id = %d
+        GROUP BY i.id
         ORDER BY i.created_at ASC
-    ", $service_id));
+    ", $service_id, $service_id, $service_id));
     
-    // Check if there's a second invoice waiting for completion payment
+    $total_invoiced = 0;
+    $total_paid = 0;
     $second_invoice = null;
-    if (count($invoices) > 1) {
-        $second_invoice = $invoices[1]; // Second invoice (50% completion payment)
+    foreach ($invoices as $inv) {
+        $total_invoiced += (float)$inv->service_charged_amount;
+        if (in_array($inv->status, ['paid', 'pending_vat'])) {
+            $total_paid += (float)$inv->service_charged_amount;
+        }
+        if ($inv->status === 'pending_completion') {
+            $second_invoice = $inv;
+        }
     }
+    $remaining_uninvoiced = max(0, $total_service_value - $total_invoiced);
 
     // Get all tasks for this service
     $tasks_table = $wpdb->prefix . 'im_service_tasks';
@@ -57,9 +85,58 @@ if ($service_id) {
 }
 
 /* 
- * Process completion form submission
+ * Process form submissions
  */
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // Process payment confirmation for any milestone invoice
+    if (isset($_POST['mark_invoice_paid']) && wp_verify_nonce($_POST['mark_invoice_paid'], 'mark_invoice_paid')) {
+        $pay_invoice_id = intval($_POST['invoice_id'] ?? 0);
+        if ($pay_invoice_id) {
+            $wpdb->update(
+                $invoice_table,
+                array(
+                    'status' => 'paid',
+                    'payment_date' => current_time('mysql'),
+                    'updated_at' => current_time('mysql')
+                ),
+                array('id' => $pay_invoice_id)
+            );
+            $message = '<div class="alert alert-success"><strong>Thành công!</strong> Đã xác nhận thanh toán hóa đơn.</div>';
+
+            // Refresh invoices
+            $invoices = $wpdb->get_results($wpdb->prepare("
+                SELECT i.*, 
+                       COALESCE((
+                           SELECT SUM(ii.amount) 
+                           FROM $invoice_items_table ii 
+                           WHERE ii.invoice_id = i.id 
+                             AND ii.service_type = 'website_service' 
+                             AND ii.service_id = %d
+                       ), i.total_amount) as service_charged_amount,
+                       (
+                           SELECT ii.description 
+                           FROM $invoice_items_table ii 
+                           WHERE ii.invoice_id = i.id 
+                             AND ii.service_type = 'website_service' 
+                             AND ii.service_id = %d
+                           LIMIT 1
+                       ) as service_item_desc
+                FROM $invoice_table i
+                INNER JOIN $invoice_items_table ii_join ON i.id = ii_join.invoice_id
+                WHERE ii_join.service_type = 'website_service' AND ii_join.service_id = %d
+                GROUP BY i.id
+                ORDER BY i.created_at ASC
+            ", $service_id, $service_id, $service_id));
+            $total_paid = 0;
+            foreach ($invoices as $inv) {
+                if (in_array($inv->status, ['paid', 'pending_vat'])) {
+                    $total_paid += (float)$inv->service_charged_amount;
+                }
+            }
+        }
+    }
+
+    // Process completion form submission
     if (isset($_POST['complete_service']) && wp_verify_nonce($_POST['complete_service'], 'complete_service')) {
         $completion_notes = sanitize_textarea_field($_POST['completion_notes']);
         $customer_feedback = sanitize_textarea_field($_POST['customer_feedback']);
@@ -86,30 +163,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     throw new Exception('Failed to update service status');
                 }
 
-                // If there's a second invoice (completion payment), activate it
-                if ($second_invoice && $second_invoice->status === 'pending_completion') {
-                    $invoice_update = $wpdb->update(
-                        $invoice_table,
-                        array(
-                            'status' => 'draft', // Change from pending_completion to draft so it can be paid
-                            'due_date' => date('Y-m-d', strtotime('+30 days')), // Set new due date
-                            'updated_at' => current_time('mysql')
-                        ),
-                        array('id' => $second_invoice->id)
-                    );
-                    
-                    if ($invoice_update === false) {
-                        throw new Exception('Failed to activate completion payment invoice');
-                    }
-                }
+                // Activate any pending_completion invoices
+                $wpdb->query($wpdb->prepare("
+                    UPDATE $invoice_table i
+                    INNER JOIN $invoice_items_table ii ON i.id = ii.invoice_id
+                    SET i.status = 'draft', i.due_date = DATE_ADD(NOW(), INTERVAL 30 DAY), i.updated_at = NOW()
+                    WHERE ii.service_type = 'website_service' AND ii.service_id = %d AND i.status = 'pending_completion'
+                ", $service_id));
                 
                 $wpdb->query('COMMIT');
                 
-                if ($second_invoice) {
-                    $message = '<div class="alert alert-success"><strong>Thành công!</strong> Dịch vụ đã được hoàn thành và bàn giao. Hóa đơn thanh toán 50% còn lại đã được kích hoạt.</div>';
-                } else {
-                    $message = '<div class="alert alert-success"><strong>Thành công!</strong> Dịch vụ đã được hoàn thành và bàn giao.</div>';
-                }
+                $message = '<div class="alert alert-success"><strong>Thành công!</strong> Dịch vụ đã được hoàn thành và bàn giao.</div>';
                 
                 // Refresh service data
                 $service = $wpdb->get_row($wpdb->prepare("
@@ -126,15 +190,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 
                 // Refresh invoice data
                 $invoices = $wpdb->get_results($wpdb->prepare("
-                    SELECT i.* FROM $invoice_table i
-                    INNER JOIN $invoice_items_table ii ON i.id = ii.invoice_id
-                    WHERE ii.service_type = 'website_service' AND ii.service_id = %d
+                    SELECT i.*, 
+                           COALESCE((
+                               SELECT SUM(ii.amount) 
+                               FROM $invoice_items_table ii 
+                               WHERE ii.invoice_id = i.id 
+                                 AND ii.service_type = 'website_service' 
+                                 AND ii.service_id = %d
+                           ), i.total_amount) as service_charged_amount,
+                           (
+                               SELECT ii.description 
+                               FROM $invoice_items_table ii 
+                               WHERE ii.invoice_id = i.id 
+                                 AND ii.service_type = 'website_service' 
+                                 AND ii.service_id = %d
+                               LIMIT 1
+                           ) as service_item_desc
+                    FROM $invoice_table i
+                    INNER JOIN $invoice_items_table ii_join ON i.id = ii_join.invoice_id
+                    WHERE ii_join.service_type = 'website_service' AND ii_join.service_id = %d
+                    GROUP BY i.id
                     ORDER BY i.created_at ASC
-                ", $service_id));
-                
-                if (count($invoices) > 1) {
-                    $second_invoice = $invoices[1];
-                }
+                ", $service_id, $service_id, $service_id));
                 
             } catch (Exception $e) {
                 $wpdb->query('ROLLBACK');
@@ -241,51 +318,152 @@ get_header();
                             </div>
                         </div>
 
-                        <!-- Second Invoice Notification -->
-                        <?php if ($second_invoice): ?>
+                        <!-- URL Message Alert -->
+                        <?php if (isset($_GET['msg']) && $_GET['msg'] === 'invoice_created'): ?>
+                            <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+                                <i class="ph ph-check-circle me-2"></i><strong>Thành công!</strong> Hóa đơn đợt thanh toán đã được tạo thành công.
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        <?php endif; ?>
+
+                        <!-- Financial Overview & Invoices -->
                         <div class="row mb-4">
                             <div class="col-12">
-                                <div class="alert alert-<?php echo $second_invoice->status === 'draft' ? 'warning' : 'info'; ?> border-<?php echo $second_invoice->status === 'draft' ? 'warning' : 'info'; ?>">
-                                    <div class="d-flex align-items-center">
-                                        <i class="ph ph-receipt me-3 fs-4"></i>
-                                        <div class="flex-grow-1">
-                                            <h6 class="mb-1">
-                                                <?php if ($second_invoice->status === 'draft'): ?>
-                                                    <strong>Hóa đơn thanh toán 50% còn lại đã sẵn sàng!</strong>
-                                                <?php else: ?>
-                                                    <strong>Hóa đơn thanh toán 50% còn lại</strong>
-                                                <?php endif; ?>
-                                            </h6>
-                                            <p class="mb-2">
-                                                Mã hóa đơn: <strong><?php echo esc_html($second_invoice->invoice_code); ?></strong> | 
-                                                Số tiền: <strong><?php echo number_format($second_invoice->total_amount); ?> VNĐ</strong> |
-                                                Trạng thái: 
-                                                <span class="badge badge-<?php echo $second_invoice->status === 'draft' ? 'warning' : 'secondary'; ?>">
-                                                    <?php echo $second_invoice->status === 'draft' ? 'Sẵn sàng thanh toán' : 'Chờ hoàn thành dịch vụ'; ?>
-                                                </span>
-                                            </p>
-                                            <?php if ($second_invoice->status === 'draft'): ?>
-                                            <p class="mb-0 text-muted">
-                                                <small>Khách hàng có thể thanh toán hóa đơn này ngay sau khi dịch vụ được hoàn thành.</small>
-                                            </p>
+                                <div class="card border-primary">
+                                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                        <h5 class="mb-0 text-white">
+                                            <i class="ph ph-receipt me-2"></i>
+                                            Tài chính & Các đợt hóa đơn thanh toán
+                                        </h5>
+                                        <div class="d-flex gap-2">
+                                            <?php if ($remaining_uninvoiced > 0): ?>
+                                                <a href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>" class="btn btn-sm btn-warning">
+                                                    <i class="ph ph-plus-circle me-1"></i>Lập hóa đơn quyết toán (<?php echo number_format($remaining_uninvoiced); ?> VNĐ)
+                                                </a>
                                             <?php else: ?>
-                                            <p class="mb-0 text-muted">
-                                                <small>Hóa đơn này sẽ được kích hoạt tự động sau khi bạn hoàn thành dịch vụ.</small>
-                                            </p>
+                                                <a href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>" class="btn btn-sm btn-light">
+                                                    <i class="ph ph-plus-circle me-1"></i>Lập thêm hóa đơn phát sinh
+                                                </a>
                                             <?php endif; ?>
                                         </div>
-                                        <?php if ($second_invoice->status === 'draft'): ?>
-                                        <div>
-                                            <a href="<?php echo home_url('/chi-tiet-hoa-don/?invoice_id=' . $second_invoice->id); ?>" class="btn btn-sm btn-outline-primary">
-                                                <i class="ph ph-eye me-1"></i>Xem hóa đơn
-                                            </a>
+                                    </div>
+                                    <div class="card-body">
+                                        <!-- Financial Summary Badges -->
+                                        <div class="row mb-3 text-center g-2">
+                                            <div class="col-md-3 col-6">
+                                                <div class="p-2 border rounded bg-light">
+                                                    <small class="text-muted d-block">Giá trị dịch vụ</small>
+                                                    <strong class="fs-6"><?php echo number_format($total_service_value); ?> VNĐ</strong>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3 col-6">
+                                                <div class="p-2 border rounded bg-light">
+                                                    <small class="text-muted d-block">Đã xuất hóa đơn</small>
+                                                    <strong class="fs-6 text-primary"><?php echo number_format($total_invoiced); ?> VNĐ</strong>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3 col-6">
+                                                <div class="p-2 border rounded bg-light">
+                                                    <small class="text-muted d-block">Đã thanh toán thực tế</small>
+                                                    <strong class="fs-6 text-success"><?php echo number_format($total_paid); ?> VNĐ</strong>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3 col-6">
+                                                <div class="p-2 border rounded bg-light">
+                                                    <small class="text-muted d-block">Chưa lập hóa đơn</small>
+                                                    <strong class="fs-6 <?php echo $remaining_uninvoiced > 0 ? 'text-danger' : 'text-success'; ?>">
+                                                        <?php echo number_format($remaining_uninvoiced); ?> VNĐ
+                                                    </strong>
+                                                </div>
+                                            </div>
                                         </div>
+
+                                        <?php if ($remaining_uninvoiced > 0): ?>
+                                            <div class="alert alert-warning d-flex justify-content-between align-items-center mb-3">
+                                                <div>
+                                                    <i class="ph ph-warning-circle me-2 fs-5"></i>
+                                                    Dịch vụ còn <strong><?php echo number_format($remaining_uninvoiced); ?> VNĐ</strong> chưa lập hóa đơn quyết toán. Bạn nên lập hóa đơn để hoàn tất tài chính trước khi kết thúc hợp đồng.
+                                                </div>
+                                                <a href="<?php echo home_url('/tao-hoa-don/?service_id=' . $service->id); ?>" class="btn btn-sm btn-dark text-nowrap ms-2">
+                                                    <i class="ph ph-receipt me-1"></i>Lập HĐ quyết toán
+                                                </a>
+                                            </div>
+                                        <?php endif; ?>
+
+                                        <?php if (!empty($invoices)): ?>
+                                            <div class="table-responsive">
+                                                <table class="table table-hover align-middle mb-0">
+                                                    <thead class="table-light">
+                                                        <tr>
+                                                            <th>Đợt</th>
+                                                            <th>Mã HĐ</th>
+                                                            <th>Nội dung thanh toán</th>
+                                                            <th>Số tiền HĐ</th>
+                                                            <th>Trạng thái</th>
+                                                            <th>Ngày tạo / Hạn</th>
+                                                            <th>Thao tác</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <?php foreach ($invoices as $idx => $inv): ?>
+                                                            <tr>
+                                                                <td><strong>Đợt <?php echo $idx + 1; ?></strong></td>
+                                                                <td>
+                                                                    <strong><?php echo esc_html($inv->invoice_code); ?></strong>
+                                                                </td>
+                                                                <td>
+                                                                    <small class="text-muted"><?php echo esc_html($inv->service_item_desc ?: $service->title); ?></small>
+                                                                </td>
+                                                                <td>
+                                                                    <strong class="text-primary"><?php echo number_format($inv->total_amount); ?> VNĐ</strong>
+                                                                </td>
+                                                                <td>
+                                                                    <span class="badge bg-<?php echo in_array($inv->status, ['paid', 'pending_vat']) ? 'success' : ($inv->status === 'draft' ? 'warning' : 'secondary'); ?> text-<?php echo in_array($inv->status, ['paid', 'pending_vat']) ? 'white' : 'dark'; ?>">
+                                                                        <?php 
+                                                                        if (in_array($inv->status, ['paid', 'pending_vat'])) echo 'Đã thanh toán';
+                                                                        elseif ($inv->status === 'draft') echo 'Chờ thanh toán';
+                                                                        elseif ($inv->status === 'pending_completion') echo 'Chờ hoàn thành';
+                                                                        else echo esc_html($inv->status);
+                                                                        ?>
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <small class="text-muted">
+                                                                        <?php echo date('d/m/Y', strtotime($inv->created_at)); ?>
+                                                                        <?php if ($inv->due_date): ?>
+                                                                            <br><span class="text-secondary">Hạn: <?php echo date('d/m/Y', strtotime($inv->due_date)); ?></span>
+                                                                        <?php endif; ?>
+                                                                    </small>
+                                                                </td>
+                                                                <td>
+                                                                    <a href="<?php echo home_url('/chi-tiet-hoa-don/?invoice_id=' . $inv->id); ?>" class="btn btn-sm btn-outline-primary me-1" title="Xem hóa đơn">
+                                                                        <i class="ph ph-eye"></i> Xem
+                                                                    </a>
+                                                                    <?php if (!in_array($inv->status, ['paid', 'pending_vat'])): ?>
+                                                                        <form method="post" class="d-inline" onsubmit="return confirm('Xác nhận khách hàng đã thanh toán hóa đơn <?php echo esc_js($inv->invoice_code); ?>?');">
+                                                                            <?php wp_nonce_field('mark_invoice_paid', 'mark_invoice_paid'); ?>
+                                                                            <input type="hidden" name="invoice_id" value="<?php echo esc_attr($inv->id); ?>">
+                                                                            <button type="submit" class="btn btn-sm btn-outline-success">
+                                                                                <i class="ph ph-check"></i> Đã thu tiền
+                                                                            </button>
+                                                                        </form>
+                                                                    <?php endif; ?>
+                                                                </td>
+                                                            </tr>
+                                                        <?php endforeach; ?>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        <?php else: ?>
+                                            <div class="text-center py-3 text-muted">
+                                                <i class="ph ph-receipt fs-2 d-block mb-2"></i>
+                                                Chưa có hóa đơn nào được tạo cho dịch vụ này.
+                                            </div>
                                         <?php endif; ?>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        <?php endif; ?>
 
                         <?php if ($service->status !== 'COMPLETED'): ?>
                         <!-- Completion Form -->

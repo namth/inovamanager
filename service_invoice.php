@@ -32,12 +32,32 @@ if ($service_id) {
         exit;
     }
 
-    // Check if invoice already exists for this service
-    $existing_invoice = $wpdb->get_row($wpdb->prepare("
-        SELECT i.* FROM $invoice_table i
+    // Check all existing invoices for this service
+    $existing_invoices = $wpdb->get_results($wpdb->prepare("
+        SELECT i.*, ii.item_total as service_item_amount, ii.description as service_item_desc
+        FROM $invoice_table i
         INNER JOIN $invoice_items_table ii ON i.id = ii.invoice_id
         WHERE ii.service_type = 'website_service' AND ii.service_id = %d
+        ORDER BY i.created_at ASC
     ", $service_id));
+
+    $existing_invoice = !empty($existing_invoices) ? $existing_invoices[0] : null;
+
+    // Calculate total service value from quotation
+    $total_service_value = 0;
+    if ($service->pricing_type === 'DAILY') {
+        $total_service_value = floatval($service->estimated_manday) * floatval($service->daily_rate);
+    } elseif ($service->pricing_type === 'FIXED') {
+        $total_service_value = floatval($service->fixed_price);
+    }
+
+    $total_invoiced_service_amount = 0;
+    foreach ($existing_invoices as $inv) {
+        $total_invoiced_service_amount += floatval($inv->service_item_amount);
+    }
+    $remaining_service_amount = max(0, $total_service_value - $total_invoiced_service_amount);
+    $installment_count = count($existing_invoices);
+    $next_installment_num = $installment_count + 1;
 
     // Get pending/new hostings for this customer with correct pricing from product_catalog
     $available_hostings = $wpdb->get_results($wpdb->prepare("
@@ -156,7 +176,43 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
              }
          }
 
-        $sub_total = $unit_price + $products_total;
+        $milestone_title = !empty($_POST['milestone_title']) ? sanitize_text_field($_POST['milestone_title']) : '';
+
+        // Calculate service portion for this invoice
+        $service_charged = 0;
+        if ($payment_type === 'percentage') {
+            $pct = max(1, min(100, floatval($_POST['installment_percentage'] ?? 30)));
+            $service_charged = round($unit_price * ($pct / 100));
+            if (empty($milestone_title)) {
+                $milestone_title = 'Đợt ' . $next_installment_num . ': Tạm ứng ' . $pct . '%';
+            }
+        } elseif ($payment_type === 'amount') {
+            $service_charged = floatval($_POST['custom_installment_amount'] ?? 0);
+            if (empty($milestone_title)) {
+                $milestone_title = 'Đợt ' . $next_installment_num . ': Thanh toán theo tiến độ';
+            }
+        } elseif ($payment_type === 'remaining') {
+            $service_charged = $remaining_service_amount;
+            if (empty($milestone_title)) {
+                $milestone_title = 'Đợt ' . $next_installment_num . ': Quyết toán phần còn lại';
+            }
+        } elseif ($payment_type === 'full') {
+            if (!empty($existing_invoices)) {
+                $service_charged = $remaining_service_amount;
+                if (empty($milestone_title)) {
+                    $milestone_title = 'Đợt ' . $next_installment_num . ': Quyết toán toàn bộ phần còn lại';
+                }
+            } else {
+                $service_charged = $unit_price;
+                if (empty($milestone_title)) {
+                    $milestone_title = 'Thanh toán trọn gói 100%';
+                }
+            }
+        } elseif ($payment_type === 'partial_50') {
+            $service_charged = $unit_price * 0.5;
+        }
+
+        $sub_total = $service_charged + $products_total;
         $discount_total = $discount_amount;
         $tax_amount = ($sub_total - $discount_total) * ($tax_rate / 100);
         $total_amount = $sub_total - $discount_total + $tax_amount;
@@ -172,7 +228,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $requires_vat_invoice = intval($user_vat_settings['requires_vat_invoice']);
             }
 
-            if ($payment_type === 'partial_50') {
+            if ($payment_type === 'partial_50' && empty($existing_invoices)) {
                 // Generate invoice codes
                 $first_invoice_code = generate_invoice_code($service->owner_user_id);
 
@@ -370,7 +426,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     'paid_amount' => 0,
                     'status' => 'draft',
                     'requires_vat_invoice' => $requires_vat_invoice,
-                    'notes' => $invoice_notes,
+                    'notes' => $invoice_notes . (!empty($milestone_title) ? "\n\n[" . $milestone_title . "]" : ""),
                     'created_by_type' => 'system',
                     'created_by_id' => get_current_user_id(),
                     'partner_id' => $partner_id,
@@ -385,8 +441,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 $invoice_id = $wpdb->insert_id;
 
-                // Insert invoice item
-                $description = $service->title;
+                // Insert invoice item with milestone title
+                $description = $service->title . (!empty($milestone_title) ? ' (' . $milestone_title . ')' : '');
                 if ($service->pricing_type === 'DAILY') {
                     $description .= " (Theo ngày công: {$service->estimated_manday} ngày × " . number_format($service->daily_rate) . " VNĐ)";
                 }
@@ -397,8 +453,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     'service_id' => $service_id,
                     'description' => $description,
                     'quantity' => 1,
-                    'unit_price' => $unit_price,
-                    'item_total' => $unit_price,
+                    'unit_price' => $service_charged,
+                    'item_total' => $service_charged,
                     'created_at' => current_time('mysql'),
                     'updated_at' => current_time('mysql')
                 );
@@ -465,11 +521,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             $wpdb->query('COMMIT');
 
-            // Redirect to invoice detail page after successful creation
-            // if (isset($created_invoice_id)) {
-            //     wp_redirect(home_url('/chi-tiet-hoa-don/?invoice_id=' . $created_invoice_id));
-            //     exit;
-            // }
+            // Redirect back to processing or completion
+            $redirect_url = ($service->status === 'COMPLETED') 
+                ? home_url('/completion/?service_id=' . $service_id . '&msg=invoice_created') 
+                : home_url('/processing/?service_id=' . $service_id . '&msg=invoice_created');
+            wp_redirect($redirect_url);
+            exit;
 
         } catch (Exception $e) {
             $wpdb->query('ROLLBACK');
@@ -500,152 +557,174 @@ get_header();
                         <?php if (isset($error_message))
                             echo $error_message; ?>
 
-                        <?php if ($existing_invoice): ?>
-                            <div class="alert alert-warning">
-                                <i class="ph ph-warning me-2"></i>
-                                <strong>Hóa đơn đã tồn tại!</strong>
-                                Yêu cầu này đã có hóa đơn với mã:
-                                <strong><?php echo esc_html($existing_invoice->invoice_code); ?></strong>
-                                <br>
-                                <div class="mt-2">
-                                    <a href="<?php echo home_url('/chi-tiet-hoa-don/?invoice_id=' . $existing_invoice->id); ?>"
-                                        class="btn btn-sm btn-primary me-2">
-                                        <i class="ph ph-eye me-1"></i>Xem hóa đơn
-                                    </a>
-                                    <form method="post" style="display: inline-block;">
-                                        <?php wp_nonce_field('delete_invoice', 'delete_invoice'); ?>
-                                        <button type="submit" class="btn btn-sm btn-danger"
-                                            onclick="return confirm('Bạn có chắc chắn muốn xóa hóa đơn này? Hành động này không thể hoàn tác.')">
-                                            <i class="ph ph-trash me-1"></i>Xóa hóa đơn
-                                        </button>
-                                    </form>
+                        <?php if (!empty($existing_invoices)): ?>
+                            <div class="card border-info mb-4">
+                                <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0 text-white">
+                                        <i class="ph ph-receipt me-2"></i>
+                                        Danh sách các đợt hóa đơn đã tạo cho dịch vụ này
+                                    </h5>
+                                    <div>
+                                        <span class="badge bg-light text-dark">
+                                            Đã lập: <?php echo number_format($total_invoiced_service_amount); ?> / <?php echo number_format($total_service_value); ?> VNĐ
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="card-body">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover align-middle mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Đợt</th>
+                                                    <th>Mã hóa đơn</th>
+                                                    <th>Nội dung thanh toán</th>
+                                                    <th>Ngày HĐ</th>
+                                                    <th>Hạn TT</th>
+                                                    <th>Số tiền</th>
+                                                    <th>Trạng thái</th>
+                                                    <th>Thao tác</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach ($existing_invoices as $idx => $inv): ?>
+                                                    <tr>
+                                                        <td><strong>Đợt <?php echo $idx + 1; ?></strong></td>
+                                                        <td><strong><?php echo esc_html($inv->invoice_code); ?></strong></td>
+                                                        <td><small class="text-muted"><?php echo esc_html($inv->service_item_desc ?: $service->title); ?></small></td>
+                                                        <td><?php echo date('d/m/Y', strtotime($inv->invoice_date)); ?></td>
+                                                        <td><?php echo date('d/m/Y', strtotime($inv->due_date)); ?></td>
+                                                        <td><strong class="text-primary"><?php echo number_format($inv->total_amount); ?> VNĐ</strong></td>
+                                                        <td>
+                                                            <span class="badge bg-<?php echo in_array($inv->status, ['paid', 'pending_vat']) ? 'success' : 'warning'; ?> text-<?php echo in_array($inv->status, ['paid', 'pending_vat']) ? 'white' : 'dark'; ?>">
+                                                                <?php echo in_array($inv->status, ['paid', 'pending_vat']) ? 'Đã thanh toán' : 'Chờ thanh toán'; ?>
+                                                            </span>
+                                                        </td>
+                                                        <td>
+                                                            <a href="<?php echo home_url('/chi-tiet-hoa-don/?invoice_id=' . $inv->id); ?>" class="btn btn-sm btn-outline-primary me-1" title="Xem hóa đơn">
+                                                                <i class="ph ph-eye"></i>
+                                                            </a>
+                                                            <?php if ($inv->status === 'draft'): ?>
+                                                                <form method="post" style="display: inline-block;">
+                                                                    <?php wp_nonce_field('delete_invoice', 'delete_invoice'); ?>
+                                                                    <input type="hidden" name="invoice_id" value="<?php echo esc_attr($inv->id); ?>">
+                                                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa hóa đơn"
+                                                                        onclick="return confirm('Bạn có chắc chắn muốn xóa hóa đơn <?php echo esc_js($inv->invoice_code); ?>?')">
+                                                                        <i class="ph ph-trash"></i>
+                                                                    </button>
+                                                                </form>
+                                                            <?php endif; ?>
+                                                        </td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="row mt-3 text-center border-top pt-2">
+                                        <div class="col-md-4">
+                                            <small class="text-muted">Tổng dịch vụ:</small> <strong><?php echo number_format($total_service_value); ?> VNĐ</strong>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <small class="text-muted">Đã xuất HĐ:</small> <strong class="text-primary"><?php echo number_format($total_invoiced_service_amount); ?> VNĐ</strong>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <small class="text-muted">Còn lại chưa xuất:</small> <strong class="<?php echo $remaining_service_amount > 0 ? 'text-warning' : 'text-success'; ?>"><?php echo number_format($remaining_service_amount); ?> VNĐ</strong>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         <?php endif; ?>
 
-                        <!-- Service Information -->
-                        <div class="row mb-4">
-                            <div class="col-12">
-                                <div class="card border-success">
-                                    <div class="card-header bg-success text-white">
-                                        <h5 class="mb-0">
-                                            <i class="ph ph-check-circle me-2"></i>
-                                            Thông tin dịch vụ đã duyệt
+                        <!-- Invoice Creation Form -->
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="card">
+                                    <div class="card-header bg-primary text-white">
+                                        <h5 class="mb-1 mt-1">
+                                            <i class="ph ph-file-text me-2"></i>
+                                            <?php echo !empty($existing_invoices) ? ('Lập hóa đơn đợt ' . $next_installment_num) : 'Thông tin hóa đơn'; ?>
                                         </h5>
                                     </div>
                                     <div class="card-body">
-                                        <div class="row">
-                                            <div class="col-md-6">
-                                                <p><strong>Mã yêu cầu:</strong>
-                                                    <?php echo esc_html($service->service_code); ?></p>
-                                                <p><strong>Website:</strong>
-                                                    <?php echo esc_html($service->website_name); ?></p>
-                                                <p><strong>Tiêu đề:</strong> <?php echo esc_html($service->title); ?>
-                                                </p>
-                                                <p><strong>Khách hàng:</strong>
-                                                    <?php echo esc_html($service->requester_name . ' (' . $service->requester_code . ')'); ?>
-                                                </p>
+                                        <form class="forms-sample" method="post" action="">
+                                            <?php wp_nonce_field('create_invoice', 'create_invoice'); ?>
+
+                                            <div class="form-group mb-3">
+                                                <label for="milestone_title" class="fw-bold">Tên đợt thanh toán / Hạng mục <span class="text-danger">*</span></label>
+                                                <input type="text" class="form-control" id="milestone_title" name="milestone_title"
+                                                    value="<?php echo esc_attr('Đợt ' . $next_installment_num . ': ' . ($installment_count == 0 ? 'Tạm ứng đợt 1' : ($remaining_service_amount > 0 ? 'Thanh toán theo tiến độ' : 'Phát sinh bổ sung'))); ?>" required>
+                                                <small class="form-text text-muted">Ví dụ: Tạm ứng đợt 1 (30%), Bàn giao Staging (40%), Quyết toán nghiệm thu...</small>
                                             </div>
-                                            <div class="col-md-6">
-                                                <p><strong>Loại định giá:</strong>
-                                                    <span class="badge badge-info">
-                                                        <?php echo $service->pricing_type === 'DAILY' ? 'Theo ngày công' : 'Giá cố định'; ?>
-                                                    </span>
-                                                </p>
-                                                <?php if ($service->pricing_type === 'DAILY'): ?>
-                                                    <p><strong>Ngày công:</strong>
-                                                        <?php echo esc_html($service->estimated_manday); ?> ngày</p>
-                                                    <p><strong>Đơn giá:</strong>
-                                                        <?php echo number_format($service->daily_rate); ?> VNĐ/ngày</p>
-                                                    <p><strong>Tổng giá trị:</strong>
-                                                        <?php echo number_format($service->estimated_manday * $service->daily_rate); ?>
-                                                        VNĐ</p>
-                                                <?php else: ?>
-                                                    <p><strong>Giá cố định:</strong>
-                                                        <?php echo number_format($service->fixed_price); ?> VNĐ</p>
-                                                <?php endif; ?>
-                                                <p><strong>Người thực hiện:</strong>
-                                                    <?php echo esc_html($service->assignee_name . ' (' . $service->assignee_code . ')'); ?>
-                                                </p>
+
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <div class="form-group mb-3">
+                                                        <label for="invoice_date" class="fw-bold">Ngày hóa đơn <span class="text-danger">*</span></label>
+                                                        <input type="date" class="form-control" id="invoice_date" name="invoice_date" value="<?php echo date('Y-m-d'); ?>" required>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="form-group mb-3">
+                                                        <label for="due_date" class="fw-bold">Hạn thanh toán <span class="text-danger">*</span></label>
+                                                        <input type="date" class="form-control" id="due_date" name="due_date" value="<?php echo date('Y-m-d', strtotime('+30 days')); ?>" required>
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
 
-                        <?php if (!$existing_invoice): ?>
-
-                            <!-- Invoice Creation Form -->
-                            <div class="row">
-                                <div class="col-md-8">
-                                    <div class="card">
-                                        <div class="card-header bg-primary text-white">
-                                            <h5 class="mb-1 mt-1">
-                                                <i class="ph ph-file-text me-2"></i>
-                                                Thông tin hóa đơn
-                                            </h5>
-                                        </div>
-                                        <div class="card-body">
-                                            <form class="forms-sample" method="post" action="">
-                                                <?php wp_nonce_field('create_invoice', 'create_invoice'); ?>
-
-                                                <div class="row">
-                                                    <div class="col-md-6">
-                                                        <div class="form-group mb-3">
-                                                            <label for="invoice_date" class="fw-bold">Ngày hóa đơn <span
-                                                                    class="text-danger">*</span></label>
-                                                            <input type="date" class="form-control" id="invoice_date"
-                                                                name="invoice_date" value="<?php echo date('Y-m-d'); ?>"
-                                                                required>
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-6">
-                                                        <div class="form-group mb-3">
-                                                            <label for="due_date" class="fw-bold">Hạn thanh toán <span
-                                                                    class="text-danger">*</span></label>
-                                                            <input type="date" class="form-control" id="due_date"
-                                                                name="due_date"
-                                                                value="<?php echo date('Y-m-d', strtotime('+30 days')); ?>"
-                                                                required>
-                                                        </div>
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <div class="form-group mb-3">
+                                                        <label for="tax_rate" class="fw-bold">Thuế VAT (%)</label>
+                                                        <input type="number" class="form-control" id="tax_rate" name="tax_rate" value="0" min="0" max="100" step="0.1">
                                                     </div>
                                                 </div>
-
-                                                <div class="row">
-                                                    <div class="col-md-6">
-                                                        <div class="form-group mb-3">
-                                                            <label for="tax_rate" class="fw-bold">Thuế VAT (%)</label>
-                                                            <input type="number" class="form-control" id="tax_rate"
-                                                                name="tax_rate" value="0" min="0" max="100" step="0.1">
-                                                        </div>
-                                                    </div>
-                                                    <div class="col-md-6">
-                                                        <div class="form-group mb-3">
-                                                            <label for="discount_amount" class="fw-bold">Giảm giá
-                                                                (VNĐ)</label>
-                                                            <input type="number" class="form-control" id="discount_amount"
-                                                                name="discount_amount" value="0" min="0">
-                                                        </div>
+                                                <div class="col-md-6">
+                                                    <div class="form-group mb-3">
+                                                        <label for="discount_amount" class="fw-bold">Giảm giá (VNĐ)</label>
+                                                        <input type="number" class="form-control" id="discount_amount" name="discount_amount" value="0" min="0">
                                                     </div>
                                                 </div>
+                                            </div>
 
-                                                <div class="form-group mb-3">
-                                                    <label for="payment_type" class="fw-bold">Tùy chọn thanh toán <span
-                                                            class="text-danger">*</span></label>
-                                                    <select class="form-control" id="payment_type" name="payment_type"
-                                                        required>
-                                                        <option value="full">Thanh toán toàn bộ (100%)</option>
-                                                        <option value="partial_50">Thanh toán theo giai đoạn (50% trước +
-                                                            50% sau khi hoàn thành)</option>
-                                                    </select>
-                                                    <small class="form-text text-muted">
-                                                        • <strong>Thanh toán toàn bộ:</strong> Tạo 1 hóa đơn cho toàn bộ số
-                                                        tiền<br>
-                                                        • <strong>Thanh toán theo giai đoạn:</strong> Tạo 2 hóa đơn - 50%
-                                                        thanh toán trước khi bắt đầu, 50% thanh toán sau khi hoàn thành
-                                                    </small>
+                                            <div class="form-group mb-3">
+                                                <label for="payment_type" class="fw-bold">Phương thức tính tiền đợt này <span class="text-danger">*</span></label>
+                                                <select class="form-control" id="payment_type" name="payment_type" required>
+                                                    <?php if ($installment_count > 0): ?>
+                                                        <option value="remaining" selected>Quyết toán toàn bộ phần còn lại (<?php echo number_format($remaining_service_amount); ?> VNĐ)</option>
+                                                        <option value="percentage">Theo tỷ lệ % dịch vụ (ví dụ: 30%, 40%, 50%)</option>
+                                                        <option value="amount">Theo số tiền cụ thể (VNĐ)</option>
+                                                        <option value="full">Toàn bộ giá trị dịch vụ (<?php echo number_format($total_service_value); ?> VNĐ)</option>
+                                                    <?php else: ?>
+                                                        <option value="full">Thanh toán toàn bộ 100% (<?php echo number_format($total_service_value); ?> VNĐ)</option>
+                                                        <option value="percentage">Tạm ứng theo tỷ lệ % (ví dụ: 30%, 50%)</option>
+                                                        <option value="amount">Tạm ứng số tiền cụ thể (VNĐ)</option>
+                                                        <option value="partial_50">Chia đôi 50% trước + 50% sau (Tạo 2 hóa đơn cùng lúc)</option>
+                                                    <?php endif; ?>
+                                                </select>
+                                                <small class="form-text text-muted" id="payment_type_help">
+                                                    <?php echo $installment_count > 0 ? 'Mặc định tính nốt số tiền còn lại chưa xuất hóa đơn.' : 'Chọn thanh toán toàn bộ hoặc tạm ứng theo tỷ lệ.'; ?>
+                                                </small>
+                                            </div>
+
+                                            <!-- Percentage Row -->
+                                            <div id="percentage_row" class="form-group mb-3" style="display: none;">
+                                                <label for="installment_percentage" class="fw-bold">Tỷ lệ thanh toán (%)</label>
+                                                <div class="input-group mb-2">
+                                                    <input type="number" class="form-control" id="installment_percentage" name="installment_percentage" min="1" max="100" value="30">
+                                                    <span class="input-group-text">%</span>
                                                 </div>
+                                                <div class="btn-group btn-group-sm">
+                                                    <button type="button" class="btn btn-outline-secondary quick-pct" data-pct="30">30%</button>
+                                                    <button type="button" class="btn btn-outline-secondary quick-pct" data-pct="40">40%</button>
+                                                    <button type="button" class="btn btn-outline-secondary quick-pct" data-pct="50">50%</button>
+                                                    <button type="button" class="btn btn-outline-secondary quick-pct" data-pct="70">70%</button>
+                                                </div>
+                                            </div>
+
+                                            <!-- Custom Amount Row -->
+                                            <div id="amount_row" class="form-group mb-3" style="display: none;">
+                                                <label for="custom_installment_amount" class="fw-bold">Số tiền thanh toán đợt này (VNĐ)</label>
+                                                <input type="number" class="form-control" id="custom_installment_amount" name="custom_installment_amount" min="1000" value="<?php echo esc_attr($remaining_service_amount > 0 ? $remaining_service_amount : 1000000); ?>">
+                                            </div>
 
                                                 <div class="form-group mb-3">
                                                     <label for="payment_terms" class="fw-bold">Điều khoản thanh toán</label>
@@ -860,7 +939,7 @@ get_header();
                                     </div>
                                 </div>
                             </div>
-                        <?php endif; ?>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -873,52 +952,73 @@ get_header();
         const taxRate = document.getElementById('tax_rate');
         const discountAmount = document.getElementById('discount_amount');
         const paymentType = document.getElementById('payment_type');
-        const servicePrice = <?php echo $service->pricing_type === 'DAILY' ? ($service->estimated_manday * $service->daily_rate) : $service->fixed_price; ?>;
+        const pctInput = document.getElementById('installment_percentage');
+        const customAmountInput = document.getElementById('custom_installment_amount');
+        const pctRow = document.getElementById('percentage_row');
+        const amountRow = document.getElementById('amount_row');
+
+        const totalServiceValue = <?php echo (float)$total_service_value; ?>;
+        const remainingServiceAmount = <?php echo (float)$remaining_service_amount; ?>;
+        const installmentCount = <?php echo (int)$installment_count; ?>;
 
         function calculateProductsTotal() {
             let total = 0;
 
             // Sum hosting prices
             const hostingCheckboxes = document.querySelectorAll('.hosting-checkbox:checked');
-            console.log('Hosting checkboxes checked:', hostingCheckboxes.length);
             hostingCheckboxes.forEach(checkbox => {
                 const price = parseFloat(checkbox.dataset.price) || 0;
-                console.log('Hosting price:', price);
                 total += price;
             });
 
             // Sum domain prices
             const domainCheckboxes = document.querySelectorAll('.domain-checkbox:checked');
-            console.log('Domain checkboxes checked:', domainCheckboxes.length);
             domainCheckboxes.forEach(checkbox => {
                 const price = parseFloat(checkbox.dataset.price) || 0;
-                console.log('Domain price:', price);
                 total += price;
             });
 
-            console.log('Total products:', total);
             return total;
         }
 
-        function updatePreview() {
-            console.log('updatePreview called');
-            const tax = parseFloat(taxRate.value) || 0;
-            const discount = parseFloat(discountAmount.value) || 0;
-            const paymentMethod = paymentType.value;
+        function getActiveServicePrice() {
+            const method = paymentType ? paymentType.value : 'full';
+            if (method === 'percentage') {
+                const pct = parseFloat(pctInput ? pctInput.value : 0) || 0;
+                return Math.round(totalServiceValue * (pct / 100));
+            } else if (method === 'amount') {
+                return parseFloat(customAmountInput ? customAmountInput.value : 0) || 0;
+            } else if (method === 'remaining') {
+                return remainingServiceAmount;
+            } else {
+                return totalServiceValue;
+            }
+        }
 
-            // Calculate totals
+        function updatePreview() {
+            const tax = parseFloat(taxRate ? taxRate.value : 0) || 0;
+            const discount = parseFloat(discountAmount ? discountAmount.value : 0) || 0;
+            const paymentMethod = paymentType ? paymentType.value : 'full';
+
+            // Toggle rows
+            if (pctRow) pctRow.style.display = (paymentMethod === 'percentage') ? 'block' : 'none';
+            if (amountRow) amountRow.style.display = (paymentMethod === 'amount') ? 'block' : 'none';
+
+            const activeServicePrice = getActiveServicePrice();
             const productsTotal = calculateProductsTotal();
-            console.log('productsTotal:', productsTotal, 'servicePrice:', servicePrice);
-            const subtotal = servicePrice + productsTotal;
+            const subtotal = activeServicePrice + productsTotal;
             const discountTotal = discount;
             
-            // Calculate VAT correctly: (subtotal - discount) * (tax_rate / 100)
-            const taxableAmount = subtotal - discountTotal;
+            // Calculate VAT: (subtotal - discount) * (tax_rate / 100)
+            const taxableAmount = Math.max(0, subtotal - discountTotal);
             const taxAmount = Math.round(taxableAmount * (tax / 100));
-            const total = subtotal - discountTotal + taxAmount;
+            const total = taxableAmount + taxAmount;
 
             // Update service price display
-            document.getElementById('service_price').textContent = servicePrice.toLocaleString('vi-VN') + ' VNĐ';
+            const servicePriceEl = document.getElementById('service_price');
+            if (servicePriceEl) {
+                servicePriceEl.textContent = activeServicePrice.toLocaleString('vi-VN') + ' VNĐ';
+            }
 
             // Update products display
             const productsRow = document.getElementById('products_row');
@@ -927,89 +1027,106 @@ get_header();
             const subtotalDisplay = document.getElementById('subtotal_display');
 
             if (productsTotal > 0) {
-                productsRow.style.display = 'table-row';
-                subtotalRow.style.display = 'table-row';
-                productsDisplay.textContent = productsTotal.toLocaleString('vi-VN') + ' VNĐ';
-                subtotalDisplay.textContent = subtotal.toLocaleString('vi-VN') + ' VNĐ';
+                if (productsRow) productsRow.style.display = 'table-row';
+                if (subtotalRow) subtotalRow.style.display = 'table-row';
+                if (productsDisplay) productsDisplay.textContent = productsTotal.toLocaleString('vi-VN') + ' VNĐ';
+                if (subtotalDisplay) subtotalDisplay.textContent = subtotal.toLocaleString('vi-VN') + ' VNĐ';
             } else {
-                productsRow.style.display = 'none';
-                subtotalRow.style.display = 'none';
+                if (productsRow) productsRow.style.display = 'none';
+                if (subtotalRow) subtotalRow.style.display = 'none';
             }
 
             // Update tax rate display
-            document.getElementById('tax_rate_display').textContent = tax.toFixed(1);
-            document.getElementById('discount_display').textContent = discountTotal.toLocaleString('vi-VN') + ' VNĐ';
-            document.getElementById('tax_display').textContent = taxAmount.toLocaleString('vi-VN') + ' VNĐ';
-            document.getElementById('total_display').textContent = total.toLocaleString('vi-VN') + ' VNĐ';
+            const taxRateDisplay = document.getElementById('tax_rate_display');
+            if (taxRateDisplay) taxRateDisplay.textContent = tax.toFixed(1);
+            const discountDisplay = document.getElementById('discount_display');
+            if (discountDisplay) discountDisplay.textContent = discountTotal.toLocaleString('vi-VN') + ' VNĐ';
+            const taxDisplay = document.getElementById('tax_display');
+            if (taxDisplay) taxDisplay.textContent = taxAmount.toLocaleString('vi-VN') + ' VNĐ';
+            const totalDisplay = document.getElementById('total_display');
+            if (totalDisplay) totalDisplay.textContent = total.toLocaleString('vi-VN') + ' VNĐ';
 
             // Show/hide payment breakdown based on payment type
             const paymentBreakdown = document.getElementById('payment_breakdown');
             const additionalInfo = document.getElementById('additional_info');
 
             if (paymentMethod === 'partial_50') {
-                paymentBreakdown.style.display = 'block';
+                if (paymentBreakdown) paymentBreakdown.style.display = 'block';
 
-                // Invoice 1: 50% service + 100% products (hosting + domain)
-                // Invoice 2: 50% service
-                
-                // For partial payment:
-                // Invoice 1 = 50% service + 100% products
-                const invoice1Subtotal = (servicePrice * 0.5) + productsTotal;
-                const invoice1Discount = discount * 0.5; // Split discount proportionally
-                const invoice1TaxableAmount = invoice1Subtotal - invoice1Discount;
+                const invoice1Subtotal = (totalServiceValue * 0.5) + productsTotal;
+                const invoice1Discount = discount * 0.5;
+                const invoice1TaxableAmount = Math.max(0, invoice1Subtotal - invoice1Discount);
                 const invoice1Tax = Math.round(invoice1TaxableAmount * (tax / 100));
-                const invoice1Total = invoice1Subtotal - invoice1Discount + invoice1Tax;
+                const invoice1Total = invoice1TaxableAmount + invoice1Tax;
                 
-                // Invoice 2 = 50% service
-                const invoice2Subtotal = servicePrice * 0.5;
+                const invoice2Subtotal = totalServiceValue * 0.5;
                 const invoice2Discount = discount * 0.5;
-                const invoice2TaxableAmount = invoice2Subtotal - invoice2Discount;
+                const invoice2TaxableAmount = Math.max(0, invoice2Subtotal - invoice2Discount);
                 const invoice2Tax = Math.round(invoice2TaxableAmount * (tax / 100));
-                const invoice2Total = invoice2Subtotal - invoice2Discount + invoice2Tax;
+                const invoice2Total = invoice2TaxableAmount + invoice2Tax;
 
-                document.getElementById('first_payment_display').textContent = invoice1Total.toLocaleString('vi-VN') + ' VNĐ';
-                document.getElementById('second_payment_display').textContent = invoice2Total.toLocaleString('vi-VN') + ' VNĐ';
+                const firstPaymentEl = document.getElementById('first_payment_display');
+                if (firstPaymentEl) firstPaymentEl.textContent = invoice1Total.toLocaleString('vi-VN') + ' VNĐ';
+                const secondPaymentEl = document.getElementById('second_payment_display');
+                if (secondPaymentEl) secondPaymentEl.textContent = invoice2Total.toLocaleString('vi-VN') + ' VNĐ';
 
                 let productNote = '';
                 if (productsTotal > 0) {
                     productNote = '<br>• Hosting & Domain được thêm vào hóa đơn 1 (100%, thanh toán trước)';
                 }
 
-                additionalInfo.innerHTML = `
-                • Sẽ tạo 2 hóa đơn riêng biệt<br>
-                • Hóa đơn 1: 50% dịch vụ + 100% hosting/domain (thanh toán trước)<br>
-                • Hóa đơn 2: 50% dịch vụ còn lại (thanh toán sau khi hoàn thành)<br>
-                • Dịch vụ chỉ bắt đầu sau khi thanh toán hóa đơn đầu tiên${productNote}
-            `;
+                if (additionalInfo) {
+                    additionalInfo.innerHTML = `
+                    • Sẽ tạo 2 hóa đơn riêng biệt<br>
+                    • Hóa đơn 1: 50% dịch vụ + 100% hosting/domain (thanh toán trước)<br>
+                    • Hóa đơn 2: 50% dịch vụ còn lại (thanh toán sau khi hoàn thành)<br>
+                    • Dịch vụ chỉ bắt đầu sau khi thanh toán hóa đơn đầu tiên${productNote}
+                    `;
+                }
             } else {
-                paymentBreakdown.style.display = 'none';
+                if (paymentBreakdown) paymentBreakdown.style.display = 'none';
                 let productNote = '';
                 if (productsTotal > 0) {
                     productNote = '<br>• Hosting & Domain được thêm vào cùng hóa đơn này';
                 }
-                additionalInfo.innerHTML = `
-                • Hóa đơn sẽ có trạng thái "Nháp"<br>
-                • Cần thanh toán để chuyển sang "Đã thanh toán"<br>
-                • Sau khi thanh toán, dịch vụ sẽ chuyển sang "Đang thực hiện"${productNote}
-            `;
+                if (additionalInfo) {
+                    if (installmentCount > 0) {
+                        additionalInfo.innerHTML = `
+                        • Hóa đơn đợt thanh toán tiếp theo cho hợp đồng<br>
+                        • Trạng thái sau khi tạo: "Nháp"<br>
+                        • Bạn có thể xác nhận thanh toán trực tiếp ở trang Triển khai hoặc Bàn giao${productNote}
+                        `;
+                    } else {
+                        additionalInfo.innerHTML = `
+                        • Hóa đơn sẽ có trạng thái "Nháp"<br>
+                        • Cần thanh toán hoặc kích hoạt bảo lãnh để chuyển sang "Đang thực hiện"${productNote}
+                        `;
+                    }
+                }
             }
         }
 
         // Event listeners for form fields
-        if (taxRate) {
-            taxRate.addEventListener('input', updatePreview);
-        }
-        if (discountAmount) {
-            discountAmount.addEventListener('input', updatePreview);
-        }
-        if (paymentType) {
-            paymentType.addEventListener('change', updatePreview);
-        }
+        if (taxRate) taxRate.addEventListener('input', updatePreview);
+        if (discountAmount) discountAmount.addEventListener('input', updatePreview);
+        if (paymentType) paymentType.addEventListener('change', updatePreview);
+        if (pctInput) pctInput.addEventListener('input', updatePreview);
+        if (customAmountInput) customAmountInput.addEventListener('input', updatePreview);
 
-        // Add event listeners for product checkboxes - use event delegation
-        document.addEventListener('change', function(e) {
+        // Quick percentage buttons
+        document.querySelectorAll('.quick-pct').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const pct = this.getAttribute('data-pct');
+                if (pctInput) {
+                    pctInput.value = pct;
+                    updatePreview();
+                }
+            });
+        });
+
+        // Product checkboxes
+        document.addEventListener('change', function (e) {
             if (e.target.classList.contains('hosting-checkbox') || e.target.classList.contains('domain-checkbox')) {
-                console.log('Checkbox changed:', e.target.value, e.target.checked);
                 updatePreview();
             }
         });
