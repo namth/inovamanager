@@ -177,6 +177,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
          }
 
         $milestone_title = !empty($_POST['milestone_title']) ? sanitize_text_field($_POST['milestone_title']) : '';
+        $service_item_name = !empty($_POST['service_item_name']) ? sanitize_text_field($_POST['service_item_name']) : '';
 
         // Calculate service portion for this invoice
         $service_charged = 0;
@@ -184,28 +185,43 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $pct = max(1, min(100, floatval($_POST['installment_percentage'] ?? 30)));
             $service_charged = round($unit_price * ($pct / 100));
             if (empty($milestone_title)) {
-                $milestone_title = 'Đợt ' . $next_installment_num . ': Tạm ứng ' . $pct . '%';
+                $milestone_title = 'Tạm ứng đợt ' . $next_installment_num . ' (' . $pct . '%)';
+            }
+            if (empty($service_item_name)) {
+                $service_item_name = $service->title . ' - Tạm ứng đợt ' . $next_installment_num . ' (' . $pct . '%)';
             }
         } elseif ($payment_type === 'amount') {
             $service_charged = floatval($_POST['custom_installment_amount'] ?? 0);
             if (empty($milestone_title)) {
-                $milestone_title = 'Đợt ' . $next_installment_num . ': Thanh toán theo tiến độ';
+                $milestone_title = 'Tạm ứng đợt ' . $next_installment_num;
+            }
+            if (empty($service_item_name)) {
+                $service_item_name = $service->title . ' - Tạm ứng đợt ' . $next_installment_num;
             }
         } elseif ($payment_type === 'remaining') {
             $service_charged = $remaining_service_amount;
             if (empty($milestone_title)) {
-                $milestone_title = 'Đợt ' . $next_installment_num . ': Quyết toán phần còn lại';
+                $milestone_title = 'Quyết toán nghiệm thu phần còn lại';
+            }
+            if (empty($service_item_name)) {
+                $service_item_name = $service->title . ' - Quyết toán nghiệm thu';
             }
         } elseif ($payment_type === 'full') {
             if (!empty($existing_invoices)) {
                 $service_charged = $remaining_service_amount;
                 if (empty($milestone_title)) {
-                    $milestone_title = 'Đợt ' . $next_installment_num . ': Quyết toán toàn bộ phần còn lại';
+                    $milestone_title = 'Quyết toán toàn bộ phần còn lại';
+                }
+                if (empty($service_item_name)) {
+                    $service_item_name = $service->title . ' - Quyết toán toàn bộ';
                 }
             } else {
                 $service_charged = $unit_price;
                 if (empty($milestone_title)) {
                     $milestone_title = 'Thanh toán trọn gói 100%';
+                }
+                if (empty($service_item_name)) {
+                    $service_item_name = $service->title;
                 }
             }
         } elseif ($payment_type === 'partial_50') {
@@ -278,7 +294,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $first_invoice_id = $wpdb->insert_id;
 
                 // Insert invoice item for first payment - 50% of service
-                $description = $service->title . " (Thanh toán trước - 50%)";
+                $description = $service->title . " - Tạm ứng đợt 1 (50%)";
                 if ($service->pricing_type === 'DAILY') {
                     $description .= " (Theo ngày công: {$service->estimated_manday} ngày × " . number_format($service->daily_rate) . " VNĐ)";
                 }
@@ -330,7 +346,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $second_invoice_id = $wpdb->insert_id;
 
                 // Insert invoice item for second payment - 50% of service
-                $second_description = $service->title . " (Thanh toán sau - 50%)";
+                $second_description = $service->title . " - Quyết toán nghiệm thu đợt 2 (50%)";
                 if ($service->pricing_type === 'DAILY') {
                     $second_description .= " (Theo ngày công: {$service->estimated_manday} ngày × " . number_format($service->daily_rate) . " VNĐ)";
                 }
@@ -441,8 +457,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 $invoice_id = $wpdb->insert_id;
 
-                // Insert invoice item with milestone title
-                $description = $service->title . (!empty($milestone_title) ? ' (' . $milestone_title . ')' : '');
+                // Insert invoice item with milestone title and advance payment details
+                $description = !empty($service_item_name) ? $service_item_name : ($service->title . (!empty($milestone_title) ? ' - ' . $milestone_title : ''));
                 if ($service->pricing_type === 'DAILY') {
                     $description .= " (Theo ngày công: {$service->estimated_manday} ngày × " . number_format($service->daily_rate) . " VNĐ)";
                 }
@@ -645,13 +661,29 @@ get_header();
                                         </h5>
                                     </div>
                                     <div class="card-body">
+                                        <?php
+                                        $default_milestone_title = ($installment_count == 0) ? 'Tạm ứng đợt 1 (30%)' : ($remaining_service_amount > 0 ? 'Thanh toán theo tiến độ' : 'Quyết toán hoàn thành');
+                                        $default_service_item_name = $service->title . (($installment_count == 0) ? ' - Tạm ứng đợt 1 (30%)' : ' - ' . $default_milestone_title);
+                                        ?>
                                         <form class="forms-sample" method="post" action="">
                                             <?php wp_nonce_field('create_invoice', 'create_invoice'); ?>
 
                                             <div class="form-group mb-3">
+                                                <label for="service_item_name" class="fw-bold">Tên sản phẩm / dịch vụ thể hiện trên hóa đơn <span class="text-danger">*</span></label>
+                                                <div class="input-group">
+                                                    <span class="input-group-text bg-light text-primary"><i class="ph ph-receipt"></i></span>
+                                                    <input type="text" class="form-control" id="service_item_name" name="service_item_name"
+                                                        value="<?php echo esc_attr($default_service_item_name); ?>" required>
+                                                </div>
+                                                <small class="form-text text-muted">
+                                                    <i class="ph ph-info me-1"></i> Tên chính thức sẽ xuất trên hóa đơn gửi khách hàng (tự động cập nhật phần tạm ứng theo tỷ lệ/phương thức bạn chọn).
+                                                </small>
+                                            </div>
+
+                                            <div class="form-group mb-3">
                                                 <label for="milestone_title" class="fw-bold">Tên đợt thanh toán / Hạng mục <span class="text-danger">*</span></label>
                                                 <input type="text" class="form-control" id="milestone_title" name="milestone_title"
-                                                    value="<?php echo esc_attr('Đợt ' . $next_installment_num . ': ' . ($installment_count == 0 ? 'Tạm ứng đợt 1' : ($remaining_service_amount > 0 ? 'Thanh toán theo tiến độ' : 'Phát sinh bổ sung'))); ?>" required>
+                                                    value="<?php echo esc_attr($default_milestone_title); ?>" required>
                                                 <small class="form-text text-muted">Ví dụ: Tạm ứng đợt 1 (30%), Bàn giao Staging (40%), Quyết toán nghiệm thu...</small>
                                             </div>
 
@@ -856,9 +888,17 @@ get_header();
                                                     <i class="ph ph-calculator me-2"></i>Chi tiết tính toán
                                                 </h6>
                                                 <table class="table table-sm">
+                                                    <!-- Service name preview -->
+                                                    <tr class="border-bottom">
+                                                        <td class="fw-bold text-muted" style="width: 35%;">Tên SP/DV:</td>
+                                                        <td class="text-end fw-bold text-primary" id="preview_service_title" style="word-break: break-word;">
+                                                            <?php echo esc_html($default_service_item_name); ?>
+                                                        </td>
+                                                    </tr>
+                                                    
                                                     <!-- Service price -->
                                                     <tr>
-                                                        <td class="fw-bold">Dịch vụ website:</td>
+                                                        <td class="fw-bold">Số tiền đợt này:</td>
                                                         <td class="text-end fw-bold" id="service_price">
                                                             <?php
                                                             $price = $service->pricing_type === 'DAILY' ?
@@ -957,9 +997,69 @@ get_header();
         const pctRow = document.getElementById('percentage_row');
         const amountRow = document.getElementById('amount_row');
 
+        const serviceItemNameInput = document.getElementById('service_item_name');
+        const milestoneTitleInput = document.getElementById('milestone_title');
+        const previewServiceTitle = document.getElementById('preview_service_title');
+
+        const serviceTitle = <?php echo json_encode($service->title); ?>;
         const totalServiceValue = <?php echo (float)$total_service_value; ?>;
         const remainingServiceAmount = <?php echo (float)$remaining_service_amount; ?>;
         const installmentCount = <?php echo (int)$installment_count; ?>;
+        const nextInstallmentNum = <?php echo (int)$next_installment_num; ?>;
+
+        let userEditedItemName = false;
+        let userEditedMilestone = false;
+
+        if (serviceItemNameInput) {
+            serviceItemNameInput.addEventListener('input', function () {
+                userEditedItemName = true;
+                if (previewServiceTitle) previewServiceTitle.textContent = this.value;
+            });
+        }
+        if (milestoneTitleInput) {
+            milestoneTitleInput.addEventListener('input', function () {
+                userEditedMilestone = true;
+            });
+        }
+
+        function formatMoney(amount) {
+            return (parseFloat(amount) || 0).toLocaleString('vi-VN') + ' VNĐ';
+        }
+
+        function syncItemTitles(force = false) {
+            const method = paymentType ? paymentType.value : 'full';
+            let suggestedMilestone = '';
+            let suggestedItemName = '';
+
+            if (method === 'percentage') {
+                const pct = pctInput ? pctInput.value : 30;
+                suggestedMilestone = 'Tạm ứng đợt ' + nextInstallmentNum + ' (' + pct + '%)';
+                suggestedItemName = serviceTitle + ' - Tạm ứng đợt ' + nextInstallmentNum + ' (' + pct + '%)';
+            } else if (method === 'partial_50') {
+                suggestedMilestone = 'Tạm ứng đợt 1 (50%)';
+                suggestedItemName = serviceTitle + ' - Tạm ứng đợt 1 (50%)';
+            } else if (method === 'amount') {
+                const amt = customAmountInput ? customAmountInput.value : 0;
+                suggestedMilestone = 'Tạm ứng đợt ' + nextInstallmentNum;
+                suggestedItemName = serviceTitle + ' - Tạm ứng đợt ' + nextInstallmentNum + (amt > 0 ? ' (' + formatMoney(amt) + ')' : '');
+            } else if (method === 'remaining') {
+                suggestedMilestone = 'Quyết toán nghiệm thu phần còn lại';
+                suggestedItemName = serviceTitle + ' - Quyết toán nghiệm thu (phần còn lại)';
+            } else { // full
+                suggestedMilestone = (installmentCount > 0) ? 'Quyết toán toàn bộ' : 'Thanh toán trọn gói 100%';
+                suggestedItemName = (installmentCount > 0) ? serviceTitle + ' - Quyết toán toàn bộ' : serviceTitle;
+            }
+
+            if (milestoneTitleInput && (!userEditedMilestone || force)) {
+                milestoneTitleInput.value = suggestedMilestone;
+            }
+            if (serviceItemNameInput && (!userEditedItemName || force)) {
+                serviceItemNameInput.value = suggestedItemName;
+            }
+            if (previewServiceTitle) {
+                previewServiceTitle.textContent = serviceItemNameInput ? serviceItemNameInput.value : suggestedItemName;
+            }
+        }
 
         function calculateProductsTotal() {
             let total = 0;
@@ -1013,6 +1113,11 @@ get_header();
             const taxableAmount = Math.max(0, subtotal - discountTotal);
             const taxAmount = Math.round(taxableAmount * (tax / 100));
             const total = taxableAmount + taxAmount;
+
+            // Update item title preview display
+            if (previewServiceTitle && serviceItemNameInput) {
+                previewServiceTitle.textContent = serviceItemNameInput.value;
+            }
 
             // Update service price display
             const servicePriceEl = document.getElementById('service_price');
@@ -1078,8 +1183,8 @@ get_header();
                 if (additionalInfo) {
                     additionalInfo.innerHTML = `
                     • Sẽ tạo 2 hóa đơn riêng biệt<br>
-                    • Hóa đơn 1: 50% dịch vụ + 100% hosting/domain (thanh toán trước)<br>
-                    • Hóa đơn 2: 50% dịch vụ còn lại (thanh toán sau khi hoàn thành)<br>
+                    • Hóa đơn 1: Tạm ứng 50% dịch vụ + 100% hosting/domain (thanh toán trước)<br>
+                    • Hóa đơn 2: Quyết toán 50% dịch vụ còn lại (thanh toán sau khi hoàn thành)<br>
                     • Dịch vụ chỉ bắt đầu sau khi thanh toán hóa đơn đầu tiên${productNote}
                     `;
                 }
@@ -1109,9 +1214,24 @@ get_header();
         // Event listeners for form fields
         if (taxRate) taxRate.addEventListener('input', updatePreview);
         if (discountAmount) discountAmount.addEventListener('input', updatePreview);
-        if (paymentType) paymentType.addEventListener('change', updatePreview);
-        if (pctInput) pctInput.addEventListener('input', updatePreview);
-        if (customAmountInput) customAmountInput.addEventListener('input', updatePreview);
+        if (paymentType) {
+            paymentType.addEventListener('change', function () {
+                syncItemTitles(true);
+                updatePreview();
+            });
+        }
+        if (pctInput) {
+            pctInput.addEventListener('input', function () {
+                if (!userEditedItemName) syncItemTitles(false);
+                updatePreview();
+            });
+        }
+        if (customAmountInput) {
+            customAmountInput.addEventListener('input', function () {
+                if (!userEditedItemName) syncItemTitles(false);
+                updatePreview();
+            });
+        }
 
         // Quick percentage buttons
         document.querySelectorAll('.quick-pct').forEach(btn => {
@@ -1119,6 +1239,7 @@ get_header();
                 const pct = this.getAttribute('data-pct');
                 if (pctInput) {
                     pctInput.value = pct;
+                    syncItemTitles(true);
                     updatePreview();
                 }
             });

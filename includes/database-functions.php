@@ -2191,7 +2191,7 @@ function load_existing_invoice_items($invoice_id)
                 WHEN ii.service_type = 'domain' THEN (SELECT domain_name FROM {$wpdb->prefix}im_domains WHERE id = ii.service_id)
                 WHEN ii.service_type = 'hosting' THEN (SELECT hosting_code FROM {$wpdb->prefix}im_hostings WHERE id = ii.service_id)
                 WHEN ii.service_type = 'maintenance' THEN (SELECT order_code FROM {$wpdb->prefix}im_maintenance_packages WHERE id = ii.service_id)
-                WHEN ii.service_type = 'website_service' THEN (SELECT title FROM {$wpdb->prefix}im_website_services WHERE id = ii.service_id)
+                WHEN ii.service_type = 'website_service' THEN COALESCE(NULLIF(ii.description, ''), (SELECT title FROM {$wpdb->prefix}im_website_services WHERE id = ii.service_id))
                 ELSE ''
             END AS service_name
         FROM {$invoice_items_table} ii

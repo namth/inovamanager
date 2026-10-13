@@ -81,7 +81,7 @@ $invoice_items = $wpdb->get_results($wpdb->prepare("
     SELECT
         ii.*,
         CASE
-            WHEN ii.service_type = 'website_service' THEN ws.title
+            WHEN ii.service_type = 'website_service' THEN COALESCE(NULLIF(ii.description, ''), ws.title)
             ELSE ii.description
         END AS service_title,
         CASE
