@@ -952,7 +952,7 @@ get_header();
                                                  <div class="fw-bold">
                                                      <span class="item-title-text" id="item-title-<?php echo $item->id; ?>"><?php echo esc_html($item->service_title ?: $item->description); ?></span>
                                                      <?php if ($can_edit_invoice): ?>
-                                                         <button type="button" class="btn btn-link text-warning p-0 ms-1 edit-invoice-item border-0 bg-transparent" 
+                                                         <button type="button" class="nav-link d-inline text-warning text-decoration-none shadow-none p-0 ms-1 edit-invoice-item border-0 bg-transparent" 
                                                                  style="line-height: 1; vertical-align: middle; font-size: 13px;"
                                                                  data-item-id="<?php echo $item->id; ?>"
                                                                  data-item-name="<?php echo esc_attr($item->service_title ?: $item->description); ?>"
