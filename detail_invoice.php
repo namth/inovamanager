@@ -21,6 +21,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && wp_verify_nonce($_POST['action_nonc
     
     if (isset($_POST['action'])) {
         switch ($_POST['action']) {
+            case 'update_item_name':
+                $item_id = intval($_POST['item_id'] ?? 0);
+                $new_name = sanitize_text_field(wp_unslash($_POST['item_name'] ?? ''));
+
+                if (empty($new_name)) {
+                    if (wp_doing_ajax() || isset($_POST['ajax'])) {
+                        wp_send_json_error(array('message' => 'Tên sản phẩm/dịch vụ không được để trống'));
+                        exit;
+                    }
+                    $error_message = 'Tên sản phẩm/dịch vụ không được để trống';
+                    break;
+                }
+
+                $item_to_update = $wpdb->get_row($wpdb->prepare(
+                    "SELECT * FROM $invoice_items_table WHERE id = %d AND invoice_id = %d",
+                    $item_id, $invoice_id
+                ));
+
+                if (!$item_to_update) {
+                    if (wp_doing_ajax() || isset($_POST['ajax'])) {
+                        wp_send_json_error(array('message' => 'Không tìm thấy sản phẩm/dịch vụ trong hóa đơn này'));
+                        exit;
+                    }
+                    $error_message = 'Không tìm thấy sản phẩm/dịch vụ';
+                    break;
+                }
+
+                $update_result = $wpdb->update(
+                    $invoice_items_table,
+                    array(
+                        'description' => $new_name,
+                        'updated_at' => current_time('mysql')
+                    ),
+                    array('id' => $item_id)
+                );
+
+                if ($update_result === false) {
+                    if (wp_doing_ajax() || isset($_POST['ajax'])) {
+                        wp_send_json_error(array('message' => 'Lỗi khi cập nhật tên sản phẩm/dịch vụ'));
+                        exit;
+                    }
+                    $error_message = 'Lỗi khi cập nhật tên sản phẩm/dịch vụ';
+                    break;
+                }
+
+                if (wp_doing_ajax() || isset($_POST['ajax'])) {
+                    wp_send_json_success(array(
+                        'message' => 'Cập nhật tên sản phẩm/dịch vụ thành công',
+                        'item_id' => $item_id,
+                        'new_name' => $new_name
+                    ));
+                    exit;
+                }
+
+                $success_message = 'Đã cập nhật tên sản phẩm/dịch vụ thành công.';
+                break;
+
             case 'delete_item':
                 $item_id = intval($_POST['item_id']);
                 
@@ -892,7 +949,17 @@ get_header();
                                          <?php foreach ($items as $item): ?>
                                          <tr>
                                              <td>
-                                                 <div class="fw-bold"><?php echo esc_html($item->service_title ?: $item->description); ?></div>
+                                                 <div class="d-flex align-items-center justify-content-between">
+                                                     <span class="fw-bold item-title-text" id="item-title-<?php echo $item->id; ?>"><?php echo esc_html($item->service_title ?: $item->description); ?></span>
+                                                     <?php if ($can_edit_invoice): ?>
+                                                         <button type="button" class="btn btn-xs btn-link text-primary p-0 ms-2 edit-invoice-item" 
+                                                                 data-item-id="<?php echo $item->id; ?>"
+                                                                 data-item-name="<?php echo esc_attr($item->service_title ?: $item->description); ?>"
+                                                                 title="Sửa tên sản phẩm / dịch vụ">
+                                                             <i class="ph ph-pencil-simple"></i>
+                                                         </button>
+                                                     <?php endif; ?>
+                                                 </div>
                                                  <?php if ($item->service_reference): ?>
                                                      <small class="text-muted"><?php echo esc_html($item->service_reference); ?></small>
                                                  <?php endif; ?>
@@ -963,7 +1030,13 @@ get_header();
                                              <?php endif; ?>
                                              
                                              <?php if ($can_edit_invoice && !in_array($invoice->status, ['paid', 'pending_vat'])): ?>
-                                             <td class="text-center">
+                                             <td class="text-center text-nowrap">
+                                                 <button type="button" class="btn btn-sm btn-outline-primary edit-invoice-item me-1" 
+                                                         data-item-id="<?php echo $item->id; ?>"
+                                                         data-item-name="<?php echo esc_attr($item->service_title ?: $item->description); ?>"
+                                                         title="Sửa tên sản phẩm / dịch vụ">
+                                                     <i class="ph ph-pencil-simple"></i>
+                                                 </button>
                                                  <button type="button" class="btn btn-sm btn-danger delete-invoice-item" 
                                                          data-item-id="<?php echo $item->id; ?>"
                                                          data-item-name="<?php echo esc_attr($item->service_title ?: $item->description); ?>"
@@ -1542,6 +1615,46 @@ get_header();
 </div>
 <?php endif; ?>
 
+<!-- Edit Item Name Modal -->
+<?php if ($can_edit_invoice): ?>
+<div class="modal fade" id="editItemNameModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content border-0 shadow-lg">
+            <form id="editItemNameForm" method="POST">
+                <?php wp_nonce_field('invoice_action', 'action_nonce'); ?>
+                <input type="hidden" name="action" value="update_item_name">
+                <input type="hidden" name="ajax" value="1">
+                <input type="hidden" name="item_id" id="edit_item_id" value="">
+                
+                <div class="modal-header bg-primary text-white border-0 py-3">
+                    <h5 class="modal-title d-flex align-items-center text-white">
+                        <i class="ph ph-pencil-simple me-2 fs-4"></i> Sửa tên sản phẩm / dịch vụ
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label for="edit_item_name_input" class="form-label fw-bold">Tên hiển thị trên hóa đơn <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="edit_item_name_input" name="item_name" rows="3" required placeholder="Nhập tên sản phẩm / dịch vụ..."></textarea>
+                        <small class="form-text text-muted mt-2 d-block">
+                            <i class="ph ph-info me-1"></i> Tên này sẽ xuất hiện trên bảng chi tiết hóa đơn (cho cả admin và khách hàng). Bạn có thể ghi rõ đợt tạm ứng, nội dung nghiệm thu, v.v.
+                        </small>
+                    </div>
+                </div>
+                
+                <div class="modal-footer border-0 bg-light py-3 d-flex justify-content-end">
+                    <button type="button" class="btn btn-secondary px-4 border-radius-9" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" id="saveItemNameBtn" class="btn btn-primary px-4 border-radius-9">
+                        <i class="ph ph-check me-2"></i> Lưu thay đổi
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if ($auto_open_payment && !in_array($invoice->status, ['paid', 'pending_vat'])): ?>
 <script>
 jQuery(document).ready(function($) {
@@ -1561,8 +1674,71 @@ jQuery(document).ready(function($) {
 <?php endif; ?>
 
 <script>
-// Form validation for payment modal, copy invoice link, and delete invoice item
+// Form validation for payment modal, copy invoice link, delete and edit invoice item
 jQuery(document).ready(function($) {
+    /**
+     * Edit invoice item name handler
+     */
+    $(document).on('click', '.edit-invoice-item', function(e) {
+        e.preventDefault();
+        var itemId = $(this).data('item-id');
+        var itemName = $(this).data('item-name');
+        
+        $('#edit_item_id').val(itemId);
+        $('#edit_item_name_input').val(itemName);
+        
+        try {
+            var editModal = new bootstrap.Modal(document.getElementById('editItemNameModal'));
+            editModal.show();
+        } catch (err) {
+            $('#editItemNameModal').modal('show');
+        }
+    });
+
+    $(document).on('submit', '#editItemNameForm', function(e) {
+        e.preventDefault();
+        var form = $(this);
+        var submitBtn = $('#saveItemNameBtn');
+        var originalBtnHtml = submitBtn.html();
+        var itemId = $('#edit_item_id').val();
+        var newName = $('#edit_item_name_input').val().trim();
+        
+        if (!newName) {
+            alert('Vui lòng nhập tên sản phẩm/dịch vụ');
+            return;
+        }
+        
+        submitBtn.prop('disabled', true).html('<i class="ph ph-spinner ph-spin me-2"></i>Đang lưu...');
+        
+        $.ajax({
+            url: window.location.href,
+            type: 'POST',
+            data: form.serialize(),
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    $('#item-title-' + itemId).text(newName);
+                    $('[data-item-id="' + itemId + '"]').data('item-name', newName);
+                    try {
+                        var modalEl = document.getElementById('editItemNameModal');
+                        var modalInstance = bootstrap.Modal.getInstance(modalEl);
+                        if (modalInstance) modalInstance.hide();
+                    } catch (err) {
+                        $('#editItemNameModal').modal('hide');
+                    }
+                    window.location.reload();
+                } else {
+                    alert(response.data && response.data.message ? response.data.message : 'Lỗi khi cập nhật tên');
+                    submitBtn.prop('disabled', false).html(originalBtnHtml);
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('Error updating item name:', error);
+                window.location.reload();
+            }
+        });
+    });
+
     /**
      * Delete invoice item handler
      * Files using this: detail_invoice.php
